@@ -1,0 +1,117 @@
+import React from 'react';
+import {
+  CheckCircle2,
+  LayoutDashboard,
+  Users,
+  UserCheck,
+  Clock,
+  Receipt,
+  Users2,
+  BarChart3,
+  Settings,
+  ChevronRight,
+  ShieldAlert,
+  Globe
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+
+interface SidebarProps {
+  activeItem?: string;
+  onSelectItem?: (item: string) => void;
+  collapsed?: boolean;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeItem = 'Time Tracking',
+  onSelectItem,
+}) => {
+  const { hasPermission, user } = useAuth();
+  const { t, language, setLanguage } = useLanguage();
+  
+  const mainNavItems = [
+    ...((user?.role === 'ADMIN' || user?.role === 'SUPERVISEUR') ? [{ id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false }] : []),
+    ...(hasPermission('VIEW_CLIENTS') ? [{ id: 'Clients', label: t('nav.clients'), icon: Users, hasChevron: false }] : []),
+    { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
+    { id: 'Invoicing', label: t('nav.invoicing'), icon: Receipt, hasChevron: true },
+    ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: Users2, hasChevron: true }] : []),
+    ...(user?.role === 'ADMIN' ? [{ id: 'Reports', label: t('nav.reports'), icon: BarChart3, hasChevron: false }] : []),
+  ];
+
+  if (hasPermission('MANAGE_USERS')) {
+    mainNavItems.push({ id: 'Users', label: t('nav.users'), icon: ShieldAlert, hasChevron: false });
+  }
+
+  return (
+    <aside
+      className="w-[153px] min-w-[153px] bg-[#101828] text-white flex flex-col justify-between h-screen sticky top-0 z-30 select-none font-sans flex-shrink-0"
+    >
+      {/* Top Branding & Nav */}
+      <div>
+        {/* Brand Logo Header */}
+        <div className="p-4 flex items-center gap-2 mb-2">
+          <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-4 h-4 text-[#101828]" />
+          </div>
+          <span className="text-[13px] font-bold tracking-tight text-white truncate">
+            Tâches & Cash
+          </span>
+        </div>
+
+        {/* Navigation List */}
+        <nav className="space-y-1">
+          {mainNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeItem === item.id;
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectItem?.(item.id)}
+                className={`w-full flex items-center justify-between px-4 py-2 text-[12px] font-medium transition-all group ${
+                  isActive
+                    ? 'bg-[#1D2939] text-white rounded-r-lg border-l-2 border-white font-medium'
+                    : 'text-white/60 hover:text-white hover:bg-[#1D2939]/50 rounded-r-md'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 truncate">
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{item.label}</span>
+                </div>
+                {item.hasChevron && (
+                  <ChevronRight className="w-3 h-3 shrink-0 opacity-80" />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Bottom Settings Navigation */}
+      <div className="p-4 mt-auto">
+        <div className="flex items-center gap-2 mb-4 px-2">
+           <Globe className="w-4 h-4 text-white/60" />
+           <select 
+             value={language}
+             onChange={(e) => setLanguage(e.target.value as 'fr' | 'en')}
+             className="bg-transparent text-[11px] text-white/80 focus:outline-none cursor-pointer"
+           >
+             <option value="fr" className="text-black">FR</option>
+             <option value="en" className="text-black">EN</option>
+           </select>
+        </div>
+        <button
+          onClick={() => onSelectItem?.('Settings')}
+          className={`w-full flex items-center gap-3 py-2 text-[12px] font-medium transition-colors ${
+            activeItem === 'Settings'
+              ? 'text-white font-semibold'
+              : 'text-white/60 hover:text-white'
+          }`}
+        >
+          <Settings className="w-4 h-4" />
+          <span className="truncate">Settings</span>
+        </button>
+      </div>
+    </aside>
+  );
+};

@@ -1,0 +1,92 @@
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
+import { CalendarRange, Clock, AlertCircle, CheckCircle2, User } from 'lucide-react';
+import { LeavesTab } from './LeavesTab';
+import { AbsencesTab } from './AbsencesTab';
+import { LeaveBalance } from '../../types';
+
+export const HRManagement: React.FC = () => {
+  const { hasPermission, token } = useAuth();
+  const { t } = useLanguage();
+  const [activeTab, setActiveTab] = useState<'leaves' | 'absences'>('leaves');
+  const [balance, setBalance] = useState<LeaveBalance | null>(null);
+
+  const loadBalance = () => {
+    if (token) {
+      fetch('/api/hr/balance', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => setBalance(data))
+        .catch(console.error);
+    }
+  };
+
+  useEffect(() => {
+    loadBalance();
+    window.addEventListener('refresh-hr-balance', loadBalance);
+    return () => window.removeEventListener('refresh-hr-balance', loadBalance);
+  }, [token]);
+
+  if (!hasPermission('VIEW_HR')) {
+    return (
+      <div className="p-8 text-center text-gray-500">
+        Vous n'avez pas accès à ce module.
+      </div>
+    );
+  }
+
+  return (
+    <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1400px] w-full mx-auto">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t('hr.title')}</h1>
+          <p className="text-sm text-gray-500 mt-1">{t('hr.subtitle')}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-500 mb-1">{t('hr.balance.available')} ({t('hr.balance.days')})</p>
+            <h3 className="text-2xl font-bold text-gray-900">{balance ? balance.available : '-'}</h3>
+          </div>
+          <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
+            <CalendarRange className="w-5 h-5 text-blue-600" />
+          </div>
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-500 mb-1">{t('hr.balance.used')} ({t('hr.balance.days')})</p>
+            <h3 className="text-2xl font-bold text-gray-900">{balance ? balance.used : '-'}</h3>
+          </div>
+          <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center">
+            <Clock className="w-5 h-5 text-orange-600" />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1 min-h-[500px]">
+        <div className="flex border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('leaves')}
+            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'leaves' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {t('hr.tabs.leaves')}
+          </button>
+          <button
+            onClick={() => setActiveTab('absences')}
+            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'absences' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {t('hr.tabs.absences')}
+          </button>
+        </div>
+
+        <div className="p-4 flex-1 overflow-auto">
+          {activeTab === 'leaves' ? <LeavesTab /> : <AbsencesTab />}
+        </div>
+      </div>
+    </main>
+  );
+};

@@ -1,0 +1,6 @@
+{
+  "name": "Time Tracking",
+  "description": "Collaborator's Time Tracking web application based on SaaS reference layout",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
