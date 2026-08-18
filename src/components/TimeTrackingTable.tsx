@@ -9,9 +9,13 @@ import {
   Download,
   ChevronDown,
   ChevronRight,
+  Play,
+  Pause,
+  Square,
 } from 'lucide-react';
-import { TimeEntry } from '../types';
+import { TimeEntry, TaskStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { formatCostDT } from '../utils/formatters';
 
 interface TimeTrackingTableProps {
   entries: TimeEntry[];
@@ -19,6 +23,10 @@ interface TimeTrackingTableProps {
   onDelete: (id: string) => void;
   onMore: (entry: TimeEntry) => void;
   onSelectAsActive?: (entry: TimeEntry) => void;
+  /** Admin override: change any collaborator's task status directly. */
+  onChangeStatus?: (entry: TimeEntry, statut: TaskStatus) => void;
+  /** Entries held server-side; the table shows the most recent page of them. */
+  totalEntries?: number;
 }
 
 export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTask?: boolean }> = ({
@@ -28,6 +36,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   onDelete,
   onMore,
   onSelectAsActive,
+  onChangeStatus,
+  totalEntries,
 }) => {
   const { hasPermission, user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
@@ -88,6 +98,15 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
 
   const sortedMonthKeys = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
 
+  // Only price work whose collaborator has an employer cost configured; the
+  // rest is reported separately instead of being costed at a made-up rate.
+  const pricedEntries = filteredEntries.filter(e => e.hourlyRate != null);
+  const unpricedCount = filteredEntries.length - pricedEntries.length;
+  const totalCost = pricedEntries.reduce(
+    (sum, e) => sum + ((e.dureeSeconds || 0) / 3600) * (e.hourlyRate as number),
+    0
+  );
+
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm mt-6 flex flex-col overflow-hidden font-sans">
@@ -132,14 +151,14 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
             <Filter className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          {/* Pôle Filter */}
+          {/* Mission Filter */}
           <div className="relative">
             <select
               value={poleFilter}
               onChange={(e) => setPoleFilter(e.target.value)}
               className="appearance-none bg-white border border-gray-200 hover:border-gray-300 rounded-md pl-2.5 pr-7 py-1 text-[11px] font-semibold text-gray-700 focus:outline-none focus:border-gray-400 cursor-pointer max-w-[110px] truncate"
             >
-              <option value="ALL">Tous (Pôles)</option>
+              <option value="ALL">Toutes (Missions)</option>
               {uniquePoles.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
             <Filter className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -171,7 +190,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
               <th className="px-4 py-2.5">Date</th>
               <th className="px-4 py-2.5">Client</th>
               <th className="px-4 py-2.5">Description de l'activité</th>
-              <th className="px-4 py-2.5">Pôle</th>
+              <th className="px-4 py-2.5">Mission</th>
+              <th className="px-4 py-2.5">Type de tâche</th>
               <th className="px-3 py-2.5 whitespace-nowrap">Début</th>
               <th className="px-3 py-2.5 whitespace-nowrap">Fin</th>
               <th className="px-4 py-2.5">Durée</th>
@@ -183,7 +203,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
           {filteredEntries.length === 0 ? (
             <tbody className="text-[11.5px] divide-y divide-gray-50 text-gray-800">
               <tr>
-                <td colSpan={isAdmin ? 11 : 9} className="py-8 text-center text-gray-400 italic">
+                <td colSpan={isAdmin ? 12 : 10} className="py-8 text-center text-gray-400 italic">
                   Aucune donnée ne correspond à votre recherche.
                 </td>
               </tr>
@@ -197,7 +217,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                   className="bg-gray-100/50 cursor-pointer hover:bg-gray-200/50 transition-colors"
                   onClick={() => toggleMonth(monthKey)}
                 >
-                  <td colSpan={isAdmin ? 11 : 9} className="px-4 py-2 font-bold text-gray-700 uppercase tracking-wider text-[10px]">
+                  <td colSpan={isAdmin ? 12 : 10} className="px-4 py-2 font-bold text-gray-700 uppercase tracking-wider text-[10px]">
                     <div className="flex items-center gap-1.5 select-none">
                       {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
                       {groupedEntries[monthKey].label}
@@ -233,9 +253,14 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     {row.description}
                   </td>
 
-                  {/* Pôle */}
+                  {/* Mission */}
                   <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
                     {row.pole}
+                  </td>
+
+                  {/* Type de tâche */}
+                  <td className="px-4 py-2.5 text-gray-600 max-w-[200px] truncate" title={row.taskType || ''}>
+                    {row.taskType || <span className="text-gray-300">—</span>}
                   </td>
 
                   {/* Heure Début */}
@@ -243,9 +268,9 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     {row.heureDebut}
                   </td>
 
-                  {/* Heure Fin */}
+                  {/* Heure Fin — only a completed task has one */}
                   <td className="px-3 py-2.5 font-mono text-gray-600 whitespace-nowrap">
-                    {row.heureFin}
+                    {row.heureFin ? row.heureFin : <span className="text-gray-300">—</span>}
                   </td>
 
                   {/* Durée */}
@@ -253,10 +278,21 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     {row.duree}
                   </td>
 
-                  {/* Coût Calculé */}
+                  {/* Coût employeur accumulé pour cette tâche */}
                   {isAdmin && (
                     <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">
-                      {row.coutCalcule}
+                      {row.hourlyRate == null ? (
+                        <span
+                          className="text-gray-300"
+                          title={`Coût employeur non configuré pour ${row.userName || 'ce collaborateur'}`}
+                        >
+                          —
+                        </span>
+                      ) : (
+                        <span title={`Coût employeur : ${row.hourlyRate.toFixed(3)} DT/h`}>
+                          {row.coutCalcule}
+                        </span>
+                      )}
                     </td>
                   )}
 
@@ -288,6 +324,37 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                   {isAdmin && (
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1">
+                        {/* Timer controls — an admin can drive any collaborator's
+                            task, not just their own. */}
+                        {onChangeStatus && row.statut !== 'COMPLETED' && (
+                          <>
+                            {row.statut === 'RUNNING' ? (
+                              <button
+                                onClick={() => onChangeStatus(row, 'PAUSED')}
+                                className="w-6 h-6 border border-gray-200 rounded flex items-center justify-center bg-white text-gray-400 hover:text-amber-600 hover:border-amber-200 transition-colors"
+                                title={`Mettre en pause la tâche de ${row.userName || 'ce collaborateur'}`}
+                              >
+                                <Pause className="w-3 h-3 fill-current" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => onChangeStatus(row, 'RUNNING')}
+                                className="w-6 h-6 border border-gray-200 rounded flex items-center justify-center bg-white text-gray-400 hover:text-emerald-600 hover:border-emerald-200 transition-colors"
+                                title={`Reprendre la tâche de ${row.userName || 'ce collaborateur'}`}
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onChangeStatus(row, 'COMPLETED')}
+                              className="w-6 h-6 border border-gray-200 rounded flex items-center justify-center bg-white text-gray-400 hover:text-red-600 hover:border-red-200 transition-colors"
+                              title="Arrêter et clôturer cette tâche"
+                            >
+                              <Square className="w-3 h-3 fill-current" />
+                            </button>
+                          </>
+                        )}
+
                         {/* Edit button */}
                         {hasPermission('EDIT') && (user?.id === row.userId || user?.role === 'ADMIN') && (
                           <button
@@ -331,9 +398,29 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
 
       {/* Footer info bar */}
       <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 text-[11px] text-gray-500 flex items-center justify-between">
-        <span>Affichage de {filteredEntries.length} sur {entries.length} activités</span>
+        <span>
+          Affichage de {filteredEntries.length} sur {entries.length} activités
+          {totalEntries != null && totalEntries > entries.length && (
+            <span className="text-gray-400">
+              {' '}· {totalEntries} au total (les {entries.length} plus récentes sont chargées)
+            </span>
+          )}
+        </span>
         {isAdmin && (
-          <span>Coût total calculé: <strong className="text-gray-800 font-bold">106,005 DT</strong></span>
+          <span className="flex items-center gap-2">
+            {unpricedCount > 0 && (
+              <span
+                className="text-amber-600"
+                title="Renseignez le salaire et le régime horaire de ces collaborateurs dans Utilisateurs pour les inclure."
+              >
+                {unpricedCount} activité{unpricedCount > 1 ? 's' : ''} sans coût employeur
+              </span>
+            )}
+            <span>
+              Coût employeur total:{' '}
+              <strong className="text-gray-800 font-bold">{formatCostDT(totalCost)}</strong>
+            </span>
+          </span>
         )}
       </div>
     </div>

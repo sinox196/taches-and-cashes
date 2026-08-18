@@ -55,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <button 
-            onClick={logout}
+            onClick={() => logout()}
             className="ml-2 p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" 
             title="Se déconnecter"
           >

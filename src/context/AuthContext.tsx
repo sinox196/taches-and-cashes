@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import type { Role } from '../constants/roles';
 
 export interface User {
   id: number;
   username: string;
-  role: 'ADMIN' | 'COLLABORATOR' | 'SUPERVISEUR';
+  role: Role;
   permissions: string[];
   salaireBrut?: number;
   regimeHoraire?: number;
@@ -14,14 +15,20 @@ export interface User {
   primesFraisNonCotisables?: number;
   coutTotalEmployeur?: number;
   coutHoraireEmployeur?: number;
+  /** Admin-set annual leave allowance, in days. */
+  soldeConge?: number;
+  congesUtilises?: number;
+  congesRestants?: number;
 }
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
+  /** Set when the session ended on its own (expired / rejected), shown on the login screen. */
+  authMessage: string | null;
   login: (token: string, user: User) => void;
-  logout: () => void;
+  logout: (reason?: string) => void;
   hasPermission: (permission: string) => boolean;
 }
 
@@ -31,6 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
   const [isLoading, setIsLoading] = useState(true);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -52,6 +60,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           // Invalid token
           setToken(null);
+          setUser(null);
+          setAuthMessage('Votre session a expiré. Veuillez vous reconnecter.');
           localStorage.removeItem('auth_token');
         }
       } catch (error) {
@@ -67,12 +77,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = (newToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
+    setAuthMessage(null);
     localStorage.setItem('auth_token', newToken);
   };
 
-  const logout = () => {
+  const logout = (reason?: string) => {
     setToken(null);
     setUser(null);
+    // Guard against `onClick={logout}` handing us a click event instead of a
+    // message — rendering that object would crash the login screen.
+    setAuthMessage(typeof reason === 'string' ? reason : null);
     localStorage.removeItem('auth_token');
   };
 
@@ -83,7 +97,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout, hasPermission }}>
+    <AuthContext.Provider value={{ user, token, isLoading, authMessage, login, logout, hasPermission }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,122 +1,145 @@
 import React from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line, ComposedChart } from 'recharts';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts';
 
 interface DashboardChartsProps {
   employees: any[];
 }
 
+/**
+ * Categorical slots, assigned in fixed order and never cycled — series 1 is
+ * always SERIES_1, series 2 always SERIES_2, in every chart. Validated as a
+ * pair against a white chart surface (CVD ΔE 24.7, normal-vision ΔE 33.6,
+ * both ≥ 3:1 contrast).
+ */
+const SERIES_1 = '#2a78d6';
+const SERIES_2 = '#eb6834';
+
+const AXIS_TICK = { fontSize: 11, fill: '#667085' };
+const GRID = '#f2f4f7';
+
+const TOOLTIP_STYLE = {
+  borderRadius: '8px',
+  border: '1px solid #e4e7ec',
+  boxShadow: '0 4px 12px -2px rgb(16 24 40 / 0.12)',
+  fontSize: '12px',
+};
+
+const LEGEND_STYLE = { fontSize: '11px', paddingTop: '4px' };
+
+const ChartCard: React.FC<{ title: string; subtitle?: string; children: React.ReactNode }> = ({
+  title, subtitle, children,
+}) => (
+  <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+    <h3 className="text-[13px] font-bold text-gray-900">{title}</h3>
+    {subtitle && <p className="text-[11px] text-gray-500 mt-0.5">{subtitle}</p>}
+    <div className="h-64 mt-4">{children}</div>
+  </div>
+);
+
+const EmptyChart: React.FC = () => (
+  <div className="h-full flex items-center justify-center text-[12px] text-gray-400 italic">
+    Aucune donnée sur la période.
+  </div>
+);
+
 export const DashboardCharts: React.FC<DashboardChartsProps> = ({ employees }) => {
-  // Sort employees for charts to show top ones first
-  const sortedByTasks = [...employees].sort((a, b) => b.tasks.total - a.tasks.total).slice(0, 10);
-  const sortedByRate = [...employees].sort((a, b) => b.tasks.completionRate - a.tasks.completionRate).slice(0, 10);
-  const sortedByClients = [...employees].sort((a, b) => b.clients.totalHandled - a.clients.totalHandled).slice(0, 10);
-  const sortedByLeaves = [...employees].sort((a, b) => b.leaves.daysTaken - a.leaves.daysTaken).slice(0, 10);
+  const top = (key: (e: any) => number) => [...employees].sort((a, b) => key(b) - key(a)).slice(0, 10);
+
+  const byTasks = top(e => e.tasks?.total || 0);
+  const byRate = top(e => e.tasks?.completionRate || 0);
+  const byLeaves = top(e => e.leaves?.daysTaken || 0);
+  const byAuthHours = top(e => e.authorizations?.totalDuration || 0);
+
+  // Leave chart is stacked: taken + remaining = the entitlement, so the bar
+  // height is meaningful rather than two unrelated measures side by side.
+  const leaveData = byLeaves.map(e => ({
+    name: e.name,
+    pris: e.leaves?.daysTaken || 0,
+    restants: Math.max(0, e.leaves?.balance?.available ?? 0),
+  }));
+
+  const hasData = employees.length > 0;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      
-      {/* Tâches par collaborateur */}
-      <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-        <h3 className="text-[13px] font-bold text-gray-900 mb-4">Volume de Tâches par Collaborateur (Top 10)</h3>
-        <div className="h-64">
+      <ChartCard title="Volume de tâches par collaborateur" subtitle="Top 10 sur la période">
+        {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={sortedByTasks} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} angle={-45} textAnchor="end" />
-              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip 
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                cursor={{ fill: '#f9fafb' }}
-              />
-              <Bar dataKey="tasks.total" name="Total Tâches" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="tasks.completed" name="Terminées" fill="#10b981" radius={[4, 4, 0, 0]} />
+            <BarChart data={byTasks} margin={{ top: 4, right: 8, left: -18, bottom: 24 }} barGap={2}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={GRID} />
+              <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} angle={-35} textAnchor="end" height={50} interval={0} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: '#f9fafb' }} />
+              <Legend wrapperStyle={LEGEND_STYLE} iconType="circle" iconSize={8} />
+              <Bar dataKey="tasks.total" name="Total" fill={SERIES_1} radius={[4, 4, 0, 0]} maxBarSize={22} />
+              <Bar dataKey="tasks.completed" name="Terminées" fill={SERIES_2} radius={[4, 4, 0, 0]} maxBarSize={22} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </div>
+        ) : <EmptyChart />}
+      </ChartCard>
 
-      {/* Taux de réalisation */}
-      <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-        <h3 className="text-[13px] font-bold text-gray-900 mb-4">Taux de Réalisation (%)</h3>
-        <div className="h-64">
+      <ChartCard title="Taux de réalisation" subtitle="Part des tâches terminées, en %">
+        {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={sortedByRate} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} angle={-45} textAnchor="end" />
-              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} domain={[0, 100]} />
-              <Tooltip 
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+            {/* One series → one colour. The old version recoloured each bar by
+                its own value, which repainted on every filter change. */}
+            <BarChart data={byRate} margin={{ top: 4, right: 8, left: -18, bottom: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={GRID} />
+              <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} angle={-35} textAnchor="end" height={50} interval={0} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} domain={[0, 100]} unit="%" />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
                 cursor={{ fill: '#f9fafb' }}
-                formatter={(value: number) => [`${Math.round(value)}%`, 'Taux']}
+                formatter={(value: number) => [`${Math.round(value)} %`, 'Taux de réalisation']}
               />
-              <Bar dataKey="tasks.completionRate" name="Taux" radius={[4, 4, 0, 0]}>
-                {sortedByRate.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.tasks.completionRate > 80 ? '#10b981' : entry.tasks.completionRate > 50 ? '#f59e0b' : '#ef4444'} />
-                ))}
-              </Bar>
+              <Bar dataKey="tasks.completionRate" name="Taux de réalisation" fill={SERIES_1} radius={[4, 4, 0, 0]} maxBarSize={26} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </div>
+        ) : <EmptyChart />}
+      </ChartCard>
 
-      {/* Clients traités */}
-      <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-        <h3 className="text-[13px] font-bold text-gray-900 mb-4">Clients Traités par Collaborateur</h3>
-        <div className="h-64">
+      <ChartCard title="Congés" subtitle="Jours pris et solde restant — le total est le droit annuel">
+        {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={sortedByClients} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} angle={-45} textAnchor="end" />
-              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip 
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                cursor={{ fill: '#f9fafb' }}
-              />
-              <Bar dataKey="clients.totalHandled" name="Clients Uniques" fill="#6366f1" radius={[4, 4, 0, 0]} />
+            <BarChart data={leaveData} margin={{ top: 4, right: 8, left: -18, bottom: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={GRID} />
+              <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} angle={-35} textAnchor="end" height={50} interval={0} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} unit=" j" />
+              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: '#f9fafb' }} formatter={(v: number) => [`${v} j`, '']} />
+              <Legend wrapperStyle={LEGEND_STYLE} iconType="circle" iconSize={8} />
+              {/* 2px surface gap between stacked segments */}
+              <Bar dataKey="pris" stackId="conges" name="Pris" fill={SERIES_1} maxBarSize={26} stroke="#ffffff" strokeWidth={2} />
+              <Bar dataKey="restants" stackId="conges" name="Restants" fill={SERIES_2} radius={[4, 4, 0, 0]} maxBarSize={26} stroke="#ffffff" strokeWidth={2} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </div>
+        ) : <EmptyChart />}
+      </ChartCard>
 
-
-      {/* Autorisations */}
-      <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-        <h3 className="text-[13px] font-bold text-gray-900 mb-4">Autorisations (Volume & Durée)</h3>
-        <div className="h-64">
+      <ChartCard title="Autorisations d'absence" subtitle="Heures approuvées sur la période">
+        {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={sortedByTasks} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} angle={-45} textAnchor="end" />
-              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip 
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+            {/* Previously a bar (count) and a line (hours) shared one y-axis —
+                two different measures on one scale. Hours only; the count sits
+                in the tooltip. */}
+            <BarChart data={byAuthHours} margin={{ top: 4, right: 8, left: -18, bottom: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={GRID} />
+              <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} angle={-35} textAnchor="end" height={50} interval={0} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} unit=" h" />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                cursor={{ fill: '#f9fafb' }}
+                formatter={(value: number, _n, item: any) => [
+                  `${value} h · ${item?.payload?.authorizations?.total ?? 0} demande(s)`,
+                  'Autorisations',
+                ]}
               />
-              <Bar dataKey="authorizations.total" name="Nb Demandes" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-              <Line type="monotone" dataKey="authorizations.totalDuration" name="Durée (h)" stroke="#14b8a6" strokeWidth={2} dot={{ r: 3 }} />
-            </ComposedChart>
+              <Bar dataKey="authorizations.totalDuration" name="Heures approuvées" fill={SERIES_1} radius={[4, 4, 0, 0]} maxBarSize={26} />
+            </BarChart>
           </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Congés pris vs restants */}
-      <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-        <h3 className="text-[13px] font-bold text-gray-900 mb-4">Congés Pris vs Droits (Jours)</h3>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={sortedByLeaves} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} angle={-45} textAnchor="end" />
-              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip 
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-              />
-              <Bar dataKey="leaves.daysTaken" name="Congés Pris" fill="#f43f5e" radius={[4, 4, 0, 0]} />
-              <Line type="monotone" dataKey="leaves.balance.available" name="Droit Annuel" stroke="#94a3b8" strokeWidth={2} dot={{ r: 3 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
+        ) : <EmptyChart />}
+      </ChartCard>
     </div>
   );
 };

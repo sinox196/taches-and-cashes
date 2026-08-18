@@ -4,24 +4,55 @@ import bcrypt from 'bcryptjs';
 
 const DB_PATH = path.join(process.cwd(), 'local.db.json');
 
-// In-memory cache
-let db: any = {
+/**
+ * Default employer charge rates — those a Tunisian services provider actually
+ * pays. The admin can override them in Settings; this is only the starting point.
+ */
+const defaultSettings = () => ({
+  employerCharges: {
+    cnss: 16.57,
+    tfp: 2.0,
+    foprolos: 1.0,
+    accidentTravail: 0.5
+  }
+});
+
+const emptyDb = () => ({
   users: [],
   clients: [],
   services: [],
+  // Types de tâches — each belongs to a mission (service) via serviceId.
+  taskTypes: [],
+  // Cash / facturation documents.
+  invoices: [],
   leaveRequests: [],
   absenceAuthorizations: [],
   leaveBalances: [],
   timeEntries: [],
-  settings: {
-    employerCharges: {
-      cnss: 16.57,
-      tfp: 1.0,
-      foprolos: 1.0,
-      accidentTravail: 0.5
-    }
-  }
-};
+  settings: defaultSettings()
+});
+
+// In-memory cache
+let db: any = emptyDb();
+
+/** Annual leave allowance given to a user who has never been configured. */
+export const DEFAULT_LEAVE_ENTITLEMENT = 20;
+
+/**
+ * A leave balance is stored as { entitlement, used }; `available` is always
+ * derived, never stored. Older rows stored a decrementing `available` instead —
+ * for those the annual allowance is recovered as available + used.
+ */
+function normalizeBalance(b: any) {
+  const used = typeof b.used === 'number' ? b.used : 0;
+  const entitlement =
+    typeof b.entitlement === 'number'
+      ? b.entitlement
+      : typeof b.available === 'number'
+        ? b.available + used
+        : DEFAULT_LEAVE_ENTITLEMENT;
+  return { userId: b.userId, entitlement, used, available: entitlement - used };
+}
 
 export async function initDb() {
   try {
@@ -29,22 +60,18 @@ export async function initDb() {
     db = JSON.parse(data);
     if (!db.clients) db.clients = [];
     if (!db.services) db.services = [];
+    if (!db.taskTypes) db.taskTypes = [];
+    if (!db.invoices) db.invoices = [];
     if (!db.leaveRequests) db.leaveRequests = [];
     if (!db.absenceAuthorizations) db.absenceAuthorizations = [];
     if (!db.leaveBalances) db.leaveBalances = [];
     if (!db.timeEntries) db.timeEntries = [];
-    if (!db.settings) db.settings = {
-      employerCharges: {
-        cnss: 16.57,
-        tfp: 1.0,
-        foprolos: 1.0,
-        accidentTravail: 0.5
-      }
-    };
+    if (!db.settings) db.settings = defaultSettings();
+    if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
       // File doesn't exist, start with empty structure
-      db = { users: [], clients: [], services: [], leaveRequests: [], absenceAuthorizations: [], leaveBalances: [], timeEntries: [] };
+      db = emptyDb();
       await saveDb();
     }
   }
@@ -54,11 +81,13 @@ export async function initDb() {
   if (adminIndex === -1) {
     const hashed = await bcrypt.hash('admin123', 10);
     db.users.push({
-      id: Date.now(),
+      // Fixed ids: a reseeded database keeps issued JWTs valid instead of
+      // failing every request with a confusing "Unauthorized".
+      id: 1,
       username: 'admin',
       password: hashed,
       role: 'ADMIN',
-      permissions: JSON.stringify(['VIEW', 'EDIT', 'MODIFY', 'DELETE', 'MANAGE_USERS', 'VIEW_CLIENTS', 'CREATE_CLIENTS', 'EDIT_CLIENTS', 'DELETE_CLIENTS', 'MANAGE_CLIENT_FIELDS', 'MANAGE_SERVICES', 'VIEW_HR', 'CREATE_LEAVE_REQUEST', 'MANAGE_LEAVE_REQUESTS', 'CREATE_ABSENCE_AUTHORIZATION', 'MANAGE_ABSENCE_AUTHORIZATIONS'])
+      permissions: JSON.stringify(['VIEW', 'EDIT', 'MODIFY', 'DELETE', 'MANAGE_USERS', 'VIEW_CLIENTS', 'CREATE_CLIENTS', 'EDIT_CLIENTS', 'DELETE_CLIENTS', 'MANAGE_CLIENT_FIELDS', 'MANAGE_SERVICES', 'VIEW_CASH', 'MANAGE_CASH', 'VIEW_HR', 'CREATE_LEAVE_REQUEST', 'MANAGE_LEAVE_REQUESTS', 'CREATE_ABSENCE_AUTHORIZATION', 'MANAGE_ABSENCE_AUTHORIZATIONS'])
     });
     await saveDb();
     console.log('Created default admin account (admin / admin123)');
@@ -72,6 +101,13 @@ export async function initDb() {
          db.users[adminIndex].permissions = JSON.stringify(perms);
          await saveDb();
      }
+     // Cash arrived after these accounts existed; grant it to an existing admin.
+     let adminPerms = JSON.parse(db.users[adminIndex].permissions || '[]');
+     if (!adminPerms.includes('VIEW_CASH')) {
+         adminPerms.push('VIEW_CASH', 'MANAGE_CASH');
+         db.users[adminIndex].permissions = JSON.stringify(adminPerms);
+         await saveDb();
+     }
   }
 
   // Ensure Collab exists
@@ -79,7 +115,7 @@ export async function initDb() {
   if (collabIndex === -1) {
     const hashed = await bcrypt.hash('collab123', 10);
     db.users.push({
-      id: Date.now() + 1,
+      id: 2,
       username: 'collab',
       password: hashed,
       role: 'COLLABORATOR',
@@ -186,6 +222,70 @@ export async function initDb() {
       }
       return null;
     },
+    deleteService: async (id: number) => {
+      const index = db.services.findIndex((s: any) => s.id === id);
+      if (index === -1) return false;
+      db.services.splice(index, 1);
+      // Cascade: a type de tâche has no meaning without its mission.
+      db.taskTypes = db.taskTypes.filter((t: any) => t.serviceId !== id);
+      await saveDb();
+      return true;
+    },
+    // Task type CRUD (types de tâches, scoped to a mission)
+    getAllTaskTypes: async () => db.taskTypes,
+    getTaskTypeById: async (id: number) => db.taskTypes.find((t: any) => t.id === id),
+    createTaskType: async (taskType: any) => {
+      db.taskTypes.push(taskType);
+      await saveDb();
+      return taskType;
+    },
+    updateTaskType: async (id: number, updates: any) => {
+      const index = db.taskTypes.findIndex((t: any) => t.id === id);
+      if (index === -1) return null;
+      db.taskTypes[index] = { ...db.taskTypes[index], ...updates };
+      await saveDb();
+      return db.taskTypes[index];
+    },
+    deleteTaskType: async (id: number) => {
+      const index = db.taskTypes.findIndex((t: any) => t.id === id);
+      if (index === -1) return false;
+      db.taskTypes.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+    // Cash / facturation CRUD
+    getAllInvoices: async () => db.invoices,
+    getInvoiceById: async (id: string) => db.invoices.find((i: any) => i.id === id),
+    createInvoice: async (invoice: any) => {
+      db.invoices.unshift(invoice); // newest first, like time entries
+      await saveDb();
+      return invoice;
+    },
+    updateInvoice: async (id: string, updates: any) => {
+      const index = db.invoices.findIndex((i: any) => i.id === id);
+      if (index === -1) return null;
+      db.invoices[index] = { ...db.invoices[index], ...updates };
+      await saveDb();
+      return db.invoices[index];
+    },
+    deleteInvoice: async (id: string) => {
+      const index = db.invoices.findIndex((i: any) => i.id === id);
+      if (index === -1) return false;
+      db.invoices.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+    /**
+     * Next document number in the sequence, zero-padded to 4 digits.
+     * Reserved atomically here so two concurrent creations can't collide.
+     */
+    nextInvoiceNumber: async () => {
+      const current = typeof db.settings.invoiceCounter === 'number' ? db.settings.invoiceCounter : 0;
+      const next = current + 1;
+      db.settings.invoiceCounter = next;
+      await saveDb();
+      return String(next).padStart(4, '0');
+    },
     // HR CRUD
     getAllLeaveRequests: async () => {
       return db.leaveRequests;
@@ -227,26 +327,33 @@ export async function initDb() {
       }
       return null;
     },
-    getAllLeaveBalances: async () => { return db.leaveBalances || []; },
+    getAllLeaveBalances: async () => (db.leaveBalances || []).map(normalizeBalance),
     getLeaveBalanceByUserId: async (userId: number) => {
-      let balance = db.leaveBalances.find((b: any) => b.userId === userId);
-      if (!balance) {
-        balance = { userId, available: 20, used: 0 };
-        db.leaveBalances.push(balance);
+      let raw = db.leaveBalances.find((b: any) => b.userId === userId);
+      if (!raw) {
+        raw = { userId, entitlement: DEFAULT_LEAVE_ENTITLEMENT, used: 0 };
+        db.leaveBalances.push(raw);
         await saveDb();
       }
-      return balance;
+      return normalizeBalance(raw);
     },
+    /** Accepts `entitlement` (admin-set allowance) and/or `used` (consumed days). */
     updateLeaveBalance: async (userId: number, updates: any) => {
       let index = db.leaveBalances.findIndex((b: any) => b.userId === userId);
       if (index === -1) {
-        db.leaveBalances.push({ userId, available: 20, used: 0, ...updates });
+        db.leaveBalances.push({ userId, entitlement: DEFAULT_LEAVE_ENTITLEMENT, used: 0 });
         index = db.leaveBalances.length - 1;
-      } else {
-        db.leaveBalances[index] = { ...db.leaveBalances[index], ...updates };
       }
+      const current = normalizeBalance(db.leaveBalances[index]);
+      // Rewrite the row wholesale so the legacy decrementing `available` field
+      // is dropped rather than left behind to contradict the derived value.
+      db.leaveBalances[index] = {
+        userId,
+        entitlement: typeof updates.entitlement === 'number' ? updates.entitlement : current.entitlement,
+        used: typeof updates.used === 'number' ? updates.used : current.used,
+      };
       await saveDb();
-      return db.leaveBalances[index];
+      return normalizeBalance(db.leaveBalances[index]);
     },
 
     // Time Tracking CRUD
@@ -291,7 +398,39 @@ export async function initDb() {
   };
 }
 
-async function saveDb() {
+/**
+ * Every mutation rewrites the whole JSON file, so a burst of writes (a timer
+ * tick that pauses three tasks, a mission saved with ten types) would serialise
+ * the entire database once per change. Writes are coalesced into one flush per
+ * tick, and never run concurrently — with hundreds of clients and thousands of
+ * entries that is the difference between one file write and dozens.
+ *
+ * Callers still `await saveDb()` and are guaranteed their change is on disk
+ * when it resolves.
+ */
+let pendingWrite: Promise<void> | null = null;
+let queuedWrite: Promise<void> | null = null;
+
+async function flushDb() {
+  // Serialise inside the flush so we always persist the latest state, not a
+  // snapshot taken when the call was queued.
   await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
+}
+
+function saveDb(): Promise<void> {
+  // A flush is already in flight: piggyback on a single trailing write that
+  // will capture this change (and any other that lands before it starts).
+  if (pendingWrite) {
+    if (!queuedWrite) {
+      queuedWrite = pendingWrite.then(async () => {
+        queuedWrite = null;
+        pendingWrite = flushDb().finally(() => { pendingWrite = null; });
+        await pendingWrite;
+      });
+    }
+    return queuedWrite;
+  }
+  pendingWrite = flushDb().finally(() => { pendingWrite = null; });
+  return pendingWrite;
 }
 

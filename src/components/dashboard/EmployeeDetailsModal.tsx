@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, User, CheckCircle2, Clock, Pause, Briefcase, Calendar, Clock4, AlertCircle } from 'lucide-react';
+import { roleMeta, roleLabel } from '../../constants/roles';
 
 interface EmployeeDetailsModalProps {
   employee: any;
@@ -15,12 +16,12 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({ empl
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${employee.role === 'SUPERVISEUR' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${roleMeta(employee.role).badgeClass}`}>
               <User className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-[16px] font-bold text-gray-900">{employee.name}</h2>
-              <div className="text-[12px] text-gray-500">{employee.role === 'SUPERVISEUR' ? 'Superviseur' : 'Collaborateur'} • {employee.department}</div>
+              <div className="text-[12px] text-gray-500">{roleLabel(employee.role)} • {employee.department}</div>
             </div>
           </div>
           <button 

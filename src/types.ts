@@ -10,12 +10,16 @@ export interface TimeEntry {
   description: string;
   pole: string;
   serviceId?: number;
+  /** Type de tâche within the mission, e.g. "Saisie des écritures comptables". */
+  taskType?: string;
+  taskTypeId?: number;
   heureDebut: string;
   heureFin: string;
   duree: string;
   dureeSeconds: number;
   coutCalcule: string;
-  hourlyRate?: number;
+  /** Employer hourly cost of the collaborator. null = not configured for them. */
+  hourlyRate?: number | null;
   statut: TaskStatus;
 }
 
@@ -29,7 +33,8 @@ export interface ActiveTimerState {
   startTime: string;
   elapsedSeconds: number;
   isRunning: boolean;
-  costRatePerHour: number; // e.g. 5.812 DT / hr
+  /** Employer hourly cost, in DT/h. null when not configured for this user. */
+  costRatePerHour: number | null;
 }
 
 export interface ClientOption {
@@ -42,6 +47,13 @@ export interface ServiceOption {
   name: string;
   pole?: string;
   clientId?: number | null;
+}
+
+/** A type de tâche belongs to exactly one mission (service). */
+export interface TaskTypeOption {
+  id: number;
+  name: string;
+  serviceId: number;
 }
 
 // HR Types

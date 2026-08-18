@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth, User } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { ROLES, roleMeta, type Role } from '../constants/roles';
 import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
 
 const PERMISSIONS_GROUPED = [
@@ -10,7 +11,7 @@ const PERMISSIONS_GROUPED = [
       { id: 'VIEW', label: 'Voir (VIEW)', desc: 'Peut consulter le suivi du temps' },
       { id: 'EDIT', label: 'Modifier (EDIT)', desc: 'Peut modifier le suivi du temps' },
       { id: 'DELETE', label: 'Supprimer (DELETE)', desc: 'Peut supprimer des données du suivi du temps' },
-      { id: 'MANAGE_SERVICES', label: 'Gérer les services', desc: 'Peut créer et modifier des services' },
+      { id: 'MANAGE_SERVICES', label: 'Gérer missions & types de tâches', desc: 'Peut ajouter, modifier et supprimer les missions et leurs types de tâches' },
     ]
   },
   {
@@ -21,6 +22,13 @@ const PERMISSIONS_GROUPED = [
       { id: 'EDIT_CLIENTS', label: 'Modifier clients', desc: 'Peut modifier les clients existants' },
       { id: 'DELETE_CLIENTS', label: 'Supprimer clients', desc: 'Peut archiver/supprimer des clients' },
       { id: 'MANAGE_CLIENT_FIELDS', label: 'Gérer champs', desc: 'Peut gérer les champs personnalisés' },
+    ]
+  },
+  {
+    group: 'Cash (Facturation)',
+    permissions: [
+      { id: 'VIEW_CASH', label: 'Voir Cash', desc: 'Peut consulter les factures et documents' },
+      { id: 'MANAGE_CASH', label: 'Gérer Cash', desc: 'Peut créer, modifier et supprimer des documents' },
     ]
   },
   {
@@ -42,7 +50,7 @@ const PERMISSIONS_GROUPED = [
 ];
 
 export const UsersManagement: React.FC = () => {
-  const { token, hasPermission } = useAuth();
+  const { token, hasPermission, logout } = useAuth();
   const { t } = useLanguage();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -58,7 +66,7 @@ export const UsersManagement: React.FC = () => {
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [formUsername, setFormUsername] = useState('');
   const [formPassword, setFormPassword] = useState('');
-  const [formRole, setFormRole] = useState<'ADMIN' | 'COLLABORATOR' | 'SUPERVISEUR'>('COLLABORATOR');
+  const [formRole, setFormRole] = useState<Role>('COLLABORATOR');
   const [formPermissions, setFormPermissions] = useState<string[]>([]);
   const [formSalaireBrut, setFormSalaireBrut] = useState<number | ''>('');
   const [formRegimeHoraire, setFormRegimeHoraire] = useState<number | ''>(48);
@@ -67,6 +75,9 @@ export const UsersManagement: React.FC = () => {
   const [formFoprolos, setFormFoprolos] = useState<number | ''>('');
   const [formAccidentTravail, setFormAccidentTravail] = useState<number | ''>('');
   const [formPrimesFraisNonCotisables, setFormPrimesFraisNonCotisables] = useState<number | ''>('');
+  const [formSoldeConge, setFormSoldeConge] = useState<number | ''>(20);
+  /** Days already consumed — read-only context so the admin sets the allowance knowingly. */
+  const [formCongesUtilises, setFormCongesUtilises] = useState<number>(0);
   const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -115,10 +126,12 @@ export const UsersManagement: React.FC = () => {
     setFormSalaireBrut('');
     setFormRegimeHoraire(48);
     setFormCnss(globalSettings?.cnss ?? 16.57);
-    setFormTfp(globalSettings?.tfp ?? 1.0);
+    setFormTfp(globalSettings?.tfp ?? 2.0);
     setFormFoprolos(globalSettings?.foprolos ?? 1.0);
     setFormAccidentTravail(globalSettings?.accidentTravail ?? 0.5);
     setFormPrimesFraisNonCotisables('');
+    setFormSoldeConge(20);
+    setFormCongesUtilises(0);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -132,10 +145,12 @@ export const UsersManagement: React.FC = () => {
     setFormSalaireBrut(user.salaireBrut || '');
     setFormRegimeHoraire(user.regimeHoraire || 48);
     setFormCnss(typeof user.cnss === 'number' ? user.cnss : (globalSettings?.cnss ?? 16.57));
-    setFormTfp(typeof user.tfp === 'number' ? user.tfp : (globalSettings?.tfp ?? 1.0));
+    setFormTfp(typeof user.tfp === 'number' ? user.tfp : (globalSettings?.tfp ?? 2.0));
     setFormFoprolos(typeof user.foprolos === 'number' ? user.foprolos : (globalSettings?.foprolos ?? 1.0));
     setFormAccidentTravail(typeof user.accidentTravail === 'number' ? user.accidentTravail : (globalSettings?.accidentTravail ?? 0.5));
     setFormPrimesFraisNonCotisables(typeof user.primesFraisNonCotisables === 'number' ? user.primesFraisNonCotisables : '');
+    setFormSoldeConge(typeof user.soldeConge === 'number' ? user.soldeConge : 20);
+    setFormCongesUtilises(typeof user.congesUtilises === 'number' ? user.congesUtilises : 0);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -184,7 +199,8 @@ export const UsersManagement: React.FC = () => {
         tfp: formTfp === '' ? null : Number(formTfp),
         foprolos: formFoprolos === '' ? null : Number(formFoprolos),
         accidentTravail: formAccidentTravail === '' ? null : Number(formAccidentTravail),
-        primesFraisNonCotisables: formPrimesFraisNonCotisables === '' ? null : Number(formPrimesFraisNonCotisables)
+        primesFraisNonCotisables: formPrimesFraisNonCotisables === '' ? null : Number(formPrimesFraisNonCotisables),
+        soldeConge: formSoldeConge === '' ? 0 : Number(formSoldeConge)
       };
       if (formPassword) payload.password = formPassword;
       if (!editingUserId) payload.username = formUsername;
@@ -204,12 +220,19 @@ export const UsersManagement: React.FC = () => {
       const data = await res.json();
 
       if (res.ok) {
+        // The API always returns permissions as an array, but guard anyway so a
+        // shape mismatch can never crash the table behind the modal.
+        const saved = { ...data, permissions: Array.isArray(data.permissions) ? data.permissions : [] };
         if (editingUserId) {
-          setUsers(users.map(u => u.id === editingUserId ? data : u));
+          setUsers(users.map(u => u.id === editingUserId ? saved : u));
         } else {
-          setUsers([...users, data]);
+          setUsers([...users, saved]);
         }
         setIsModalOpen(false);
+      } else if (res.status === 401) {
+        // Expired or stale session: sending the user back to the login screen is
+        // the only useful action, an inline "Unauthorized" is a dead end.
+        logout('Votre session a expiré. Veuillez vous reconnecter.');
       } else {
         setFormError(data.error || 'Une erreur est survenue');
       }
@@ -290,11 +313,9 @@ export const UsersManagement: React.FC = () => {
                     <div className="font-semibold text-gray-900 text-[13px]">{user.username}</div>
                   </td>
                   <td className="px-5 py-3">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : user.role === 'SUPERVISEUR' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                    }`}>
-                      {(user.role === 'ADMIN' || user.role === 'SUPERVISEUR') && <Shield className="w-3 h-3" />}
-                      {user.role}
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${roleMeta(user.role).badgeClass}`}>
+                      {roleMeta(user.role).hasShield && <Shield className="w-3 h-3" />}
+                      {roleMeta(user.role).label}
                     </span>
                   </td>
                   <td className="px-5 py-3">
@@ -523,15 +544,62 @@ export const UsersManagement: React.FC = () => {
                 </div>
 
                 <div className="pt-4 border-t border-gray-200 mt-4">
+                  <h3 className="text-[13px] font-bold text-gray-800 mb-4">Congés</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                        Solde de congé annuel (jours)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={formSoldeConge}
+                        onChange={e => setFormSoldeConge(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        placeholder="Ex: 20"
+                      />
+                    </div>
+
+                    {editingUserId && (
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Congés déjà pris</label>
+                        <div className="px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-[13px] text-gray-600">
+                          {formCongesUtilises} j
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {editingUserId && (
+                    <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200 flex justify-between text-[12px] max-w-sm">
+                      <span className="text-gray-600">Solde restant:</span>
+                      <span
+                        className={`font-bold ${
+                          (typeof formSoldeConge === 'number' ? formSoldeConge : 0) - formCongesUtilises < 0
+                            ? 'text-red-600'
+                            : 'text-blue-600'
+                        }`}
+                      >
+                        {(typeof formSoldeConge === 'number' ? formSoldeConge : 0) - formCongesUtilises} j
+                      </span>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Modifier le solde annuel n'affecte pas les congés déjà pris.
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t border-gray-200 mt-4">
                   <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
                   <select
                     value={formRole}
-                    onChange={e => setFormRole(e.target.value as 'ADMIN' | 'COLLABORATOR' | 'SUPERVISEUR')}
+                    onChange={e => setFormRole(e.target.value as Role)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
                   >
-                    <option value="COLLABORATOR">Collaborateur</option>
-                    <option value="SUPERVISEUR">Superviseur</option>
-                    <option value="ADMIN">Administrateur</option>
+                    {ROLES.map(r => (
+                      <option key={r.id} value={r.id}>{r.label}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -577,25 +645,28 @@ export const UsersManagement: React.FC = () => {
                     </div>
                   </div>
                 )}
-              </div>
-            </div>
 
-            <div className="px-5 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-100 transition-colors bg-white"
-              >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="px-4 py-2 bg-[#101828] text-white rounded-lg text-[13px] font-medium hover:bg-[#1d2939] flex items-center gap-2 transition-colors"
-              >
-                {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {editingUserId ? 'Enregistrer' : 'Créer l\'utilisateur'}
-              </button>
+                {/* Actions live at the very bottom of the scrollable form, not in a
+                    pinned footer: the user has to pass through the cost and
+                    permission settings before they can submit. */}
+                <div className="pt-5 mt-2 border-t border-gray-200 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-100 transition-colors bg-white"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-4 py-2 bg-[#101828] text-white rounded-lg text-[13px] font-medium hover:bg-[#1d2939] flex items-center gap-2 transition-colors disabled:opacity-60"
+                  >
+                    {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {editingUserId ? 'Enregistrer' : 'Créer l\'utilisateur'}
+                  </button>
+                </div>
+              </div>
             </div>
           </form>
         </div>

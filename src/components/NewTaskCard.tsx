@@ -1,19 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Plus, X, Settings2, Check, ChevronDown, Search } from 'lucide-react';
+import { Play, Plus, X, Settings2, ChevronDown, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { MissionEditorModal } from './missions/MissionEditorModal';
 
 interface NewTaskCardProps {
-  clients: any[];
   services: any[];
-  onStartNewTask: (client: string, service: string, description: string, clientId?: number, serviceId?: number) => void;
+  taskTypes: any[];
+  onStartNewTask: (
+    client: string,
+    service: string,
+    description: string,
+    clientId?: number,
+    serviceId?: number,
+    taskType?: string,
+    taskTypeId?: number
+  ) => void;
   isOpen: boolean;
   onToggleOpen: () => void;
   refreshServices: () => void;
 }
 
 export const NewTaskCard: React.FC<NewTaskCardProps> = ({
-  clients,
   services,
+  taskTypes,
   onStartNewTask,
   isOpen,
   onToggleOpen,
@@ -22,13 +31,18 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
   const { hasPermission, token } = useAuth();
   
   const [clientSearch, setClientSearch] = useState('');
+  const [clientResults, setClientResults] = useState<any[]>([]);
+  const [selectedClient, setSelectedClient] = useState<any | null>(null);
+  const [isSearchingClients, setIsSearchingClients] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
+  const [selectedTaskTypeId, setSelectedTaskTypeId] = useState<string>('');
   const [description, setDescription] = useState('');
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
 
-  const [managingMode, setManagingMode] = useState<'add' | 'edit' | false>(false);
-  const [serviceInputName, setServiceInputName] = useState('');
+  // Full mission editor (name + client + types de tâches), shared with the
+  // Missions admin screen. `false` = closed, null = creating, object = editing.
+  const [missionEditor, setMissionEditor] = useState<false | { mission: any | null }>(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -46,78 +60,95 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
     ? services.filter(s => String(s.clientId) === String(selectedClientId) || s.clientId === null)
     : services;
 
-  const filteredClients = clientSearch.length >= 2 
-    ? clients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+  // Types de tâches belong to the chosen mission — e.g. picking "Comptabilité"
+  // offers "Collecte des documents comptables", "Saisie des écritures", …
+  const availableTaskTypes = selectedServiceId
+    ? taskTypes.filter(t => String(t.serviceId) === String(selectedServiceId))
     : [];
+  // Missions configured without any type stay usable; the field is only
+  // required once the admin has defined types for that mission.
+  const taskTypeRequired = availableTaskTypes.length > 0;
 
-  const handleClientSelect = (clientId: string, clientName: string) => {
+  // Client lookup is server-side and debounced: the full list is never loaded,
+  // so this scales to hundreds of clients. Only 8 matches are ever rendered.
+  useEffect(() => {
+    const term = clientSearch.trim();
+    if (term.length < 2 || selectedClientId) { setClientResults([]); return; }
+    let cancelled = false;
+    setIsSearchingClients(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/clients?q=${encodeURIComponent(term)}&page=1&limit=8`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const body = await res.json();
+        const rows = Array.isArray(body) ? body : (body.data ?? []);
+        if (!cancelled) setClientResults(rows);
+      } catch {
+        if (!cancelled) setClientResults([]);
+      } finally {
+        if (!cancelled) setIsSearchingClients(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [clientSearch, selectedClientId, token]);
+
+  const handleClientSelect = (clientId: string, clientName: string, client?: any) => {
     setSelectedClientId(clientId);
+    setSelectedClient(client ?? { id: clientId, name: clientName });
     setClientSearch(clientName);
     setIsClientDropdownOpen(false);
     setSelectedServiceId('');
+    setSelectedTaskTypeId('');
+  };
+
+  // Changing the mission invalidates any type picked from the previous one.
+  const handleServiceSelect = (serviceId: string) => {
+    setSelectedServiceId(serviceId);
+    setSelectedTaskTypeId('');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!description.trim()) return;
 
-    const client = clients.find(c => String(c.id) === selectedClientId);
+    const client = selectedClient;
     const service = services.find(s => String(s.id) === selectedServiceId);
-    
+    const taskType = taskTypes.find(t => String(t.id) === selectedTaskTypeId);
+
     const finalClientName = client ? client.name : clientSearch;
     const finalServiceName = service ? service.name : 'Unknown Service';
     const finalDescription = description.trim();
-    
+
     onStartNewTask(
-      finalClientName, 
-      finalServiceName, 
-      finalDescription, 
+      finalClientName,
+      finalServiceName,
+      finalDescription,
       client ? Number(client.id) : undefined,
-      service ? Number(service.id) : undefined
+      service ? Number(service.id) : undefined,
+      taskType ? taskType.name : undefined,
+      taskType ? Number(taskType.id) : undefined
     );
   };
 
-  const handleSaveService = async () => {
-    if (!serviceInputName.trim()) return;
-    try {
-      const isEdit = managingMode === 'edit' && selectedServiceId;
-      const url = isEdit ? `/api/services/${selectedServiceId}` : '/api/services';
-      const method = isEdit ? 'PUT' : 'POST';
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name: serviceInputName,
-          clientId: selectedClientId ? Number(selectedClientId) : null
-        })
-      });
-      if (res.ok) {
-        const savedService = await res.json();
-        setServiceInputName('');
-        setManagingMode(false);
-        refreshServices();
-        setSelectedServiceId(String(savedService.id));
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  const openMissionEditor = (mission: any | null) => setMissionEditor({ mission });
+
+  const handleMissionSaved = (saved: any) => {
+    setMissionEditor(false);
+    refreshServices();
+    setSelectedServiceId(String(saved.id));
+    setSelectedTaskTypeId('');
   };
 
-  const startEditService = () => {
-    const currentService = services.find(s => String(s.id) === selectedServiceId);
-    if (currentService) {
-      setServiceInputName(currentService.name);
-      setManagingMode('edit');
-    }
+  const handleMissionDeleted = () => {
+    setMissionEditor(false);
+    refreshServices();
+    // The selected mission is gone — clear it rather than leaving a dead id.
+    setSelectedServiceId('');
+    setSelectedTaskTypeId('');
   };
 
-  const startAddService = () => {
-    setServiceInputName('');
-    setManagingMode('add');
-  };
+  const currentMission = services.find(s => String(s.id) === selectedServiceId) || null;
 
   return (
     <div className="relative">
@@ -151,8 +182,9 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                     onChange={(e) => {
                       setClientSearch(e.target.value);
                       setIsClientDropdownOpen(true);
-                      if (selectedClientId && e.target.value !== clients.find(c => String(c.id) === selectedClientId)?.name) {
-                         setSelectedClientId('');
+                      if (selectedClient && e.target.value !== selectedClient.name) {
+                        setSelectedClientId('');
+                        setSelectedClient(null);
                       }
                     }}
                     onFocus={() => setIsClientDropdownOpen(true)}
@@ -163,11 +195,13 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                 
                 {isClientDropdownOpen && clientSearch.length >= 2 && (
                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                    {filteredClients.length > 0 ? (
-                      filteredClients.map(c => (
+                    {isSearchingClients ? (
+                      <div className="px-3 py-2 text-[12px] text-gray-400 italic">Recherche…</div>
+                    ) : clientResults.length > 0 ? (
+                      clientResults.map(c => (
                         <div
                           key={c.id}
-                          onClick={() => handleClientSelect(String(c.id), c.name)}
+                          onClick={() => handleClientSelect(String(c.id), c.name, c)}
                           className="px-3 py-2 text-[12px] text-gray-700 hover:bg-gray-50 cursor-pointer"
                         >
                           {c.name}
@@ -196,19 +230,21 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                 </label>
                 {hasPermission('MANAGE_SERVICES') && (
                   <div className="flex items-center gap-2">
-                    <button 
-                      type="button" 
-                      onClick={startAddService}
+                    <button
+                      type="button"
+                      onClick={() => openMissionEditor(null)}
                       className="text-[9px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                      title="Créer une mission et ses types de tâches"
                     >
                       <Plus className="w-3 h-3" />
                       Ajouter
                     </button>
-                    {selectedServiceId && (
-                      <button 
-                        type="button" 
-                        onClick={startEditService}
+                    {currentMission && (
+                      <button
+                        type="button"
+                        onClick={() => openMissionEditor(currentMission)}
                         className="text-[9px] text-gray-500 hover:text-gray-700 font-medium flex items-center gap-1"
+                        title="Modifier cette mission et ses types de tâches"
                       >
                         <Settings2 className="w-3 h-3" />
                         Modifier
@@ -218,42 +254,47 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                 )}
               </div>
               
-              {managingMode ? (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={serviceInputName}
-                    onChange={(e) => setServiceInputName(e.target.value)}
-                    placeholder={managingMode === 'add' ? "Nouvelle mission..." : "Modifier mission..."}
-                    className="flex-1 border border-gray-200 rounded-md px-2 py-1.5 text-[12px] focus:outline-none focus:border-blue-400"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveService}
-                    className="bg-blue-50 text-blue-600 px-2 rounded-md hover:bg-blue-100"
-                  >
-                    <Check className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setManagingMode(false)}
-                    className="bg-gray-50 text-gray-500 px-2 rounded-md hover:bg-gray-100"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+              <div className="relative">
+                <select
+                  value={selectedServiceId}
+                  onChange={(e) => handleServiceSelect(e.target.value)}
+                  className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-1.5 pr-8 text-[12px] font-medium text-gray-800 focus:outline-none focus:border-gray-400 transition-colors"
+                >
+                  <option value="" disabled hidden>Sélectionner une mission</option>
+                  {availableServices.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Field: Type de tâche — options come from the selected mission */}
+            <div>
+              <label className="text-[10px] font-semibold text-gray-400 block mb-1">
+                Type de tâche {taskTypeRequired && <span className="text-red-500">*</span>}
+              </label>
+              {!selectedServiceId ? (
+                <div className="w-full border border-dashed border-gray-200 rounded-md px-3 py-1.5 text-[11px] text-gray-400 italic">
+                  Sélectionnez d'abord une mission
+                </div>
+              ) : availableTaskTypes.length === 0 ? (
+                <div className="w-full border border-dashed border-gray-200 rounded-md px-3 py-1.5 text-[11px] text-gray-400 italic">
+                  Aucun type défini pour cette mission
                 </div>
               ) : (
                 <div className="relative">
                   <select
-                    value={selectedServiceId}
-                    onChange={(e) => setSelectedServiceId(e.target.value)}
+                    value={selectedTaskTypeId}
+                    onChange={(e) => setSelectedTaskTypeId(e.target.value)}
                     className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-1.5 pr-8 text-[12px] font-medium text-gray-800 focus:outline-none focus:border-gray-400 transition-colors"
                   >
-                    <option value="" disabled hidden>Sélectionner une mission</option>
-                    {availableServices.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
+                    <option value="" disabled hidden>Sélectionner un type de tâche</option>
+                    {availableTaskTypes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
                       </option>
                     ))}
                   </select>
@@ -279,15 +320,30 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={!selectedClientId || (!selectedServiceId && !managingMode) || !description.trim()}
+              disabled={
+                !selectedClientId ||
+                !selectedServiceId ||
+                (taskTypeRequired && !selectedTaskTypeId) ||
+                !description.trim()
+              }
               className="w-full mt-2 bg-[#101828] hover:bg-[#1d2939] disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold text-[12px] py-2 px-3 rounded-md transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              title={(!selectedClientId || !selectedServiceId || !description.trim()) ? "Veuillez remplir tous les champs obligatoires" : ""}
+              title={(!selectedClientId || !selectedServiceId || (taskTypeRequired && !selectedTaskTypeId) || !description.trim()) ? "Veuillez remplir tous les champs obligatoires" : ""}
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               <span>DÉMARRER</span>
             </button>
           </form>
         </div>
+      )}
+
+      {missionEditor && (
+        <MissionEditorModal
+          mission={missionEditor.mission}
+          taskTypes={taskTypes}
+          onClose={() => setMissionEditor(false)}
+          onSaved={handleMissionSaved}
+          onDeleted={handleMissionDeleted}
+        />
       )}
     </div>
   );

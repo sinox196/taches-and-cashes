@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local JSON database — contains bcrypt password hashes and real client data.
+local.db.json

@@ -1,0 +1,189 @@
+import React from 'react';
+import { X, Printer, Download, Pencil, Trash2 } from 'lucide-react';
+import { amountToFrenchWords } from '../../utils/amountToWords';
+import { downloadInvoice } from './downloadInvoice';
+
+const money = (v: number) =>
+  (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+/** Module scope: see the note in InvoiceEditor about remounting. */
+const Row: React.FC<{ label: string; value: string; strong?: boolean; muted?: boolean }> = ({ label, value, strong, muted }) => (
+  <div className={`flex justify-between px-4 py-2 ${strong ? 'bg-gray-50' : ''}`}>
+    <span className={strong ? 'font-semibold text-gray-800' : 'text-gray-600'}>{label}</span>
+    <span className={`font-mono ${strong ? 'font-bold text-gray-900' : muted ? 'text-gray-500' : 'text-gray-900'}`}>{value}</span>
+  </div>
+);
+
+interface InvoicePreviewProps {
+  invoice: any;
+  onClose: () => void;
+  /** Present only when the viewer may modify documents. */
+  onEdit?: (invoice: any) => void;
+  onDelete?: (invoice: any) => void;
+}
+
+/** The issued document, laid out as described in the cahier des charges. */
+export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose, onEdit, onDelete }) => {
+  const suspended = invoice.vatRegime === 'SUSPENSION';
+  const detailed = invoice.billingMode === 'DETAILLEE';
+  const custom = Object.entries(invoice.customFields || {});
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm overflow-y-auto print:static print:bg-white print:p-0">
+      <div id="invoice-print" className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-4">
+        <div className="no-print px-5 py-3 border-b border-gray-100 flex flex-wrap gap-2 justify-between items-center">
+          <h2 className="text-[14px] font-bold text-gray-900">
+            {invoice.title} {invoice.number}
+          </h2>
+          <div className="flex items-center gap-2">
+            {onEdit && (
+              <button
+                onClick={() => onEdit(invoice)}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+              >
+                <Pencil className="w-3.5 h-3.5" /> Modifier
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={() => onDelete(invoice)}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-red-600 hover:bg-red-50 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Supprimer
+              </button>
+            )}
+            <button
+              onClick={() => downloadInvoice(invoice)}
+              title="Enregistrer le document sur votre poste"
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" /> Télécharger
+            </button>
+            <button
+              onClick={() => window.print()}
+              title="Imprimer — choisissez « Enregistrer au format PDF » pour obtenir un PDF"
+              className="px-3 py-1.5 bg-[#101828] text-white rounded-lg text-[12px] font-medium hover:bg-[#1d2939] flex items-center gap-1.5"
+            >
+              <Printer className="w-3.5 h-3.5" /> Imprimer / PDF
+            </button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-8 space-y-6">
+          <div className="flex items-start justify-between gap-6">
+            <div className="text-[11px] text-gray-400">
+              {/* Logo placeholder — the company logo comes from the account. */}
+              <div className="w-24 h-16 border border-dashed border-gray-200 rounded flex items-center justify-center">Logo</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[24px] font-bold text-gray-900 tracking-tight">{invoice.title}</div>
+              <div className="text-[13px] text-gray-500 mt-0.5">
+                N° <span className="font-mono font-bold text-gray-900">{invoice.number}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6 text-[12.5px]">
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Détails du client</div>
+              <div className="font-semibold text-gray-900">{invoice.clientName}</div>
+              <div className="text-gray-600 mt-1">Matricule fiscal : {invoice.clientTaxId || '—'}</div>
+              <div className="text-gray-600 whitespace-pre-line">Adresse : {invoice.clientAddress || '—'}</div>
+              {custom.map(([label, value]) => (
+                <div key={label} className="text-gray-600">{label} : {String(value)}</div>
+              ))}
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Détails du document</div>
+              <div className="text-gray-600">Date de création : <span className="text-gray-900">{invoice.issueDate}</span></div>
+              {invoice.showDueDate && invoice.dueDate && (
+                <div className="text-gray-600">Date d'échéance : <span className="text-gray-900">{invoice.dueDate}</span></div>
+              )}
+            </div>
+          </div>
+
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <table className="w-full text-left text-[12.5px]">
+              <thead>
+                <tr className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
+                  <th className="px-3 py-2 font-semibold">Désignation</th>
+                  {detailed && <th className="px-3 py-2 font-semibold text-right">Qté</th>}
+                  {detailed && <th className="px-3 py-2 font-semibold text-right">P.U.</th>}
+                  {!suspended && <th className="px-3 py-2 font-semibold text-right">TVA</th>}
+                  <th className="px-3 py-2 font-semibold text-right">Montant HT</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(invoice.lines || []).map((l: any, i: number) => (
+                  <tr key={i}>
+                    <td className="px-3 py-2 text-gray-900">{l.designation}</td>
+                    {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{l.quantity}</td>}
+                    {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{money(l.unitPrice)}</td>}
+                    {!suspended && <td className="px-3 py-2 text-right text-gray-600">{(l.vatRate * 100).toFixed(0)} %</td>}
+                    <td className="px-3 py-2 text-right font-mono text-gray-900">{money(l.montantHT)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              {!suspended && (invoice.vatBreakdown || []).length > 0 && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-left text-[12px]">
+                    <thead>
+                      <tr className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
+                        <th className="px-3 py-2 font-semibold">TVA</th>
+                        <th className="px-3 py-2 font-semibold text-right">Base</th>
+                        <th className="px-3 py-2 font-semibold text-right">Montant</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {invoice.vatBreakdown.map((b: any) => (
+                        <tr key={b.rate}>
+                          <td className="px-3 py-2">{(b.rate * 100).toFixed(0)} %</td>
+                          <td className="px-3 py-2 text-right font-mono">{money(b.base)}</td>
+                          <td className="px-3 py-2 text-right font-mono">{money(b.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {suspended && (
+                <div className="border border-dashed border-gray-300 rounded-lg px-3 py-2 text-[12px] text-gray-500">
+                  Suspension de TVA
+                </div>
+              )}
+            </div>
+
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 text-[12.5px]">
+              <Row label="Total HT (1)" value={money(invoice.totalHT)} />
+              <Row label="Total TVA (2)" value={money(invoice.totalVAT)} />
+              <Row label="Total TTC (3)" value={money(invoice.totalTTC)} strong />
+              <Row label={`Retenue à la source (5) — ${(invoice.withholdingRate * 100).toLocaleString('fr-FR')} %`} value={`− ${money(invoice.withholdingAmount)}`} />
+              <Row label="Timbre fiscal (6)" value={money(invoice.stampDuty)} />
+              <Row label="Net à payer (7)" value={money(invoice.netToPay)} strong />
+              {invoice.disbursements > 0 && <Row label="Remboursement de débours (8)" value={`+ ${money(invoice.disbursements)}`} />}
+              {invoice.advances > 0 && <Row label="Moins avances perçues (9)" value={`− ${money(invoice.advances)}`} />}
+              <div className="flex justify-between px-4 py-3 bg-[#101828] text-white">
+                <span className="font-bold">Total net à payer (10)</span>
+                <span className="font-mono font-bold">{money(invoice.totalNetToPay)} DT</span>
+              </div>
+            </div>
+          </div>
+
+          <p className="text-[12.5px] text-gray-800 leading-relaxed border-t border-gray-200 pt-4">
+            Arrêtée la présente <span className="font-semibold">{(invoice.title || '').toLowerCase()}</span> à un
+            montant total TTC net de{' '}
+            <span className="font-semibold">{amountToFrenchWords(invoice.totalNetToPay)}</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};

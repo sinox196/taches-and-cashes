@@ -94,7 +94,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Pôle
+                Mission
               </label>
               <input
                 type="text"

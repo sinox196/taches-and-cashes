@@ -25,17 +25,24 @@ export function formatVerboseDuration(totalSeconds: number): string {
 }
 
 /**
- * Calculates DT cost based on duration
+ * Formats an already-computed cost as "XX,YYY DT"
  */
-export function calculateCostDT(totalSeconds: number, ratePerHour = 5.815): string {
-  const hours = totalSeconds / 3600;
-  const cost = hours * ratePerHour;
-  // Format as XX,YYY DT
-  const formatted = cost.toLocaleString('fr-FR', {
+export function formatCostDT(cost: number): string {
+  const formatted = (cost || 0).toLocaleString('fr-FR', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   });
   return `${formatted} DT`;
+}
+
+/**
+ * Calculates DT cost from a duration and the collaborator's employer hourly cost.
+ * The rate is required on purpose — there is no sensible default, and inventing
+ * one silently mis-prices everyone who has no cost configured.
+ */
+export function calculateCostDT(totalSeconds: number, ratePerHour: number): string {
+  const hours = totalSeconds / 3600;
+  return formatCostDT(hours * ratePerHour);
 }
 
 /**

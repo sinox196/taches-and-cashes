@@ -1,1 +1,34 @@
 @import "tailwindcss";
+
+/* ---------------------------------------------------------------
+   Printing a Cash document.
+   The document lives inside a modal in the app tree, so printing the
+   page would otherwise emit the sidebar, the list behind it and the
+   modal chrome. Hide everything, then reveal just the document and
+   pull it to the top of the sheet.
+   --------------------------------------------------------------- */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #invoice-print,
+  #invoice-print * {
+    visibility: visible;
+  }
+  #invoice-print {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border-radius: 0;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    margin: 14mm;
+  }
+}

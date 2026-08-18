@@ -8,7 +8,7 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, authMessage } = useAuth();
   const { t, language, setLanguage } = useLanguage();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,6 +70,12 @@ export const Login: React.FC = () => {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow-xl shadow-gray-200/50 sm:rounded-xl sm:px-10 border border-gray-100">
           <form className="space-y-6" onSubmit={handleSubmit}>
+            {!error && authMessage && (
+              <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-md">
+                <p className="text-sm text-amber-800 font-medium">{authMessage}</p>
+              </div>
+            )}
+
             {error && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md">
                 <p className="text-sm text-red-700 font-medium">{error}</p>

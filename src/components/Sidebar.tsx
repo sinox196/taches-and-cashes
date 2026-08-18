@@ -8,13 +8,14 @@ import {
   Receipt,
   Users2,
   BarChart3,
-  Settings,
   ChevronRight,
   ShieldAlert,
+  Layers,
   Globe
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { DASHBOARD_ROLES } from '../constants/roles';
 
 interface SidebarProps {
   activeItem?: string;
@@ -30,10 +31,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { t, language, setLanguage } = useLanguage();
   
   const mainNavItems = [
-    ...((user?.role === 'ADMIN' || user?.role === 'SUPERVISEUR') ? [{ id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false }] : []),
+    ...(DASHBOARD_ROLES.includes(user?.role ?? '') ? [{ id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false }] : []),
     ...(hasPermission('VIEW_CLIENTS') ? [{ id: 'Clients', label: t('nav.clients'), icon: Users, hasChevron: false }] : []),
     { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
-    { id: 'Invoicing', label: t('nav.invoicing'), icon: Receipt, hasChevron: true },
+    ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
+    ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Cash', icon: Receipt, hasChevron: false }] : []),
     ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: Users2, hasChevron: true }] : []),
     ...(user?.role === 'ADMIN' ? [{ id: 'Reports', label: t('nav.reports'), icon: BarChart3, hasChevron: false }] : []),
   ];
@@ -87,11 +89,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Bottom Settings Navigation */}
+      {/* Bottom bar — the Settings page was removed; the employer-cost
+          configuration now lives entirely in the user form. */}
       <div className="p-4 mt-auto">
-        <div className="flex items-center gap-2 mb-4 px-2">
+        <div className="flex items-center gap-2 px-2">
            <Globe className="w-4 h-4 text-white/60" />
-           <select 
+           <select
              value={language}
              onChange={(e) => setLanguage(e.target.value as 'fr' | 'en')}
              className="bg-transparent text-[11px] text-white/80 focus:outline-none cursor-pointer"
@@ -100,17 +103,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
              <option value="en" className="text-black">EN</option>
            </select>
         </div>
-        <button
-          onClick={() => onSelectItem?.('Settings')}
-          className={`w-full flex items-center gap-3 py-2 text-[12px] font-medium transition-colors ${
-            activeItem === 'Settings'
-              ? 'text-white font-semibold'
-              : 'text-white/60 hover:text-white'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          <span className="truncate">Settings</span>
-        </button>
       </div>
     </aside>
   );

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Square, Play, Pause } from 'lucide-react';
 import { ActiveTimerState } from '../types';
-import { formatHHMMSS, formatVerboseDuration } from '../utils/formatters';
+import { formatHHMMSS, formatVerboseDuration, formatCostDT } from '../utils/formatters';
 import { useAuth } from '../context/AuthContext';
 
 interface ActiveTimerCardProps {
@@ -17,8 +17,11 @@ export const ActiveTimerCard: React.FC<ActiveTimerCardProps> = ({
   onPause,
   onStop,
 }) => {
-  const { client, task, elapsedSeconds, isRunning } = timerState;
-  const { hasPermission } = useAuth();
+  const { client, task, elapsedSeconds, isRunning, costRatePerHour } = timerState;
+  const { hasPermission, user } = useAuth();
+  // Employer cost (and the DT/h rate) is admin-only information.
+  const isAdmin = user?.role === 'ADMIN';
+  const liveCost = costRatePerHour == null ? null : (elapsedSeconds / 3600) * costRatePerHour;
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 flex flex-col md:flex-row items-center justify-between gap-6 font-sans">
@@ -43,6 +46,21 @@ export const ActiveTimerCard: React.FC<ActiveTimerCardProps> = ({
         <div className="text-[13px] text-gray-500 mt-1 font-medium">
           {formatVerboseDuration(elapsedSeconds)}
         </div>
+        {/* Live employer cost accruing for this task — admins only */}
+        {isAdmin && (
+          <div className="mt-2 text-[11px]">
+            {liveCost === null ? (
+              <span className="text-gray-400 italic" title="Aucun coût employeur configuré pour ce collaborateur">
+                Coût employeur non configuré
+              </span>
+            ) : (
+              <span className="text-gray-600">
+                <span className="font-bold text-gray-900">{formatCostDT(liveCost)}</span>
+                <span className="text-gray-400"> · {costRatePerHour!.toFixed(3)} DT/h</span>
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Far Right: Action Buttons */}

@@ -5,6 +5,8 @@ import { KPICards } from './KPICards';
 import { EmployeeTable } from './EmployeeTable';
 import { DashboardCharts } from './DashboardCharts';
 import { EmployeeDetailsModal } from './EmployeeDetailsModal';
+import { EmployeeTasksModal } from './EmployeeTasksModal';
+import { ClientBreakdown } from './ClientBreakdown';
 import { MultiSelectAutocomplete } from './MultiSelectAutocomplete';
 
 
@@ -33,6 +35,7 @@ export const AdminDashboard: React.FC = () => {
   const [selectedClients, setSelectedClients] = useState<{id: number, name: string}[]>([]);
 
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
+  const [tasksEmployee, setTasksEmployee] = useState<any>(null);
 
 
 
@@ -123,14 +126,40 @@ export const AdminDashboard: React.FC = () => {
         {stats && (
           <>
             <KPICards stats={stats.globalStats} />
+            <ClientBreakdown
+              clients={stats.clientStats}
+              filters={{
+                startDate,
+                endDate,
+                filterUserIds: selectedUsers.map(u => u.id),
+                filterClientIds: selectedClients.map(c => c.id),
+              }}
+            />
             <DashboardCharts employees={stats.employeeStats} />
-            <EmployeeTable employees={stats.employeeStats} onRowClick={setSelectedEmployee} />
+            <EmployeeTable
+              employees={stats.employeeStats}
+              onRowClick={setSelectedEmployee}
+              onClientsClick={setTasksEmployee}
+            />
           </>
         )}
       </main>
       
       {selectedEmployee && (
         <EmployeeDetailsModal employee={selectedEmployee} onClose={() => setSelectedEmployee(null)} />
+      )}
+
+      {tasksEmployee && (
+        <EmployeeTasksModal
+          employee={tasksEmployee}
+          filters={{
+            startDate,
+            endDate,
+            filterUserIds: selectedUsers.map(u => u.id),
+            filterClientIds: selectedClients.map(c => c.id),
+          }}
+          onClose={() => setTasksEmployee(null)}
+        />
       )}
     </div>
   );

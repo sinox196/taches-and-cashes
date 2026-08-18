@@ -1,10 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { User, Shield, ArrowUpDown, ArrowUp, ArrowDown, Clock, DollarSign, ListFilter } from 'lucide-react';
 import { formatDurationHoursMinutes, formatCostTND } from '../../utils/formatters';
+import { roleMeta, roleLabel } from '../../constants/roles';
+import { useAuth } from '../../context/AuthContext';
 
 interface EmployeeTableProps {
   employees: any[];
   onRowClick: (emp: any) => void;
+  /** Drill into the tasks behind an employee's "Clients traités" figure. */
+  onClientsClick?: (emp: any) => void;
 }
 
 type SortField = 
@@ -24,7 +28,9 @@ type SortField =
 
 type SortDirection = 'asc' | 'desc';
 
-export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowClick }) => {
+export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowClick, onClientsClick }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [sortField, setSortField] = useState<SortField>('duration');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -84,8 +90,8 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
           valB = b.leaves?.daysTaken || 0;
           break;
         case 'leavesRemaining':
-          valA = Math.max(0, (a.leaves?.balance?.available || 0) - (a.leaves?.daysTaken || 0));
-          valB = Math.max(0, (b.leaves?.balance?.available || 0) - (b.leaves?.daysTaken || 0));
+          valA = a.leaves?.balance?.available ?? 0;
+          valB = b.leaves?.balance?.available ?? 0;
           break;
         case 'authorizations':
           valA = a.authorizations?.total || 0;
@@ -136,7 +142,7 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
             className="text-[12px] bg-gray-50 border border-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer font-medium"
           >
             <option value="duration">Durée totale</option>
-            <option value="cost">Coût total</option>
+            {isAdmin && <option value="cost">Coût employeur</option>}
             <option value="tasks">Nombre de tâches</option>
             <option value="completed">Tâches terminées</option>
             <option value="clients">Nombre de clients</option>
@@ -207,12 +213,14 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
               >
                 Durée totale {renderSortIcon('duration')}
               </th>
-              <th 
-                onClick={() => handleSort('cost')}
-                className="px-4 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center bg-emerald-50/40"
-              >
-                Coût total {renderSortIcon('cost')}
-              </th>
+              {isAdmin && (
+                <th
+                  onClick={() => handleSort('cost')}
+                  className="px-4 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center bg-emerald-50/40"
+                >
+                  Coût employeur {renderSortIcon('cost')}
+                </th>
+              )}
               <th 
                 onClick={() => handleSort('leavesTaken')}
                 className="px-3 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center"
@@ -248,8 +256,9 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
               const formattedCost = emp.totalCostFormatted ?? formatCostTND(rawCost);
 
               const daysTaken = emp.leaves?.daysTaken || 0;
-              const totalAvailable = emp.leaves?.balance?.available || 0;
-              const remainingDays = Math.max(0, totalAvailable - daysTaken);
+              // `available` is already net of days taken — subtracting daysTaken
+              // again here used to double-count and understate the remainder.
+              const remainingDays = emp.leaves?.balance?.available ?? 0;
 
               return (
                 <tr 
@@ -260,24 +269,20 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                   {/* Collaborateur */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${emp.role === 'SUPERVISEUR' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {emp.role === 'SUPERVISEUR' ? <Shield className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${roleMeta(emp.role).badgeClass}`}>
+                        {roleMeta(emp.role).hasShield ? <Shield className="w-4 h-4" /> : <User className="w-4 h-4" />}
                       </div>
                       <div>
                         <div className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">{emp.name}</div>
-                        <div className="text-[11px] text-gray-400">{emp.department && emp.department !== 'N/A' ? emp.department : (emp.role === 'SUPERVISEUR' ? 'Superviseur' : 'Collaborateur')}</div>
+                        <div className="text-[11px] text-gray-400">{emp.department && emp.department !== 'N/A' ? emp.department : roleLabel(emp.role)}</div>
                       </div>
                     </div>
                   </td>
 
                   {/* Rôle */}
                   <td className="px-3 py-3 text-center">
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                      emp.role === 'SUPERVISEUR' 
-                        ? 'bg-amber-50 text-amber-700 border border-amber-200' 
-                        : 'bg-blue-50 text-blue-700 border border-blue-200'
-                    }`}>
-                      {emp.role === 'SUPERVISEUR' ? 'Superviseur' : 'Collaborateur'}
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium border border-current/20 ${roleMeta(emp.role).badgeClass}`}>
+                      {roleLabel(emp.role)}
                     </span>
                   </td>
 
@@ -293,8 +298,18 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                   {/* Paused */}
                   <td className="px-3 py-3 text-center font-medium text-gray-500">{emp.tasks?.paused || 0}</td>
 
-                  {/* Clients */}
-                  <td className="px-3 py-3 text-center font-semibold text-blue-600">{emp.clients?.totalHandled || 0}</td>
+                  {/* Clients traités — click to see which tasks, and their status */}
+                  <td className="px-3 py-3 text-center">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onClientsClick?.(emp); }}
+                      disabled={!(emp.clients?.totalHandled)}
+                      title={emp.clients?.totalHandled ? 'Voir les tâches réalisées et leur statut' : 'Aucun client traité'}
+                      className="font-semibold text-blue-600 underline decoration-dotted underline-offset-4 hover:text-blue-800 disabled:text-gray-400 disabled:no-underline disabled:cursor-default"
+                    >
+                      {emp.clients?.totalHandled || 0}
+                    </button>
+                  </td>
 
                   {/* Durée totale */}
                   <td className="px-4 py-3 text-center font-bold text-gray-900 bg-blue-50/20">
@@ -303,12 +318,31 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                     </span>
                   </td>
 
-                  {/* Coût total */}
-                  <td className="px-4 py-3 text-center font-bold text-gray-900 bg-emerald-50/20">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-50 text-emerald-900 font-semibold text-[12px]">
-                      {formattedCost}
-                    </span>
-                  </td>
+                  {/* Coût employeur — each task at the rate in force when it was logged */}
+                  {isAdmin && (
+                    <td className="px-4 py-3 text-center font-bold text-gray-900 bg-emerald-50/20">
+                      {emp.pricedTasks === 0 ? (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded bg-gray-100 text-gray-400 font-medium text-[12px]"
+                          title="Aucune tâche chiffrée : renseignez le salaire brut et le régime horaire de ce collaborateur."
+                        >
+                          Non configuré
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-50 text-emerald-900 font-semibold text-[12px]"
+                          title={
+                            `Somme des tâches, chacune au taux en vigueur lors de sa saisie.` +
+                            (emp.hourlyRate != null ? ` Taux actuel : ${emp.hourlyRate.toFixed(3)} DT/h.` : '') +
+                            (emp.unpricedTasks ? ` ${emp.unpricedTasks} tâche(s) non chiffrée(s).` : '')
+                          }
+                        >
+                          {formattedCost}
+                          {emp.unpricedTasks > 0 && <span className="ml-1 text-amber-600">*</span>}
+                        </span>
+                      )}
+                    </td>
+                  )}
 
                   {/* Congés pris */}
                   <td className="px-3 py-3 text-center font-medium text-gray-700">

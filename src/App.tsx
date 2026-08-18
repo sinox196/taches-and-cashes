@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ActiveTimerCard } from './components/ActiveTimerCard';
@@ -10,8 +10,10 @@ import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { UsersManagement } from './components/UsersManagement';
 import { ClientsManagement } from './components/clients/ClientsManagement';
 import { HRManagement } from './components/hr/HRManagement';
-import { SettingsPage } from './components/Settings';
+import { MissionsManagement } from './components/missions/MissionsManagement';
+import { CashManagement } from './components/cash/CashManagement';
 import { useAuth } from './context/AuthContext';
+import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
 import { Loader2 } from 'lucide-react';
 
@@ -29,83 +31,136 @@ import {
 export default function App() {
   const { user, token, isLoading, hasPermission } = useAuth();
   
-  const [activeSidebarItem, setActiveSidebarItem] = useState('Time Tracking');
+  // Remember the current section so a refresh (or anything that remounts the
+  // app) leaves you where you were instead of bouncing back to Pointage.
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Missions', 'Cash', 'HR', 'Reports', 'Users'];
+  const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
+    const saved = localStorage.getItem('active_nav');
+    return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('active_nav', activeSidebarItem);
+  }, [activeSidebarItem]);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [clientsList, setClientsList] = useState<any[]>([]);
   const [servicesList, setServicesList] = useState<any[]>([]);
+  const [taskTypesList, setTaskTypesList] = useState<any[]>([]);
+  /** Entries that exist server-side, of which the table holds the most recent page. */
+  const [totalEntries, setTotalEntries] = useState<number | null>(null);
 
   useEffect(() => {
     if (token) {
-      fetch('/api/clients', { headers: { 'Authorization': `Bearer ${token}` } })
-        .then(res => res.json())
-        .then(data => {
-          if (Array.isArray(data)) setClientsList(data);
-        }).catch(console.error);
-
+      // Clients are NOT preloaded: with hundreds of them this fetch ran on
+      // every navigation just to feed one autocomplete. NewTaskCard queries
+      // /api/clients?q= as you type instead.
       fetch('/api/services', { headers: { 'Authorization': `Bearer ${token}` } })
         .then(res => res.json())
         .then(data => {
           if (Array.isArray(data)) setServicesList(data);
         }).catch(console.error);
+
+      fetch('/api/task-types', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) setTaskTypesList(data);
+        }).catch(console.error);
     }
-  }, [token, activeSidebarItem]); 
+  }, [token, activeSidebarItem]);
+
+  // Cost comes from the collaborator's employer hourly cost. When they have
+  // none configured we show a dash rather than pricing the work at a guess.
+  const decorate = (entry: any): TimeEntry => ({
+    ...entry,
+    duree: formatVerboseDuration(entry.dureeSeconds || 0),
+    coutCalcule:
+      entry.hourlyRate == null
+        ? '—'
+        : calculateCostDT(entry.dureeSeconds || 0, entry.hourlyRate),
+  });
+
+  // The server returns a capped, newest-first page plus the overall total, so a
+  // large history never lands in one payload.
+  const fetchTimeEntries = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/time-entries', { headers: { 'Authorization': `Bearer ${token}` } });
+      const body = await res.json();
+      const rows = Array.isArray(body) ? body : (body.data ?? []);
+      setTimeEntries(rows.map(decorate));
+      if (!Array.isArray(body) && typeof body.total === 'number') setTotalEntries(body.total);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [token]);
 
   useEffect(() => {
     if (!token || activeSidebarItem !== 'Time Tracking') return;
-    
-    // Initial fetch to avoid SSE delay
-    fetch('/api/time-entries', { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          const formatted = data.map((e: any) => ({
-             ...e,
-             duree: formatVerboseDuration(e.dureeSeconds || 0),
-             coutCalcule: calculateCostDT(e.dureeSeconds || 0, e.hourlyRate || 5.812)
-          }));
-          setTimeEntries(formatted);
-        }
-      }).catch(console.error);
 
-    const source = new EventSource(`/api/time-entries/stream?token=${token}`);
-    
-    source.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setTimeEntries(prev => {
-          return data.map((serverEntry: any) => {
-            if (serverEntry.statut === 'RUNNING') {
-              const local = prev.find(e => e.id === serverEntry.id);
-              // if we already have it running locally, keep our local seconds if it's within a reasonable drift (e.g. 5s) to avoid UI stutter
-              if (local && local.statut === 'RUNNING') {
-                if (Math.abs(local.dureeSeconds - serverEntry.dureeSeconds) < 5) {
-                   return { ...serverEntry, dureeSeconds: local.dureeSeconds, duree: local.duree, coutCalcule: local.coutCalcule };
+    let closed = false;
+    let source: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retries = 0;
+
+    // Initial fetch to avoid SSE delay
+    fetchTimeEntries();
+
+    const connect = () => {
+      if (closed) return;
+      source = new EventSource(`/api/time-entries/stream?token=${token}`);
+
+      source.onopen = () => {
+        retries = 0;
+      };
+
+      source.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          const data = Array.isArray(payload) ? payload : (payload.data ?? []);
+          if (!Array.isArray(payload) && typeof payload.total === 'number') setTotalEntries(payload.total);
+          setTimeEntries(prev => {
+            return data.map((serverEntry: any) => {
+              if (serverEntry.statut === 'RUNNING') {
+                const local = prev.find(e => e.id === serverEntry.id);
+                // if we already have it running locally, keep our local seconds if it's within a reasonable drift (e.g. 5s) to avoid UI stutter
+                if (local && local.statut === 'RUNNING') {
+                  if (Math.abs(local.dureeSeconds - serverEntry.dureeSeconds) < 5) {
+                     return { ...serverEntry, dureeSeconds: local.dureeSeconds, duree: local.duree, coutCalcule: local.coutCalcule };
+                  }
                 }
               }
-            }
-            return {
-               ...serverEntry, 
-               duree: formatVerboseDuration(serverEntry.dureeSeconds || 0),
-               coutCalcule: calculateCostDT(serverEntry.dureeSeconds || 0, serverEntry.hourlyRate || 5.812)
-            };
+              return decorate(serverEntry);
+            });
           });
-        });
-      } catch (e) {
-        console.error('SSE Error:', e);
-      }
+        } catch (e) {
+          console.error('SSE Error:', e);
+        }
+      };
+
+      // The stream dying used to leave the UI frozen on stale data: the local
+      // 1s tick kept counting while pause/stop never made it back to the
+      // screen. Always reconnect (with backoff) and resync on reconnect.
+      source.onerror = () => {
+        if (closed) return;
+        source?.close();
+        source = null;
+        const delay = Math.min(1000 * 2 ** retries, 15000);
+        retries += 1;
+        retryTimer = setTimeout(() => {
+          fetchTimeEntries();
+          connect();
+        }, delay);
+      };
     };
-    source.onerror = (e) => {
-      console.error('SSE Connection Error:', e);
-      source.close();
-      setTimeout(() => {
-        // Try to reconnect? For now just let it be or it reconnects automatically
-      }, 5000);
-    }
+
+    connect();
 
     return () => {
-      source.close();
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      source?.close();
     };
-  }, [token, activeSidebarItem]);
+  }, [token, activeSidebarItem, fetchTimeEntries]);
 
   const [isNewTaskCardOpen, setIsNewTaskCardOpen] = useState<boolean>(true);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
@@ -122,7 +177,10 @@ export default function App() {
               ...entry,
               dureeSeconds: nextSecs,
               duree: formatVerboseDuration(nextSecs),
-              coutCalcule: calculateCostDT(nextSecs, entry.hourlyRate || 5.812)
+              coutCalcule:
+                entry.hourlyRate == null
+                  ? '—'
+                  : calculateCostDT(nextSecs, entry.hourlyRate)
             };
           }
           return entry;
@@ -138,8 +196,11 @@ export default function App() {
   };
 
   const updateTimeEntryApi = async (id: string, updates: Partial<TimeEntry>) => {
+    // Apply locally first so PAUSE / ARRÊTER stop the on-screen chronometer
+    // immediately, even if the SSE stream is momentarily down.
+    setTimeEntries(prev => prev.map(e => (e.id === id ? { ...e, ...updates } : e)));
     try {
-      await fetch(`/api/time-entries/${id}`, {
+      const res = await fetch(`/api/time-entries/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -147,8 +208,14 @@ export default function App() {
         },
         body: JSON.stringify(updates)
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const saved = await res.json();
+      setTimeEntries(prev => prev.map(e => (e.id === id ? decorate({ ...e, ...saved }) : e)));
     } catch (e) {
       console.error(e);
+      // Roll back to whatever the server actually holds.
+      showToast("Échec de l'enregistrement, resynchronisation…");
+      fetchTimeEntries();
     }
   }
 
@@ -166,7 +233,7 @@ export default function App() {
     startTime: myRunningEntry.heureDebut,
     elapsedSeconds: myRunningEntry.dureeSeconds,
     isRunning: myRunningEntry.statut === 'RUNNING',
-    costRatePerHour: myRunningEntry.hourlyRate || 5.812,
+    costRatePerHour: myRunningEntry.hourlyRate ?? null,
   } : {
     client: '-',
     task: '-',
@@ -174,15 +241,13 @@ export default function App() {
     startTime: '00:00:00',
     elapsedSeconds: 0,
     isRunning: false,
-    costRatePerHour: 5.812,
+    costRatePerHour: null,
   };
 
   const handleStopTimer = () => {
     if (myRunningEntry) {
-      updateTimeEntryApi(myRunningEntry.id, {
-        statut: 'COMPLETED',
-        heureFin: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-      });
+      // heureFin is stamped server-side when the task actually completes.
+      updateTimeEntryApi(myRunningEntry.id, { statut: 'COMPLETED' });
       showToast('Chronomètre arrêté et enregistré.');
     }
   };
@@ -201,7 +266,15 @@ export default function App() {
     }
   };
 
-  const handleStartNewTask = async (client: string, service: string, description: string, clientId?: number, serviceId?: number) => {
+  const handleStartNewTask = async (
+    client: string,
+    service: string,
+    description: string,
+    clientId?: number,
+    serviceId?: number,
+    taskType?: string,
+    taskTypeId?: number
+  ) => {
     if (myRunningEntry) {
       await updateTimeEntryApi(myRunningEntry.id, {
         statut: myRunningEntry.statut === 'RUNNING' ? 'COMPLETED' : myRunningEntry.statut
@@ -209,22 +282,18 @@ export default function App() {
     }
 
     const newId = `row-${Date.now()}`;
-    const todayStr = new Date().toLocaleDateString('fr-FR');
-    const nowTimeStr = new Date().toLocaleTimeString('fr-FR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
 
+    // date / heureDebut are stamped server-side (single clock, single format),
+    // and heureFin stays empty until the task is actually completed.
     const newEntry = {
       id: newId,
-      date: todayStr,
       client: client,
       clientId: clientId,
       description: description,
       pole: service,
       serviceId: serviceId,
-      heureDebut: nowTimeStr,
-      heureFin: nowTimeStr,
+      taskType: taskType,
+      taskTypeId: taskTypeId,
       duree: '0h 0m 0s',
       dureeSeconds: 0,
       coutCalcule: '0,000 DT',
@@ -232,7 +301,7 @@ export default function App() {
     };
 
     try {
-      await fetch('/api/time-entries', {
+      const res = await fetch('/api/time-entries', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -240,29 +309,50 @@ export default function App() {
         },
         body: JSON.stringify(newEntry)
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const saved = await res.json();
+      // The SSE broadcast can beat this response, so merge instead of prepending
+      // blindly — otherwise the entry lands twice and React sees duplicate keys.
+      setTimeEntries(prev => prev.some(e => e.id === saved.id)
+        ? prev.map(e => (e.id === saved.id ? decorate({ ...e, ...saved }) : e))
+        : [decorate({ ...saved, userName: user?.username }), ...prev]);
       showToast(`Nouvelle tâche démarrée : ${client}`);
     } catch (e) {
       console.error(e);
+      showToast('Impossible de démarrer la tâche.');
+      fetchTimeEntries();
     }
   };
 
   const handleDeleteEntry = async (id: string) => {
+    setTimeEntries(prev => prev.filter(e => e.id !== id));
     try {
-      await fetch(`/api/time-entries/${id}`, {
+      const res = await fetch(`/api/time-entries/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showToast('Activité supprimée avec succès.');
     } catch (e) {
       console.error(e);
+      showToast('Échec de la suppression, resynchronisation…');
+      fetchTimeEntries();
     }
   };
 
   const handleSaveEdit = async (updated: TimeEntry) => {
     await updateTimeEntryApi(updated.id, updated);
     showToast('Activité mise à jour.');
+  };
+
+  // Admin acting on someone else's task: set the status directly, without
+  // touching the admin's own running timer.
+  const handleAdminChangeStatus = async (entry: TimeEntry, statut: TimeEntry['statut']) => {
+    await updateTimeEntryApi(entry.id, { statut });
+    const label = statut === 'PAUSED' ? 'mise en pause' : statut === 'RUNNING' ? 'reprise' : 'clôturée';
+    showToast(`Tâche de ${entry.userName || 'collaborateur'} ${label}.`);
   };
 
   const handleSelectAsActive = async (entry: TimeEntry) => {
@@ -298,13 +388,17 @@ export default function App() {
         <Header userCode="ABA01" userName="Alexandre Dupont" />
         
         
-        {activeSidebarItem === 'Dashboard' && (hasPermission('ADMIN') || user?.role === 'ADMIN' || user?.role === 'SUPERVISEUR') ? (
+        {activeSidebarItem === 'Dashboard' && (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? (
           <AdminDashboard />
         ) : activeSidebarItem === 'Users' && hasPermission('MANAGE_USERS') ? (
 
           <UsersManagement />
         ) : activeSidebarItem === 'Clients' ? (
           <ClientsManagement />
+        ) : activeSidebarItem === 'Missions' && hasPermission('MANAGE_SERVICES') ? (
+          <MissionsManagement />
+        ) : activeSidebarItem === 'Cash' && hasPermission('VIEW_CASH') ? (
+          <CashManagement />
         ) : activeSidebarItem === 'HR' && hasPermission('VIEW_HR') ? (
           <HRManagement />
         ) : activeSidebarItem === 'Time Tracking' ? (
@@ -333,8 +427,8 @@ export default function App() {
               <div className="md:w-80 shrink-0">
                 {hasPermission('EDIT') && !myRunningEntry && (
                   <NewTaskCard
-                    clients={clientsList.length > 0 ? clientsList : INITIAL_CLIENTS}
                     services={servicesList}
+                    taskTypes={taskTypesList}
                     onStartNewTask={handleStartNewTask}
                     isOpen={isNewTaskCardOpen}
                     onToggleOpen={() => setIsNewTaskCardOpen((prev) => !prev)}
@@ -344,6 +438,11 @@ export default function App() {
                           .then(res => res.json())
                           .then(data => {
                             if (Array.isArray(data)) setServicesList(data);
+                          }).catch(console.error);
+                        fetch('/api/task-types', { headers: { 'Authorization': `Bearer ${token}` } })
+                          .then(res => res.json())
+                          .then(data => {
+                            if (Array.isArray(data)) setTaskTypesList(data);
                           }).catch(console.error);
                       }
                     }}
@@ -371,11 +470,11 @@ export default function App() {
                 onDelete={handleDeleteEntry}
                 onMore={(entry) => showToast(`Options pour ${entry.client}`)}
                 onSelectAsActive={handleSelectAsActive}
+                onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
+                totalEntries={totalEntries ?? undefined}
               />
             )}
           </main>
-        ) : activeSidebarItem === 'Settings' ? (
-          <SettingsPage />
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">
             Cette section ({activeSidebarItem}) est en cours de développement.

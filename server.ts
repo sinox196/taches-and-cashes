@@ -1,11 +1,107 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { initDb } from './src/server/database.js';
+import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
+import { STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-local-dev';
+
+/** DD/MM/YYYY — the format time entries are stored and grouped by. */
+const formatDateFR = (d: Date) =>
+  `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+
+/** HH:mm, 24h. */
+const formatTimeFR = (d: Date) =>
+  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+/** Users are stored with `permissions` JSON-stringified; the API always returns an array. */
+const publicUser = (u: any) => {
+  const { password, permissions, ...rest } = u;
+  return { ...rest, permissions: JSON.parse(permissions || '[]') };
+};
+
+const num = (v: any, fallback: number) => (typeof v === 'number' ? v : fallback);
+
+/** Attaches the admin-set annual leave allowance and its consumption to a user payload. */
+const withLeaveBalance = (user: any, balances: any[]) => {
+  const b = balances.find((x: any) => x.userId === user.id);
+  const entitlement = b ? b.entitlement : DEFAULT_LEAVE_ENTITLEMENT;
+  const used = b ? b.used : 0;
+  return { ...user, soldeConge: entitlement, congesUtilises: used, congesRestants: entitlement - used };
+};
+
+/**
+ * The employer hourly cost of a collaborator:
+ *
+ *   charges = salaireBrut * (CNSS + TFP + FOPROLOS + accident) / 100
+ *   total   = salaireBrut + charges + primes non cotisables
+ *   rate    = total / (regimeHoraire * 4.33)
+ *
+ * Percentages fall back to the global defaults when not overridden per user.
+ * Returns `null` when the collaborator has no salary configured — callers must
+ * NOT substitute a placeholder: an invented cost is worse than no cost.
+ */
+const employerHourlyRate = (user: any, settings: any): number | null => {
+  if (!user) return null;
+  if (typeof user.coutHoraireEmployeur === 'number' && user.coutHoraireEmployeur > 0) {
+    return user.coutHoraireEmployeur;
+  }
+  const salaire = num(user.salaireBrut, 0);
+  const regime = num(user.regimeHoraire, 0);
+  if (salaire <= 0 || regime <= 0) return null;
+
+  const g = settings?.employerCharges ?? {};
+  const pct =
+    num(user.cnss, num(g.cnss, 16.57)) +
+    num(user.tfp, num(g.tfp, 2)) +
+    num(user.foprolos, num(g.foprolos, 1)) +
+    num(user.accidentTravail, num(g.accidentTravail, 0.5));
+
+  const total = salaire + salaire * (pct / 100) + num(user.primesFraisNonCotisables, 0);
+  const heuresMensuelles = regime * 4.33;
+  return heuresMensuelles > 0 ? total / heuresMensuelles : null;
+};
+
+/** DD/MM/YYYY (how entries are stored) → epoch ms. */
+const parseFrenchDateTs = (dateStr: string) => {
+  if (!dateStr) return 0;
+  const parts = dateStr.split('/');
+  if (parts.length === 3) return new Date(`${parts[2]}-${parts[1]}-${parts[0]}T00:00:00Z`).getTime();
+  return 0;
+};
+
+/**
+ * The dashboard's date / collaborator / client filters, in one place so the
+ * summary endpoint and the per-client drill-down apply exactly the same rules.
+ */
+const filterKpiEntries = (entries: any[], body: any) => {
+  const startTs = body?.startDate ? new Date(body.startDate).getTime() : 0;
+  const endTs = body?.endDate ? new Date(body.endDate).getTime() + 86400000 - 1 : Infinity;
+  const userIds: any[] = body?.filterUserIds || [];
+  const clientIds: any[] = body?.filterClientIds || [];
+  return entries.filter((t: any) => {
+    const ts = parseFrenchDateTs(t.date);
+    if (ts < startTs || ts > endTs) return false;
+    if (userIds.length > 0 && !userIds.includes(t.userId)) return false;
+    if (clientIds.length > 0 && !clientIds.includes(t.clientId)) return false;
+    return true;
+  });
+};
+
+/** Bucket key used to group entries by client (falls back to the stored name). */
+const clientBucketKey = (t: any) =>
+  t.clientId != null ? String(t.clientId) : `name:${t.client || 'Sans client'}`;
+
+/** Seconds a task has accrued, including the currently-running stretch. */
+const accruedSeconds = (t: any) => {
+  let s = t.dureeSeconds || 0;
+  if (t.statut === 'RUNNING' && t.lastStartedAt) {
+    s += Math.floor((Date.now() - t.lastStartedAt) / 1000);
+  }
+  return s;
+};
 
 async function startServer() {
   const app = express();
@@ -146,23 +242,10 @@ async function startServer() {
   app.get('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const users = await db.getAllUsers();
-      // Don't send passwords to client
-      const safeUsers = users.map((u: any) => ({
-        id: u.id,
-        username: u.username,
-        role: u.role,
-        permissions: JSON.parse(u.permissions),
-        salaireBrut: u.salaireBrut,
-        regimeHoraire: u.regimeHoraire,
-        cnss: u.cnss,
-        tfp: u.tfp,
-        foprolos: u.foprolos,
-        accidentTravail: u.accidentTravail,
-        primesFraisNonCotisables: u.primesFraisNonCotisables,
-        coutTotalEmployeur: u.coutTotalEmployeur,
-        coutHoraireEmployeur: u.coutHoraireEmployeur
-      }));
-      res.json(safeUsers);
+      const balances = await db.getAllLeaveBalances();
+      // Don't send passwords to client. Same shape as POST/PUT responses so the
+      // list can be updated in place after a create/edit.
+      res.json(users.map((u: any) => withLeaveBalance(publicUser(u), balances)));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -171,8 +254,8 @@ async function startServer() {
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables } = req.body;
-      
+      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge } = req.body;
+
       const existing = await db.get('SELECT * FROM users WHERE username = ?', username);
       if (existing) {
         return res.status(400).json({ error: 'Username already exists' });
@@ -209,9 +292,15 @@ async function startServer() {
         coutHoraireEmployeur
       });
       
-      const { password: _, ...userWithoutPassword } = newUser;
-      res.json(userWithoutPassword);
+      // The admin sets the annual leave allowance from this same form.
+      await db.updateLeaveBalance(newUser.id, {
+        entitlement: num(soldeConge, DEFAULT_LEAVE_ENTITLEMENT),
+        used: 0,
+      });
+
+      res.json(withLeaveBalance(publicUser(newUser), await db.getAllLeaveBalances()));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -219,7 +308,7 @@ async function startServer() {
   app.put('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables } = req.body;
+      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge } = req.body;
       
       const simSalaire = typeof salaireBrut === 'number' ? salaireBrut : 0;
       const simRegime = typeof regimeHoraire === 'number' ? regimeHoraire : 0;
@@ -256,9 +345,14 @@ async function startServer() {
         return res.status(404).json({ error: 'User not found' });
       }
       
-      const { password: _, ...userWithoutPassword } = updatedUser;
-      res.json(userWithoutPassword);
+      // Changing the allowance never touches days already consumed.
+      if (typeof soldeConge === 'number') {
+        await db.updateLeaveBalance(id, { entitlement: soldeConge });
+      }
+
+      res.json(withLeaveBalance(publicUser(updatedUser), await db.getAllLeaveBalances()));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -415,7 +509,7 @@ async function startServer() {
 
 // --- KPI SEARCH ENDPOINTS ---
 app.get('/api/kpi/users/search', authenticate, async (req: any, res: any) => {
-  if (req.user.role !== 'ADMIN' && req.user.role !== 'SUPERVISEUR') {
+  if (!DASHBOARD_ROLES.includes(req.user.role)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const q = (req.query.q || '').toLowerCase();
@@ -432,7 +526,7 @@ app.get('/api/kpi/users/search', authenticate, async (req: any, res: any) => {
 });
 
 app.get('/api/kpi/clients/search', authenticate, async (req: any, res: any) => {
-  if (req.user.role !== 'ADMIN' && req.user.role !== 'SUPERVISEUR') {
+  if (!DASHBOARD_ROLES.includes(req.user.role)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const q = (req.query.q || '').toLowerCase();
@@ -444,9 +538,107 @@ app.get('/api/kpi/clients/search', authenticate, async (req: any, res: any) => {
   res.json(clients.slice(0, 10).map((c: any) => ({ id: c.id, name: c.name })));
 });
 
+/**
+ * Tasks behind one client's row on the dashboard, under the same filters.
+ * Loaded on expand so the summary payload stays small no matter how many
+ * clients and entries exist.
+ */
+app.post('/api/kpi/client-tasks', authenticate, async (req: any, res: any) => {
+  try {
+    if (!DASHBOARD_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { key } = req.body || {};
+    if (!key) return res.status(400).json({ error: 'A client key is required' });
+
+    const isAdminViewer = req.user.role === 'ADMIN';
+    const allUsers = await db.getAllUsers();
+    const usersById = new Map<number, any>(allUsers.map((u: any) => [u.id, u]));
+
+    const entries = filterKpiEntries(await db.getAllTimeEntries() || [], req.body)
+      .filter((t: any) => clientBucketKey(t) === String(key))
+      .sort((a: any, b: any) => accruedSeconds(b) - accruedSeconds(a));
+
+    const LIMIT = 200;
+    const truncated = Math.max(0, entries.length - LIMIT);
+
+    const tasks = entries.slice(0, LIMIT).map((t: any) => {
+      const secs = accruedSeconds(t);
+      const rate = typeof t.hourlyRate === 'number' ? t.hourlyRate : null;
+      const user = usersById.get(t.userId);
+      const row: any = {
+        id: t.id,
+        date: t.date,
+        userName: user ? (user.fullName || user.username) : 'Inconnu',
+        description: t.description || '',
+        mission: t.pole || '',
+        taskType: t.taskType || '',
+        statut: t.statut,
+        dureeSeconds: secs,
+        dureeFormatted: `${Math.floor(secs / 3600)}h${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}`,
+      };
+      if (isAdminViewer) row.cost = rate === null ? null : (secs / 3600) * rate;
+      return row;
+    });
+
+    res.json({ tasks, total: entries.length, truncated });
+  } catch (error) {
+    console.error('KPI client-tasks error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/** Tasks behind one collaborator, under the dashboard filters. Loaded on open. */
+app.post('/api/kpi/employee-tasks', authenticate, async (req: any, res: any) => {
+  try {
+    if (!DASHBOARD_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const userId = Number(req.body?.userId);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'A userId is required' });
+
+    const isAdminViewer = req.user.role === 'ADMIN';
+    const clients = await db.getAllClients() || [];
+    const clientsById = new Map<number, any>(clients.map((c: any) => [c.id, c]));
+
+    const entries = filterKpiEntries(await db.getAllTimeEntries() || [], req.body)
+      .filter((t: any) => t.userId === userId)
+      .sort((a: any, b: any) => accruedSeconds(b) - accruedSeconds(a));
+
+    const LIMIT = 200;
+    const truncated = Math.max(0, entries.length - LIMIT);
+
+    const tasks = entries.slice(0, LIMIT).map((t: any) => {
+      const secs = accruedSeconds(t);
+      const rate = typeof t.hourlyRate === 'number' ? t.hourlyRate : null;
+      const row: any = {
+        id: t.id,
+        date: t.date,
+        clientId: t.clientId ?? null,
+        client: (t.clientId != null ? clientsById.get(t.clientId)?.name : null) || t.client || 'Sans client',
+        description: t.description || '',
+        pole: t.pole || '',
+        taskType: t.taskType || '',
+        statut: t.statut,
+        heureDebut: t.heureDebut || '',
+        heureFin: t.heureFin || '',
+        dureeSeconds: secs,
+        dureeFormatted: `${Math.floor(secs / 3600)}h${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}`,
+      };
+      if (isAdminViewer) row.cost = rate === null ? null : (secs / 3600) * rate;
+      return row;
+    });
+
+    res.json({ tasks, total: entries.length, truncated });
+  } catch (error) {
+    console.error('KPI employee-tasks error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   try {
-    if (req.user.role !== 'ADMIN' && req.user.role !== 'SUPERVISEUR') {
+    if (!DASHBOARD_ROLES.includes(req.user.role)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -478,14 +670,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     let clients = await db.getAllClients() || [];
     let leaveBalances = await db.getAllLeaveBalances() || [];
 
-    // Filter time entries
-    timeEntries = timeEntries.filter((t: any) => {
-      const ts = parseFrenchDate(t.date);
-      if (ts < startTs || ts > endTs) return false;
-      if (filterUserIds && filterUserIds.length > 0 && !filterUserIds.includes(t.userId)) return false;
-      if (filterClientIds && filterClientIds.length > 0 && !filterClientIds.includes(t.clientId)) return false;
-      return true;
-    });
+    // Filter time entries (shared with the per-client drill-down endpoint)
+    timeEntries = filterKpiEntries(timeEntries, req.body);
 
     // Filter leave requests
     leaveRequests = leaveRequests.filter((l: any) => {
@@ -505,22 +691,38 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       return true;
     });
 
-    const employees = allUsers.filter((u: any) => u.role === 'COLLABORATOR' || u.role === 'SUPERVISEUR');
+    const employees = allUsers.filter((u: any) => STAFF_ROLES.includes(u.role));
     
-    const globalDurationSeconds = timeEntries.reduce((sum: number, t: any) => {
-      let s = t.dureeSeconds || 0;
-      if (t.statut === 'RUNNING' && t.lastStartedAt) {
-        s += Math.floor((Date.now() - t.lastStartedAt) / 1000);
-      }
-      return sum + s;
-    }, 0);
+    const kpiSettings = await db.getSettings();
+    const isAdminViewer = req.user.role === 'ADMIN';
 
+    // Index once instead of scanning allUsers/clients per task. With thousands
+    // of entries the repeated .find() calls were the dominant cost here.
+    const usersById = new Map<number, any>(allUsers.map((u: any) => [u.id, u]));
+    const clientsById = new Map<number, any>(clients.map((c: any) => [c.id, c]));
+    const userLabel = (id: number) => {
+      const u = usersById.get(id);
+      return u ? (u.fullName || u.username) : 'Inconnu';
+    };
+
+    // Each task is costed at the rate snapshotted when it was created, so a
+    // salary change only affects work logged after it.
+    const taskRate = (t: any) => (typeof t.hourlyRate === 'number' ? t.hourlyRate : null);
+    const taskCost = (t: any) => {
+      const rate = taskRate(t);
+      return rate === null ? null : (accruedSeconds(t) / 3600) * rate;
+    };
+
+    const globalDurationSeconds = timeEntries.reduce(
+      (sum: number, t: any) => sum + accruedSeconds(t), 0);
+
+    // Tasks logged while the collaborator had no employer cost configured are
+    // excluded rather than priced at a guess; `tasksWithoutRate` says how many.
+    let tasksWithoutRate = 0;
     const globalCost = timeEntries.reduce((sum: number, t: any) => {
-      let s = t.dureeSeconds || 0;
-      if (t.statut === 'RUNNING' && t.lastStartedAt) {
-        s += Math.floor((Date.now() - t.lastStartedAt) / 1000);
-      }
-      return sum + (s / 3600) * (t.hourlyRate || 5.812);
+      const c = taskCost(t);
+      if (c === null) { tasksWithoutRate++; return sum; }
+      return sum + c;
     }, 0);
     
     const gHours = Math.floor(globalDurationSeconds / 3600);
@@ -530,6 +732,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const globalStats = {
       totalCollaborators: employees.filter((u: any) => u.role === 'COLLABORATOR').length,
       totalSupervisors: employees.filter((u: any) => u.role === 'SUPERVISEUR').length,
+      totalHeadcount: employees.length,
+      // Headcount per role, so a newly added role shows up without a code change here.
+      headcountByRole: STAFF_ROLES.reduce((acc: Record<string, number>, roleId: string) => {
+        acc[roleId] = employees.filter((u: any) => u.role === roleId).length;
+        return acc;
+      }, {}),
       totalTasks: timeEntries.length,
       completedTasks: timeEntries.filter((t: any) => t.statut === 'COMPLETED').length,
       inProgressTasks: timeEntries.filter((t: any) => t.statut === 'RUNNING').length,
@@ -539,6 +747,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       totalDurationFormatted: `${gHours}h${String(gMins).padStart(2, '0')}`,
       totalCost: globalCost,
       totalCostFormatted: `${Math.round(globalCost).toLocaleString('fr-FR')} TND`,
+      tasksWithoutRate,
       activeLeaves: leaveRequests.filter((l: any) => l.status === 'APPROVED').length,
       activeAuthorizations: authorizations.filter((a: any) => a.status === 'APPROVED').length,
     };
@@ -553,21 +762,16 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const inProgressTasks = empTasks.filter((t: any) => t.statut === 'RUNNING').length;
       const pausedTasks = empTasks.filter((t: any) => t.statut === 'PAUSED').length;
 
-      const totalDurationSeconds = empTasks.reduce((sum: number, t: any) => {
-        let s = t.dureeSeconds || 0;
-        if (t.statut === 'RUNNING' && t.lastStartedAt) {
-          s += Math.floor((Date.now() - t.lastStartedAt) / 1000);
-        }
-        return sum + s;
-      }, 0);
+      const totalDurationSeconds = empTasks.reduce(
+        (sum: number, t: any) => sum + accruedSeconds(t), 0);
 
-      const totalCost = empTasks.reduce((sum: number, t: any) => {
-        let s = t.dureeSeconds || 0;
-        if (t.statut === 'RUNNING' && t.lastStartedAt) {
-          s += Math.floor((Date.now() - t.lastStartedAt) / 1000);
-        }
-        return sum + (s / 3600) * (t.hourlyRate || 5.812);
-      }, 0);
+      // Sum of each task at its own historical rate — not this person's current
+      // rate applied to all their hours.
+      const empUnpricedTasks = empTasks.filter((t: any) => taskCost(t) === null).length;
+      const empPricedTasks = empTasks.length - empUnpricedTasks;
+      const totalCost = empTasks.reduce((sum: number, t: any) => sum + (taskCost(t) ?? 0), 0);
+      // The rate in force *now* — what future tasks will be costed at.
+      const currentRate = employerHourlyRate(emp, kpiSettings);
       
       const eHours = Math.floor(totalDurationSeconds / 3600);
       const eMins = Math.floor((totalDurationSeconds % 3600) / 60);
@@ -584,7 +788,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       });
       
       const empLeaves = leaveRequests.filter((l: any) => l.userId === emp.id);
-      const balance = leaveBalances.find((b: any) => b.userId === emp.id) || { available: 18, used: 0 };
+      const balance = leaveBalances.find((b: any) => b.userId === emp.id)
+        || { entitlement: DEFAULT_LEAVE_ENTITLEMENT, used: 0, available: DEFAULT_LEAVE_ENTITLEMENT };
       
       const empAuths = authorizations.filter((a: any) => a.userId === emp.id);
       const totalAuthDuration = empAuths
@@ -592,7 +797,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         .reduce((sum: number, a: any) => sum + (a.duration || 0), 0);
 
       const clientListDetails = Array.from(empClients).map((cid: any) => {
-        const c = clients.find((client: any) => client.id === cid);
+        const c = clientsById.get(cid);
         return {
           id: cid,
           name: c ? c.name : 'Unknown',
@@ -600,6 +805,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         };
       });
 
+      // The per-task breakdown is NOT inlined: 40 collaborators × their history
+      // is the bulk of this payload. The drill-down modal loads it from
+      // /api/kpi/employee-tasks when it opens.
       return {
         id: emp.id,
         name: emp.fullName || emp.username,
@@ -609,6 +817,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         totalDurationFormatted,
         totalCost,
         totalCostFormatted,
+        // Rate that will apply to *new* tasks; null = not configured.
+        hourlyRate: currentRate,
+        pricedTasks: empPricedTasks,
+        unpricedTasks: empUnpricedTasks,
         tasks: {
           total: totalTasks,
           completed: completedTasks,
@@ -643,7 +855,80 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       };
     }).filter(Boolean);
 
-    res.json({ globalStats, employeeStats });
+    // ----- Per-client breakdown: cost, who worked on it, and what they did.
+    // Built from the same already-filtered `timeEntries`, so it always reflects
+    // the date / collaborator / client filters applied above.
+    const clientBuckets = new Map<string, any[]>();
+    timeEntries.forEach((t: any) => {
+      const key = clientBucketKey(t);
+      if (!clientBuckets.has(key)) clientBuckets.set(key, []);
+      clientBuckets.get(key)!.push(t);
+    });
+
+    const clientStats = [...clientBuckets.entries()].map(([key, entries]) => {
+      const first = entries[0];
+      const clientRecord = first.clientId != null ? clientsById.get(first.clientId) : null;
+
+      const durationSeconds = entries.reduce((s: number, t: any) => s + accruedSeconds(t), 0);
+      const unpricedTasks = entries.filter((t: any) => taskCost(t) === null).length;
+      const totalCost = entries.reduce((s: number, t: any) => s + (taskCost(t) ?? 0), 0);
+
+      // Who worked on this client, and how much each contributed.
+      const byUser = new Map<number, any[]>();
+      entries.forEach((t: any) => {
+        if (!byUser.has(t.userId)) byUser.set(t.userId, []);
+        byUser.get(t.userId)!.push(t);
+      });
+      const contributors = [...byUser.entries()].map(([userId, userEntries]) => {
+        const secs = userEntries.reduce((s: number, t: any) => s + accruedSeconds(t), 0);
+        const user = usersById.get(userId);
+        return {
+          userId,
+          name: user ? (user.fullName || user.username) : 'Inconnu',
+          role: user ? user.role : null,
+          taskCount: userEntries.length,
+          durationSeconds: secs,
+          durationFormatted: `${Math.floor(secs / 3600)}h${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}`,
+          cost: userEntries.reduce((s: number, t: any) => s + (taskCost(t) ?? 0), 0),
+        };
+      }).sort((a, b) => b.durationSeconds - a.durationSeconds);
+
+      // The task list is deliberately NOT included here. With hundreds of
+      // clients it would mean serialising the whole history on every dashboard
+      // load; the rows below fetch it from /api/kpi/client-tasks on expand.
+      return {
+        id: first.clientId ?? key,
+        key,
+        name: clientRecord ? clientRecord.name : (first.client || 'Sans client'),
+        taskCount: entries.length,
+        completedTasks: entries.filter((t: any) => t.statut === 'COMPLETED').length,
+        durationSeconds,
+        durationFormatted: `${Math.floor(durationSeconds / 3600)}h${String(Math.floor((durationSeconds % 3600) / 60)).padStart(2, '0')}`,
+        totalCost,
+        totalCostFormatted: `${Math.round(totalCost).toLocaleString('fr-FR')} TND`,
+        unpricedTasks,
+        contributors,
+      };
+    }).sort((a, b) => b.totalCost - a.totalCost || b.durationSeconds - a.durationSeconds);
+
+    if (isAdminViewer) {
+      return res.json({ globalStats, employeeStats, clientStats });
+    }
+
+    // Employer cost is admin-only. A supervisor still gets the whole dashboard,
+    // just without any money figures — stripped server-side, not merely hidden.
+    const stripCost = ({ totalCost, totalCostFormatted, hourlyRate, cost, ...rest }: any) => rest;
+    res.json({
+      globalStats: stripCost({ ...globalStats, tasksWithoutRate: undefined }),
+      employeeStats: employeeStats.map((e: any) => ({
+        ...stripCost(e),
+        tasks: stripCost(e.tasks),
+      })),
+      clientStats: clientStats.map((c: any) => ({
+        ...stripCost(c),
+        contributors: c.contributors.map(stripCost),
+      })),
+    });
   } catch (error) {
     console.error('KPI error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -796,6 +1081,337 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
+  // DELETE /api/services/:id — removes the mission and its types de tâches
+  app.delete('/api/services/:id', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const removed = await db.deleteService(id);
+      if (!removed) return res.status(404).json({ error: 'Service not found' });
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Types de tâches — each belongs to a mission (service)
+  // ---------------------------------------------------------
+
+  // GET /api/task-types[?serviceId=]
+  app.get('/api/task-types', authenticate, async (req: any, res: any) => {
+    try {
+      let taskTypes = await db.getAllTaskTypes();
+      if (req.query.serviceId) {
+        const sid = parseInt(req.query.serviceId, 10);
+        taskTypes = taskTypes.filter((t: any) => t.serviceId === sid);
+      }
+      res.json(taskTypes);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/task-types', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
+    try {
+      const { name, serviceId } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Task type name is required' });
+      }
+      const sid = parseInt(serviceId, 10);
+      if (!Number.isFinite(sid) || !(await db.getServiceById(sid))) {
+        return res.status(400).json({ error: 'A valid mission is required' });
+      }
+      const created = await db.createTaskType({
+        id: Date.now(),
+        name: name.trim(),
+        serviceId: sid,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(created);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/task-types/:id', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { name, serviceId } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Task type name is required' });
+      }
+      const updates: any = { name: name.trim(), updatedAt: new Date().toISOString() };
+      if (serviceId !== undefined) {
+        const sid = parseInt(serviceId, 10);
+        if (!Number.isFinite(sid) || !(await db.getServiceById(sid))) {
+          return res.status(400).json({ error: 'A valid mission is required' });
+        }
+        updates.serviceId = sid;
+      }
+      const updated = await db.updateTaskType(id, updates);
+      if (!updated) return res.status(404).json({ error: 'Task type not found' });
+      res.json(updated);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/task-types/:id', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const removed = await db.deleteTaskType(id);
+      if (!removed) return res.status(404).json({ error: 'Task type not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Cash / Facturation
+  // ---------------------------------------------------------
+
+  /**
+   * The totals cascade from the cahier des charges. Computed server-side so a
+   * stored document can never disagree with its own lines:
+   *   (3)=(1)+(2)   (5)=(3)*(4)   (7)=(3)-(5)+(6)   (10)=(7)+(8)-(9)
+   * Under "Suspension de TVA" no VAT is charged, so (2) is zero.
+   */
+  const computeInvoiceTotals = (invoice: any) => {
+    const suspended = invoice.vatRegime === 'SUSPENSION';
+    const lines = Array.isArray(invoice.lines) ? invoice.lines : [];
+
+    const round3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
+
+    let totalHT = 0;
+    const vatByRate = new Map<number, number>();
+    for (const line of lines) {
+      const ht = num(Number(line.montantHT), 0);
+      totalHT += ht;
+      const rate = suspended ? 0 : num(Number(line.vatRate), 0);
+      vatByRate.set(rate, (vatByRate.get(rate) || 0) + ht);
+    }
+
+    const vatBreakdown = [...vatByRate.entries()]
+      .filter(([rate]) => !suspended && rate > 0)
+      .map(([rate, base]) => ({ rate, base: round3(base), amount: round3(base * rate) }))
+      .sort((a, b) => a.rate - b.rate);
+
+    const totalHTr = round3(totalHT);
+    const totalVAT = round3(vatBreakdown.reduce((s, v) => s + v.amount, 0));
+    const totalTTC = round3(totalHTr + totalVAT);                                   // (3)
+    const withholdingRate = num(Number(invoice.withholdingRate), 0);                // (4)
+    const withholdingAmount = round3(totalTTC * withholdingRate);                   // (5)
+    const stampDuty = num(Number(invoice.stampDuty), 0);                            // (6)
+    const netToPay = round3(totalTTC - withholdingAmount + stampDuty);              // (7)
+    const disbursements = num(Number(invoice.disbursements), 0);                    // (8)
+    const advances = num(Number(invoice.advances), 0);                              // (9)
+    const totalNetToPay = round3(netToPay + disbursements - advances);              // (10)
+
+    return {
+      vatBreakdown,
+      totalHT: totalHTr,
+      totalVAT,
+      totalTTC,
+      withholdingRate,
+      withholdingAmount,
+      stampDuty,
+      netToPay,
+      disbursements,
+      advances,
+      totalNetToPay,
+    };
+  };
+
+  app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+    try {
+      const all = await db.getAllInvoices();
+      const q = String(req.query.q || '').toLowerCase();
+      const filtered = q
+        ? all.filter((i: any) =>
+            (i.number || '').toLowerCase().includes(q) ||
+            (i.clientName || '').toLowerCase().includes(q) ||
+            (i.title || '').toLowerCase().includes(q))
+        : all;
+      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+      const offset = parseInt(req.query.offset, 10) || 0;
+      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/invoices/:id', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+    try {
+      const invoice = await db.getInvoiceById(req.params.id);
+      if (!invoice) return res.status(404).json({ error: 'Document introuvable' });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Peek at the number the next document will get (display only; not reserved). */
+  app.get('/api/invoices/meta/next-number', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const settings = await db.getSettings();
+      const current = typeof settings.invoiceCounter === 'number' ? settings.invoiceCounter : 0;
+      const all = await db.getAllInvoices();
+      // The newest document's date bounds the next one (see the date rule below).
+      const last = all[0];
+      res.json({
+        nextNumber: String(current + 1).padStart(4, '0'),
+        lastIssueDate: last ? last.issueDate : null,
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/invoices', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const body = req.body || {};
+      if (!body.clientId && !body.clientName) {
+        return res.status(400).json({ error: 'La raison sociale du client est obligatoire' });
+      }
+      if (!body.issueDate) {
+        return res.status(400).json({ error: 'La date de création est obligatoire' });
+      }
+      if (!Array.isArray(body.lines) || body.lines.length === 0) {
+        return res.status(400).json({ error: 'Au moins une ligne est requise' });
+      }
+      if (body.lines.some((l: any) => !String(l.designation || '').trim())) {
+        return res.status(400).json({ error: 'Chaque ligne doit avoir une désignation' });
+      }
+
+      const kind = body.documentKind === 'AUTRE' ? 'AUTRE' : 'FACTURE_LEGALE';
+      const all = await db.getAllInvoices();
+
+      // Only a legal invoice is bound to the sequence. "Autre document" carries
+      // a free reference (bon de livraison, reçu…), so it neither follows the
+      // sequence nor consumes a number from it — doing so would punch gaps in
+      // the legal numbering.
+      let number: string;
+      if (kind === 'AUTRE') {
+        number = String(body.number ?? '').trim();
+        if (!number) {
+          return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
+        }
+        if (all.some((i: any) => i.number === number)) {
+          return res.status(400).json({ error: `Le numéro « ${number} » est déjà utilisé.` });
+        }
+      } else {
+        // "La date de la facture N°2 doit être la même que la facture N°1 ou
+        // bien le jour suivant" — this ordering rule belongs to the sequence,
+        // so it applies to legal invoices only.
+        const lastLegal = all.find((i: any) => i.documentKind !== 'AUTRE');
+        if (lastLegal?.issueDate && body.issueDate < lastLegal.issueDate) {
+          return res.status(400).json({
+            error: `La date doit être postérieure ou égale à celle de la dernière facture (${lastLegal.issueDate}).`,
+          });
+        }
+      }
+
+      const totals = computeInvoiceTotals(body);
+      if (kind !== 'AUTRE') number = await db.nextInvoiceNumber();
+
+      const invoice = await db.createInvoice({
+        id: `inv-${Date.now()}`,
+        number,
+        documentKind: kind,
+        title: String(body.title || 'Facture').trim(),
+        billingMode: body.billingMode === 'DETAILLEE' ? 'DETAILLEE' : 'FORFAIT',
+        vatRegime: body.vatRegime === 'SUSPENSION' ? 'SUSPENSION' : 'DROIT_COMMUN',
+        clientId: body.clientId ?? null,
+        clientName: body.clientName || '',
+        clientTaxId: body.clientTaxId || '',
+        clientAddress: body.clientAddress || '',
+        customFields: body.customFields && typeof body.customFields === 'object' ? body.customFields : {},
+        issueDate: body.issueDate,
+        dueDate: body.dueDate || '',
+        showDueDate: body.showDueDate !== false,
+        lines: body.lines.map((l: any) => ({
+          designation: String(l.designation || '').trim(),
+          quantity: num(Number(l.quantity), 1),
+          unitPrice: num(Number(l.unitPrice), 0),
+          vatRate: num(Number(l.vatRate), 0),
+          montantHT: num(Number(l.montantHT), 0),
+        })),
+        ...totals,
+        createdBy: req.user.id,
+        createdAt: new Date().toISOString(),
+      });
+
+      res.status(201).json(invoice);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/invoices/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+
+      const merged = { ...existing, ...req.body };
+
+      // A legal invoice's number belongs to the sequence and is never
+      // reassigned; a free document's may be corrected.
+      if (merged.documentKind === 'AUTRE') {
+        const wanted = String(req.body?.number ?? existing.number ?? '').trim();
+        if (!wanted) {
+          return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
+        }
+        const all = await db.getAllInvoices();
+        if (all.some((i: any) => i.id !== existing.id && i.number === wanted)) {
+          return res.status(400).json({ error: `Le numéro « ${wanted} » est déjà utilisé.` });
+        }
+        merged.number = wanted;
+      } else {
+        merged.number = existing.number;
+      }
+
+      if (!merged.clientId && !merged.clientName) {
+        return res.status(400).json({ error: 'La raison sociale du client est obligatoire' });
+      }
+      if (!merged.issueDate) {
+        return res.status(400).json({ error: 'La date de création est obligatoire' });
+      }
+      if (!Array.isArray(merged.lines) || merged.lines.length === 0) {
+        return res.status(400).json({ error: 'Au moins une ligne est requise' });
+      }
+      if (merged.lines.some((l: any) => !String(l.designation || '').trim())) {
+        return res.status(400).json({ error: 'Chaque ligne doit avoir une désignation' });
+      }
+      const totals = computeInvoiceTotals(merged);
+
+      const updated = await db.updateInvoice(req.params.id, {
+        ...merged,
+        ...totals,
+        updatedAt: new Date().toISOString(),
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/invoices/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const removed = await db.deleteInvoice(req.params.id);
+      if (!removed) return res.status(404).json({ error: 'Document introuvable' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // ---------------------------------------------------------
   // HR API Routes
   // ---------------------------------------------------------
@@ -805,7 +1421,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const users = await db.getAllUsers();
       // Allow ADMIN, MANAGER, SUPERVISOR to be approvers
-      const approvers = users.filter((u: any) => ['ADMIN', 'SUPERVISEUR'].includes(u.role));
+      const approvers = users.filter((u: any) => HR_APPROVER_ROLES.includes(u.role));
       res.json(approvers.map((u: any) => ({ id: u.id, name: u.username, role: u.role })));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -879,10 +1495,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Insufficient leave balance' });
       }
 
-      await db.updateLeaveBalance(leave.userId, {
-        available: balance.available - leave.duration,
-        used: balance.used + leave.duration
-      });
+      // Only `used` moves; `available` is derived from the admin-set entitlement.
+      await db.updateLeaveBalance(leave.userId, { used: balance.used + leave.duration });
 
       const updated = await db.updateLeaveRequest(id, {
         status: 'APPROVED',
@@ -946,8 +1560,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (leave.status === 'APPROVED') {
         const balance = await db.getLeaveBalanceByUserId(leave.userId);
         await db.updateLeaveBalance(leave.userId, {
-          available: balance.available + leave.duration,
-          used: balance.used - leave.duration
+          used: Math.max(0, balance.used - leave.duration),
         });
       }
 
@@ -1105,30 +1718,73 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   const sseClients = new Set<any>();
 
-  const broadcastTimeEntries = async () => {
-    try {
-      const entries = await db.getAllTimeEntries();
-      const users = await db.getAllUsers();
-      
-      const enriched = entries.map((e: any) => {
-        let computedDureeSeconds = e.dureeSeconds || 0;
-        if (e.statut === 'RUNNING' && e.lastStartedAt) {
-           computedDureeSeconds += Math.floor((Date.now() - e.lastStartedAt) / 1000);
-        }
-        return {
-          ...e,
-          dureeSeconds: computedDureeSeconds,
-          userName: users.find((u: any) => u.id === e.userId)?.username || 'Unknown'
-        };
-      });
-
-      const data = `data: ${JSON.stringify(enriched)}\n\n`;
-      for (const client of sseClients) {
-        client.write(data);
+  /**
+   * Adds the live elapsed time, the owner's name, and the cost of the task.
+   *
+   * The rate is the one **snapshotted on the entry when it was created**, never
+   * the collaborator's current rate: raising a salary must not retroactively
+   * re-price work already logged at the old salary.
+   *
+   * Cost is employer-confidential, so `hourlyRate`/`cost` are only included for
+   * admins — stripping them in the UI alone would still leak them over the wire.
+   */
+  const enrichEntries = async (entries: any[], forAdmin: boolean) => {
+    const users = await db.getAllUsers();
+    return entries.map((e: any) => {
+      const secs = accruedSeconds(e);
+      const base = {
+        ...e,
+        dureeSeconds: secs,
+        userName: users.find((u: any) => u.id === e.userId)?.username || 'Unknown',
+      };
+      if (!forAdmin) {
+        delete base.hourlyRate;
+        return base;
       }
-    } catch (e) {
-      console.error('Error broadcasting time entries', e);
+      // null => no employer cost was configured for this person at the time
+      const rate = typeof e.hourlyRate === 'number' ? e.hourlyRate : null;
+      return { ...base, hourlyRate: rate, cost: rate === null ? null : (secs / 3600) * rate };
+    });
+  };
+
+  /**
+   * How many entries a client holds at once. Entries are stored newest-first,
+   * and the UI is a recent-activity view, so a page of this size covers what is
+   * on screen. Without a cap, every mutation would push the entire history to
+   * every connected user — at dozens of users and thousands of entries that is
+   * the single most expensive thing the server does.
+   */
+  const ENTRIES_PAGE_SIZE = 200;
+
+  const doBroadcast = async () => {
+    const raw = await db.getAllTimeEntries();
+    const total = raw.length;
+    const pageRaw = raw.slice(0, ENTRIES_PAGE_SIZE);
+    // Two payloads only: admins get the cost fields, everyone else doesn't.
+    const cache: Record<string, string> = {};
+    for (const client of sseClients) {
+      const key = client.isAdmin ? 'admin' : 'plain';
+      if (!cache[key]) {
+        const data = await enrichEntries(pageRaw, client.isAdmin);
+        cache[key] = `data: ${JSON.stringify({ data, total })}\n\n`;
+      }
+      client.res.write(cache[key]);
     }
+  };
+
+  // Coalesce bursts (pausing one task starts another, a save touches several
+  // rows) into a single push instead of one per mutation.
+  let broadcastTimer: NodeJS.Timeout | null = null;
+  const broadcastTimeEntries = () => {
+    if (broadcastTimer || sseClients.size === 0) return;
+    broadcastTimer = setTimeout(async () => {
+      broadcastTimer = null;
+      try {
+        await doBroadcast();
+      } catch (e) {
+        console.error('Error broadcasting time entries', e);
+      }
+    }, 120);
   };
 
   app.get('/api/time-entries/stream', authenticate, (req: any, res: any) => {
@@ -1137,30 +1793,45 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders(); // flush the headers to establish SSE
 
-    sseClients.add(res);
-    broadcastTimeEntries();
+    const client = { res, isAdmin: req.user.role === 'ADMIN' };
+    sseClients.add(client);
+    // Send this client its first frame immediately rather than waiting on the
+    // coalescing timer.
+    doBroadcast().catch(e => console.error('Error sending initial SSE frame', e));
 
     req.on('close', () => {
-      sseClients.delete(res);
+      sseClients.delete(client);
     });
   });
 
+  /**
+   * Pauses every other RUNNING entry belonging to `userId`, folding the elapsed
+   * time into each one. Keeps the "at most one running task per person"
+   * invariant no matter who triggered the change.
+   */
+  const pauseOtherRunningEntries = async (userId: number, keepId: string) => {
+    const all = await db.getAllTimeEntries();
+    for (const other of all) {
+      if (other.userId !== userId || other.id === keepId || other.statut !== 'RUNNING') continue;
+      const elapsed = other.lastStartedAt
+        ? Math.floor((Date.now() - other.lastStartedAt) / 1000)
+        : 0;
+      await db.updateTimeEntry(other.id, {
+        statut: 'PAUSED',
+        dureeSeconds: (other.dureeSeconds || 0) + elapsed,
+        lastStartedAt: null,
+        heureFin: '',
+      });
+    }
+  };
+
   app.get('/api/time-entries', authenticate, async (req: any, res: any) => {
     try {
-      const entries = await db.getAllTimeEntries();
-      const users = await db.getAllUsers();
-      const enriched = entries.map((e: any) => {
-        let computedDureeSeconds = e.dureeSeconds || 0;
-        if (e.statut === 'RUNNING' && e.lastStartedAt) {
-           computedDureeSeconds += Math.floor((Date.now() - e.lastStartedAt) / 1000);
-        }
-        return {
-          ...e,
-          dureeSeconds: computedDureeSeconds,
-          userName: users.find((u: any) => u.id === e.userId)?.username || 'Unknown'
-        };
-      });
-      res.json(enriched);
+      const all = await db.getAllTimeEntries();
+      const limit = Math.min(parseInt(req.query.limit, 10) || ENTRIES_PAGE_SIZE, 1000);
+      const offset = parseInt(req.query.offset, 10) || 0;
+      const data = await enrichEntries(all.slice(offset, offset + limit), req.user.role === 'ADMIN');
+      res.json({ data, total: all.length, limit, offset });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1170,24 +1841,22 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const userFull = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
       const settings = await db.getSettings() || {};
-      let hourlyRate = 5.812;
-      
-      if (userFull && userFull.salaireBrut && userFull.regimeHoraire) {
-         let globalCharges = settings.employerCharges || { cnss: 16.57, tfp: 1.0, foprolos: 1.0, accidentTravail: 0.5 };
-         let userCnss = typeof userFull.cnss === 'number' ? userFull.cnss : globalCharges.cnss;
-         let userTfp = typeof userFull.tfp === 'number' ? userFull.tfp : globalCharges.tfp;
-         let userFoprolos = typeof userFull.foprolos === 'number' ? userFull.foprolos : globalCharges.foprolos;
-         let userAccidentTravail = typeof userFull.accidentTravail === 'number' ? userFull.accidentTravail : globalCharges.accidentTravail;
-         
-         let totalPct = (userCnss || 0) + (userTfp || 0) + (userFoprolos || 0) + (userAccidentTravail || 0);
-         let chargesAmt = userFull.salaireBrut * (totalPct / 100);
-         let coutTotal = userFull.salaireBrut + chargesAmt;
-         let heures = userFull.regimeHoraire * 4.33;
-         if (heures > 0) hourlyRate = coutTotal / heures;
-      }
+      // Snapshot the author's employer cost. Reads resolve it live as well, so
+      // this is only a record of the rate in force when the task was created.
+      const hourlyRate = employerHourlyRate(userFull, settings);
 
+      // Stamp date / heureDebut server-side so the recorded start time can't
+      // drift from the client clock or locale. heureFin stays empty until the
+      // task is actually completed.
+      const now = new Date();
+      if ((req.body.statut ?? 'RUNNING') === 'RUNNING') {
+        await pauseOtherRunningEntries(req.user.id, req.body.id);
+      }
       const entry = await db.createTimeEntry({
         ...req.body,
+        date: formatDateFR(now),
+        heureDebut: formatTimeFR(now),
+        heureFin: '',
         userId: req.user.id,
         hourlyRate: hourlyRate,
         lastStartedAt: Date.now()
@@ -1211,9 +1880,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
 
       let updates = { ...req.body };
-      
+
       if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
          updates.lastStartedAt = Date.now();
+         // Back in progress: an end time would be misleading.
+         if (updates.heureFin === undefined) updates.heureFin = '';
       } else if (req.body.statut !== 'RUNNING' && existing.statut === 'RUNNING') {
          // Stopping or pausing
          if (existing.lastStartedAt) {
@@ -1223,10 +1894,24 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
          updates.lastStartedAt = null;
       }
 
+      // Only a completed task has an end time, and the server stamps it.
+      if (req.body.statut === 'COMPLETED' && existing.statut !== 'COMPLETED' && !req.body.heureFin) {
+         updates.heureFin = formatTimeFR(new Date());
+      } else if (req.body.statut === 'PAUSED') {
+         if (updates.heureFin === undefined) updates.heureFin = '';
+      }
+
+      // One running task per person. Resuming a task (including an admin
+      // resuming someone else's) pauses whatever else that person had running.
+      if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
+        await pauseOtherRunningEntries(existing.userId, entryId);
+      }
+
       const updated = await db.updateTimeEntry(entryId, updates);
       res.json(updated);
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
