@@ -2,7 +2,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 
-const DB_PATH = path.join(process.cwd(), 'local.db.json');
+// Overridable so a deploy with an ephemeral root filesystem (e.g. Render
+// without this path on a mounted persistent disk) can point it somewhere
+// durable. Defaults to the previous behaviour when unset.
+const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'local.db.json');
 
 /**
  * Default employer charge rates — those a Tunisian services provider actually

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: taches-and-cashes
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Generated once by Render and kept stable across deploys — do not
+      # remove/regenerate this, or every previously issued login token
+      # becomes invalid.
+      - key: JWT_SECRET
+        generateValue: true
+      # Points the JSON "database" at the persistent disk below instead of
+      # the app's ephemeral build directory, which is wiped on every deploy.
+      - key: DB_PATH
+        value: /var/data/local.db.json
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
