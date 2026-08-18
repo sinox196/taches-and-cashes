@@ -3,6 +3,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
 import { STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
+import { AWAY_AFTER_MS, OFFLINE_AFTER_MS, type PresenceState } from './src/constants/presence.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
@@ -1165,6 +1166,69 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const removed = await db.deleteTaskType(id);
       if (!removed) return res.status(404).json({ error: 'Task type not found' });
       res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Presence (actif / absent / inactif)
+  // ---------------------------------------------------------
+
+  /**
+   * Deliberately in memory, not in the JSON database: presence is ephemeral and
+   * every user heartbeats every 30s, which would rewrite the whole database file
+   * dozens of times a minute. Losing it on restart is correct — everyone simply
+   * shows as inactive until their next heartbeat lands.
+   */
+  const presence = new Map<number, { lastSeenAt: number; lastActivityAt: number }>();
+
+  /**
+   * The server owns this decision. A client can report how long it has been
+   * idle, but it cannot report that its own machine is off — that is only
+   * visible here, as heartbeats that stopped arriving.
+   */
+  const presenceStateOf = (rec?: { lastSeenAt: number; lastActivityAt: number }): PresenceState => {
+    if (!rec) return 'INACTIVE';
+    const now = Date.now();
+    if (now - rec.lastSeenAt > OFFLINE_AFTER_MS) return 'INACTIVE';
+    if (now - rec.lastActivityAt >= AWAY_AFTER_MS) return 'AWAY';
+    return 'ACTIVE';
+  };
+
+  const presenceFor = (userId: number) => {
+    const rec = presence.get(userId);
+    const state = presenceStateOf(rec);
+    return {
+      state,
+      // Idle time is meaningless once we've lost contact.
+      idleMs: rec && state !== 'INACTIVE' ? Date.now() - rec.lastActivityAt : null,
+      lastSeenAt: rec ? new Date(rec.lastSeenAt).toISOString() : null,
+    };
+  };
+
+  /** Heartbeat. `idleMs` = time since this user last touched mouse or keyboard. */
+  app.post('/api/presence', authenticate, (req: any, res: any) => {
+    const now = Date.now();
+    const reported = Number(req.body?.idleMs);
+    const idleMs = Number.isFinite(reported) && reported >= 0 ? Math.min(reported, AWAY_AFTER_MS * 6) : 0;
+    presence.set(req.user.id, { lastSeenAt: now, lastActivityAt: now - idleMs });
+    res.json({ userId: req.user.id, ...presenceFor(req.user.id) });
+  });
+
+  /** Sent on logout / tab close so the user drops to inactive immediately. */
+  app.post('/api/presence/offline', authenticate, (req: any, res: any) => {
+    presence.delete(req.user.id);
+    res.json({ success: true });
+  });
+
+  /** Presence of every known user, keyed by id. */
+  app.get('/api/presence', authenticate, async (req: any, res: any) => {
+    try {
+      const users = await db.getAllUsers();
+      const byUser: Record<string, any> = {};
+      for (const u of users) byUser[u.id] = presenceFor(u.id);
+      res.json(byUser);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

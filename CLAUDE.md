@@ -85,6 +85,18 @@ Default charge percentages come from `defaultSettings()` in [src/server/database
 
 **Cost configuration lives only in the user form** ([UsersManagement.tsx](src/components/UsersManagement.tsx)). There is deliberately no Settings page: it was removed so there is exactly one place to reason about employer cost. `GET /api/settings` survives purely to seed that form's defaults — don't rebuild a global settings UI on top of it, and keep the form's `?? 2.0` style fallbacks in step with `defaultSettings()`.
 
+### Presence (actif / absent / inactif)
+
+Three states, defined in [src/constants/presence.ts](src/constants/presence.ts) and shared by both sides: **ACTIVE** (mouse or keyboard in use), **AWAY** (no input for `AWAY_AFTER_MS`, 10 min), **INACTIVE** (no heartbeat for `OFFLINE_AFTER_MS`, ~95 s — tab closed, logged out, or machine off).
+
+**The server decides the state; the client only reports how long it has been idle.** A browser cannot report that its own machine is off — that is only observable here as heartbeats that stopped arriving, so `presenceStateOf()` derives all three from `lastSeenAt` + `lastActivityAt`. Never let a client declare its own status.
+
+Presence is held in a **module-level `Map`, never in the JSON database**. Every user heartbeats every 30 s and each write rewrites the whole database file — persisting it would be the single heaviest thing the server does. Losing it on restart is correct: everyone shows inactive until their next heartbeat.
+
+[PresenceContext](src/context/PresenceContext.tsx) tracks real input events, heartbeats on an interval, beats **immediately** when returning from away (the one transition that must feel instant), and fires a `keepalive` offline beacon on `pagehide`/logout so a closed tab doesn't linger for 95 s. Your own badge reads from local state rather than the poll, so it flips the moment you touch the mouse.
+
+`OFFLINE_AFTER_MS` must stay comfortably above three heartbeats — tightening it makes users flicker offline on one dropped request.
+
 ### Cash (facturation)
 
 Implements workflow #1 of the cahier des charges (`Facturation-Tous-les-types-de-facture-Tâches-Cash.xlsx`). Three selectors drive the form: **type de document** (facture légale / autre), **mode de facturation** (forfait hides Quantité & PU; détaillée derives the amount from Qté × PU), **régime de TVA** (droit commun / suspension → no VAT).

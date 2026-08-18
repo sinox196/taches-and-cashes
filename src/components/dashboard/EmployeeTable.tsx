@@ -3,6 +3,8 @@ import { User, Shield, ArrowUpDown, ArrowUp, ArrowDown, Clock, DollarSign, ListF
 import { formatDurationHoursMinutes, formatCostTND } from '../../utils/formatters';
 import { roleMeta, roleLabel } from '../../constants/roles';
 import { useAuth } from '../../context/AuthContext';
+import { usePresence } from '../../context/PresenceContext';
+import { PresenceBadge } from '../PresenceBadge';
 
 interface EmployeeTableProps {
   employees: any[];
@@ -30,6 +32,7 @@ type SortDirection = 'asc' | 'desc';
 
 export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowClick, onClientsClick }) => {
   const { user } = useAuth();
+  const { presenceOf } = usePresence();
   const isAdmin = user?.role === 'ADMIN';
   const [sortField, setSortField] = useState<SortField>('duration');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -273,7 +276,11 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                         {roleMeta(emp.role).hasShield ? <Shield className="w-4 h-4" /> : <User className="w-4 h-4" />}
                       </div>
                       <div>
-                        <div className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">{emp.name}</div>
+                        <div className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
+                          {(() => { const p = presenceOf(emp.id);
+                            return <PresenceBadge state={p.state} idleMs={p.idleMs} variant="dot" />; })()}
+                          {emp.name}
+                        </div>
                         <div className="text-[11px] text-gray-400">{emp.department && emp.department !== 'N/A' ? emp.department : roleLabel(emp.role)}</div>
                       </div>
                     </div>

@@ -1,6 +1,8 @@
 import React from 'react';
 import { Menu, Bell, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { usePresence } from '../context/PresenceContext';
+import { PresenceBadge } from './PresenceBadge';
 
 interface HeaderProps {
   onToggleSidebar?: () => void;
@@ -14,6 +16,7 @@ export const Header: React.FC<HeaderProps> = ({
   userName = 'Alexandre Dupont',
 }) => {
   const { logout, user } = useAuth();
+  const { own } = usePresence();
   const displayUserName = user?.username || userName;
   const initials = displayUserName.substring(0, 2).toUpperCase();
 
@@ -44,13 +47,22 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 border border-white rounded-full"></div>
           </button>
 
-          {/* User Avatar */}
+          {/* User Avatar + own presence */}
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-[#101828] text-white flex items-center justify-center font-bold text-xs border border-gray-200">
-              {initials}
+            <div className="relative">
+              <div className="w-8 h-8 rounded-full bg-[#101828] text-white flex items-center justify-center font-bold text-xs border border-gray-200">
+                {initials}
+              </div>
+              {/* Status dot on the avatar, ringed so it reads against it. */}
+              <span className="absolute -bottom-0.5 -right-0.5 bg-white rounded-full p-[2px] flex">
+                <PresenceBadge state={own} variant="dot" />
+              </span>
             </div>
             <span className="text-[12px] font-medium text-gray-700 hidden sm:inline">
               {displayUserName}
+            </span>
+            <span className="hidden md:inline">
+              <PresenceBadge state={own} />
             </span>
           </div>
 

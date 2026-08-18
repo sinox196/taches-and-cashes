@@ -16,6 +16,8 @@ import {
 import { TimeEntry, TaskStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { formatCostDT } from '../utils/formatters';
+import { usePresence } from '../context/PresenceContext';
+import { PresenceBadge } from './PresenceBadge';
 
 interface TimeTrackingTableProps {
   entries: TimeEntry[];
@@ -40,6 +42,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   totalEntries,
 }) => {
   const { hasPermission, user } = useAuth();
+  const { presenceOf } = usePresence();
   const isAdmin = user?.role === 'ADMIN';
   const [collapsedMonths, setCollapsedMonths] = useState<Record<string, boolean>>({});
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RUNNING' | 'PAUSED'>('ALL');
@@ -236,7 +239,11 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                 >
                   {/* Collaborator */}
                   <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">
-                    {row.userName || 'Unknown'}
+                    <span className="inline-flex items-center gap-1.5">
+                      {(() => { const p = presenceOf(row.userId);
+                        return <PresenceBadge state={p.state} idleMs={p.idleMs} variant="dot" />; })()}
+                      {row.userName || 'Unknown'}
+                    </span>
                   </td>
                   {/* Date */}
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">

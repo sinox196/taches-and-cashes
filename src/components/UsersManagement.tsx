@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth, User } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { ROLES, roleMeta, type Role } from '../constants/roles';
+import { usePresence } from '../context/PresenceContext';
+import { PresenceBadge } from './PresenceBadge';
 import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
 
 const PERMISSIONS_GROUPED = [
@@ -51,6 +53,7 @@ const PERMISSIONS_GROUPED = [
 
 export const UsersManagement: React.FC = () => {
   const { token, hasPermission, logout } = useAuth();
+  const { presenceOf } = usePresence();
   const { t } = useLanguage();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -296,6 +299,9 @@ export const UsersManagement: React.FC = () => {
                   Utilisateur
                 </th>
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                  Statut
+                </th>
+                <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   Rôle
                 </th>
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -311,6 +317,10 @@ export const UsersManagement: React.FC = () => {
                 <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors group">
                   <td className="px-5 py-3">
                     <div className="font-semibold text-gray-900 text-[13px]">{user.username}</div>
+                  </td>
+                  <td className="px-5 py-3">
+                    {(() => { const p = presenceOf(user.id);
+                      return <PresenceBadge state={p.state} idleMs={p.idleMs} />; })()}
                   </td>
                   <td className="px-5 py-3">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${roleMeta(user.role).badgeClass}`}>
@@ -353,7 +363,7 @@ export const UsersManagement: React.FC = () => {
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-5 py-8 text-center text-gray-500 text-[13px]">
+                  <td colSpan={5} className="px-5 py-8 text-center text-gray-500 text-[13px]">
                     Aucun utilisateur trouvé.
                   </td>
                 </tr>
