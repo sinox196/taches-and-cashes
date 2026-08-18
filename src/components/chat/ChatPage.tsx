@@ -62,6 +62,15 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
   const scrollRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<Contact | null>(null);
   selectedRef.current = selected;
+  // Reporting the unread total to the shell happens in an effect below, never
+  // from inside a state updater: those run during render, and updating App
+  // while rendering ChatPage is a React violation.
+  const onUnreadRef = useRef(onUnreadChange);
+  onUnreadRef.current = onUnreadChange;
+  // `sending` is state and does not settle until the next render, so two send
+  // calls in the same tick would both read false. This latch flips at once.
+  const sendingRef = useRef(false);
+  const pendingSeq = useRef(0);
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -71,8 +80,6 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
       if (res.ok) {
         const data: Contact[] = await res.json();
         setContacts(data);
-        const total = data.reduce((s, c) => s + c.unreadCount, 0);
-        onUnreadChange?.(total);
       }
     } catch (e) {
       console.error('Failed to load contacts', e);
@@ -83,6 +90,11 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
 
   useEffect(() => { fetchContacts(); }, [fetchContacts]);
 
+  useEffect(() => {
+    if (loadingContacts) return;
+    onUnreadRef.current?.(contacts.reduce((s, c) => s + c.unreadCount, 0));
+  }, [contacts, loadingContacts]);
+
   const openThread = async (contact: Contact) => {
     setSelected(contact);
     setLoadingThread(true);
@@ -92,11 +104,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
         setThread(await res.json());
       }
       // Opening the thread marks it read server-side; reflect that locally.
-      setContacts(prev => {
-        const next = prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c);
-        onUnreadChange?.(next.reduce((s, c) => s + c.unreadCount, 0));
-        return next;
-      });
+      setContacts(prev => prev.map(c => (c.id === contact.id ? { ...c, unreadCount: 0 } : c)));
     } catch (e) {
       console.error('Failed to load thread', e);
     } finally {
@@ -129,7 +137,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
             const isOpenThread = selectedRef.current?.id === other;
 
             if (isOpenThread) {
-              setThread(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+              setThread(prev => mergeIncoming(prev, msg));
               if (msg.toUserId === user?.id) {
                 // I have the thread open, so mark it read right away.
                 fetch(`/api/messages/thread/${other}`, { headers: authHeaders }).catch(() => {});
@@ -164,14 +172,37 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
     };
   }, [token, user?.id]);
 
+  /**
+   * Folds a server message into the thread, whichever arrives first.
+   *
+   * The server echoes a sent message back to its author over SSE, and the POST
+   * also returns it. Either can win the race, so both paths go through here:
+   * an id we already hold is ignored, and a message that matches a still
+   * pending optimistic entry replaces it rather than being appended — that
+   * double-add was what made a sent message appear twice.
+   */
+  const mergeIncoming = (prev: ChatMessage[], msg: ChatMessage): ChatMessage[] => {
+    const twin = (m: ChatMessage) =>
+      m.id.startsWith('pending-') &&
+      m.fromUserId === msg.fromUserId &&
+      m.toUserId === msg.toUserId &&
+      m.body === msg.body;
+
+    if (prev.some(m => m.id === msg.id)) return prev.filter(m => !twin(m));
+    const i = prev.findIndex(twin);
+    if (i !== -1) return prev.map((m, idx) => (idx === i ? msg : m));
+    return [...prev, msg];
+  };
+
   const handleSend = async () => {
     const body = draft.trim();
-    if (!body || !selected || sending) return;
+    if (!body || !selected || sendingRef.current) return;
+    sendingRef.current = true;
     setSending(true);
     setDraft('');
     // Optimistic: show it immediately, replace on failure with nothing (kept simple).
     const optimistic: ChatMessage = {
-      id: `pending-${Date.now()}`,
+      id: `pending-${++pendingSeq.current}`,
       fromUserId: user!.id,
       toUserId: selected.id,
       body,
@@ -187,7 +218,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
       });
       if (res.ok) {
         const saved: ChatMessage = await res.json();
-        setThread(prev => prev.map(m => (m.id === optimistic.id ? saved : m)));
+        setThread(prev => mergeIncoming(prev, saved));
         fetchContacts();
       } else {
         setThread(prev => prev.filter(m => m.id !== optimistic.id));
@@ -196,6 +227,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
       console.error('Failed to send message', e);
       setThread(prev => prev.filter(m => m.id !== optimistic.id));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
