@@ -1,0 +1,341 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '../../context/AuthContext';
+import { roleMeta } from '../../constants/roles';
+import { Loader2, Send, MessageCircle, Check, CheckCheck } from 'lucide-react';
+
+interface Contact {
+  id: number;
+  username: string;
+  fullName: string;
+  role: string;
+  lastMessage: { body: string; createdAt: string; fromUserId: number } | null;
+  unreadCount: number;
+}
+
+interface ChatMessage {
+  id: string;
+  fromUserId: number;
+  toUserId: number;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(p => p[0]?.toUpperCase())
+    .join('') || '?';
+
+const formatTime = (iso: string) => {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+};
+
+const formatDay = (iso: string) => {
+  const d = new Date(iso);
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  if (isToday) return "Aujourd'hui";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Hier';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+/**
+ * Simple 1:1 chat. Any authenticated user can message any other user (see
+ * GET /api/messages/contacts on the server) — this is an internal team tool,
+ * not gated behind a permission the way Clients/Cash/HR are.
+ */
+export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = ({ onUnreadChange }) => {
+  const { token, user } = useAuth();
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [loadingContacts, setLoadingContacts] = useState(true);
+  const [selected, setSelected] = useState<Contact | null>(null);
+  const [thread, setThread] = useState<ChatMessage[]>([]);
+  const [loadingThread, setLoadingThread] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<Contact | null>(null);
+  selectedRef.current = selected;
+
+  const authHeaders = { Authorization: `Bearer ${token}` };
+
+  const fetchContacts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/messages/contacts', { headers: authHeaders });
+      if (res.ok) {
+        const data: Contact[] = await res.json();
+        setContacts(data);
+        const total = data.reduce((s, c) => s + c.unreadCount, 0);
+        onUnreadChange?.(total);
+      }
+    } catch (e) {
+      console.error('Failed to load contacts', e);
+    } finally {
+      setLoadingContacts(false);
+    }
+  }, [token]);
+
+  useEffect(() => { fetchContacts(); }, [fetchContacts]);
+
+  const openThread = async (contact: Contact) => {
+    setSelected(contact);
+    setLoadingThread(true);
+    try {
+      const res = await fetch(`/api/messages/thread/${contact.id}`, { headers: authHeaders });
+      if (res.ok) {
+        setThread(await res.json());
+      }
+      // Opening the thread marks it read server-side; reflect that locally.
+      setContacts(prev => {
+        const next = prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c);
+        onUnreadChange?.(next.reduce((s, c) => s + c.unreadCount, 0));
+        return next;
+      });
+    } catch (e) {
+      console.error('Failed to load thread', e);
+    } finally {
+      setLoadingThread(false);
+    }
+  };
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [thread]);
+
+  // Live updates: reconnects with backoff, same pattern as the time-entries stream.
+  useEffect(() => {
+    if (!token) return;
+    let source: EventSource | null = null;
+    let retryDelay = 1000;
+    let closed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (closed) return;
+      source = new EventSource(`/api/messages/stream?token=${token}`);
+
+      source.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'message') {
+            const msg: ChatMessage = payload.message;
+            const other = msg.fromUserId === user?.id ? msg.toUserId : msg.fromUserId;
+            const isOpenThread = selectedRef.current?.id === other;
+
+            if (isOpenThread) {
+              setThread(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+              if (msg.toUserId === user?.id) {
+                // I have the thread open, so mark it read right away.
+                fetch(`/api/messages/thread/${other}`, { headers: authHeaders }).catch(() => {});
+              }
+            }
+            fetchContacts();
+          } else if (payload.type === 'read') {
+            if (selectedRef.current?.id === payload.by) {
+              setThread(prev => prev.map(m => (m.toUserId === payload.by ? m : { ...m, readAt: m.readAt ?? new Date().toISOString() })));
+            }
+          }
+        } catch (e) {
+          console.error('Bad SSE payload', e);
+        }
+      };
+
+      source.onerror = () => {
+        source?.close();
+        if (closed) return;
+        retryTimer = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 15000);
+      };
+
+      source.onopen = () => { retryDelay = 1000; };
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      source?.close();
+    };
+  }, [token, user?.id]);
+
+  const handleSend = async () => {
+    const body = draft.trim();
+    if (!body || !selected || sending) return;
+    setSending(true);
+    setDraft('');
+    // Optimistic: show it immediately, replace on failure with nothing (kept simple).
+    const optimistic: ChatMessage = {
+      id: `pending-${Date.now()}`,
+      fromUserId: user!.id,
+      toUserId: selected.id,
+      body,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    };
+    setThread(prev => [...prev, optimistic]);
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ toUserId: selected.id, body }),
+      });
+      if (res.ok) {
+        const saved: ChatMessage = await res.json();
+        setThread(prev => prev.map(m => (m.id === optimistic.id ? saved : m)));
+        fetchContacts();
+      } else {
+        setThread(prev => prev.filter(m => m.id !== optimistic.id));
+      }
+    } catch (e) {
+      console.error('Failed to send message', e);
+      setThread(prev => prev.filter(m => m.id !== optimistic.id));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex min-w-0 overflow-hidden bg-[#F2F4F7]">
+      {/* Conversation list */}
+      <aside className="w-[280px] shrink-0 border-r border-gray-200 bg-white flex flex-col">
+        <div className="p-4 border-b border-gray-100">
+          <h1 className="text-[16px] font-bold text-gray-900">Messages</h1>
+          <p className="text-[12px] text-gray-500 mt-0.5">Discutez avec l'équipe</p>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {loadingContacts ? (
+            <div className="flex items-center justify-center p-8">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+            </div>
+          ) : contacts.length === 0 ? (
+            <div className="p-4 text-[12px] text-gray-400 text-center">Aucun collègue trouvé</div>
+          ) : (
+            contacts.map(c => {
+              const meta = roleMeta(c.role);
+              const isActive = selected?.id === c.id;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => openThread(c)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-gray-50 transition-colors ${
+                    isActive ? 'bg-gray-100' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="w-9 h-9 rounded-full bg-slate-800 text-white text-[12px] font-bold flex items-center justify-center shrink-0">
+                    {initials(c.fullName)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[13px] font-medium text-gray-900 truncate">{c.fullName}</span>
+                      {c.lastMessage && (
+                        <span className="text-[10px] text-gray-400 shrink-0">{formatTime(c.lastMessage.createdAt)}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <span className="text-[11px] text-gray-500 truncate">
+                        {c.lastMessage ? c.lastMessage.body : <span className={`px-1.5 py-0.5 rounded text-[10px] ${meta.badgeClass}`}>{meta.label}</span>}
+                      </span>
+                      {c.unreadCount > 0 && (
+                        <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+                          {c.unreadCount > 99 ? '99+' : c.unreadCount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </aside>
+
+      {/* Thread */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {!selected ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
+            <MessageCircle className="w-10 h-10" />
+            <span className="text-[13px]">Sélectionnez une conversation pour commencer</span>
+          </div>
+        ) : (
+          <>
+            <div className="px-5 py-3 border-b border-gray-200 bg-white flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                {initials(selected.fullName)}
+              </div>
+              <div>
+                <div className="text-[13px] font-semibold text-gray-900">{selected.fullName}</div>
+                <div className="text-[11px] text-gray-400">{roleMeta(selected.role).label}</div>
+              </div>
+            </div>
+
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+              {loadingThread ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+                </div>
+              ) : thread.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-[12px] text-gray-400">
+                  Aucun message. Dites bonjour !
+                </div>
+              ) : (
+                thread.map((m, i) => {
+                  const mine = m.fromUserId === user?.id;
+                  const prev = thread[i - 1];
+                  const showDay = !prev || formatDay(prev.createdAt) !== formatDay(m.createdAt);
+                  return (
+                    <React.Fragment key={m.id}>
+                      {showDay && (
+                        <div className="flex justify-center my-3">
+                          <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{formatDay(m.createdAt)}</span>
+                        </div>
+                      )}
+                      <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                        <div
+                          className={`max-w-[65%] px-3 py-2 rounded-2xl text-[13px] leading-snug ${
+                            mine
+                              ? 'bg-slate-800 text-white rounded-br-sm'
+                              : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm'
+                          }`}
+                        >
+                          <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                          <div className={`flex items-center gap-1 mt-1 ${mine ? 'justify-end text-white/60' : 'justify-end text-gray-400'}`}>
+                            <span className="text-[10px]">{formatTime(m.createdAt)}</span>
+                            {mine && (m.readAt ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
+                          </div>
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-200 bg-white flex items-center gap-2">
+              <input
+                type="text"
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                placeholder="Écrivez un message..."
+                className="flex-1 text-[13px] px-3 py-2 rounded-lg border border-gray-200 outline-none focus:border-gray-400"
+              />
+              <button
+                onClick={handleSend}
+                disabled={!draft.trim() || sending}
+                className="w-9 h-9 rounded-lg bg-slate-800 text-white flex items-center justify-center disabled:opacity-40 shrink-0"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};

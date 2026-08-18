@@ -7,6 +7,8 @@ import { TimeTrackingTable } from './components/TimeTrackingTable';
 import { PausedTasksList } from './components/PausedTasksList';
 import { EditTaskModal } from './components/EditTaskModal';
 import { AdminDashboard } from './components/dashboard/AdminDashboard';
+import { MyDashboard } from './components/dashboard/MyDashboard';
+import { ChatPage } from './components/chat/ChatPage';
 import { UsersManagement } from './components/UsersManagement';
 import { ClientsManagement } from './components/clients/ClientsManagement';
 import { HRManagement } from './components/hr/HRManagement';
@@ -33,7 +35,7 @@ export default function App() {
   
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Missions', 'Cash', 'HR', 'Reports', 'Users'];
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Cash', 'HR', 'Reports', 'Users'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     const saved = localStorage.getItem('active_nav');
     return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';
@@ -48,6 +50,22 @@ export default function App() {
   const [taskTypesList, setTaskTypesList] = useState<any[]>([]);
   /** Entries that exist server-side, of which the table holds the most recent page. */
   const [totalEntries, setTotalEntries] = useState<number | null>(null);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  // Sidebar badge: polled as a fallback and updated live by ChatPage's own
+  // SSE stream (via onUnreadChange) whenever the Messages page is open.
+  useEffect(() => {
+    if (!token) return;
+    const fetchUnread = () => {
+      fetch('/api/messages/unread-count', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(res => res.json())
+        .then(data => { if (typeof data?.count === 'number') setUnreadMessages(data.count); })
+        .catch(() => {});
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 20000);
+    return () => clearInterval(interval);
+  }, [token]);
 
   useEffect(() => {
     if (token) {
@@ -382,14 +400,19 @@ export default function App() {
       <Sidebar
         activeItem={activeSidebarItem}
         onSelectItem={(item) => setActiveSidebarItem(item)}
+        unreadMessages={unreadMessages}
       />
       
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         <Header userCode="ABA01" userName="Alexandre Dupont" />
         
         
-        {activeSidebarItem === 'Dashboard' && (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? (
-          <AdminDashboard />
+        {activeSidebarItem === 'Dashboard' ? (
+          // ADMIN/SUPERVISEUR get the team-wide dashboard; everyone else
+          // (COLLABORATOR, STAGIAIRE) gets their own personal KPIs.
+          (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? <AdminDashboard /> : <MyDashboard />
+        ) : activeSidebarItem === 'Messages' ? (
+          <ChatPage onUnreadChange={setUnreadMessages} />
         ) : activeSidebarItem === 'Users' && hasPermission('MANAGE_USERS') ? (
 
           <UsersManagement />
