@@ -11,29 +11,36 @@ import {
   ChevronRight,
   ShieldAlert,
   Layers,
-  Globe
+  Globe,
+  MessageCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { DASHBOARD_ROLES } from '../constants/roles';
 
 interface SidebarProps {
   activeItem?: string;
   onSelectItem?: (item: string) => void;
   collapsed?: boolean;
+  /** Unread chat messages, shown as a badge on the Messages nav item. */
+  unreadMessages?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeItem = 'Time Tracking',
   onSelectItem,
+  unreadMessages = 0,
 }) => {
   const { hasPermission, user } = useAuth();
   const { t, language, setLanguage } = useLanguage();
-  
-  const mainNavItems = [
-    ...(DASHBOARD_ROLES.includes(user?.role ?? '') ? [{ id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false }] : []),
+
+  // Every authenticated user gets a "Dashboard" entry: DASHBOARD_ROLES see the
+  // team-wide AdminDashboard, everyone else gets their own personal KPIs
+  // (MyDashboard) — the routing decision lives in App.tsx.
+  const mainNavItems: { id: string; label: string; icon: any; hasChevron: boolean; badge?: number }[] = [
+    { id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false },
     ...(hasPermission('VIEW_CLIENTS') ? [{ id: 'Clients', label: t('nav.clients'), icon: Users, hasChevron: false }] : []),
     { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
+    { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
     ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
     ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Cash', icon: Receipt, hasChevron: false }] : []),
     ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: Users2, hasChevron: true }] : []),
@@ -80,6 +87,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <Icon className="w-4 h-4 shrink-0" />
                   <span className="truncate">{item.label}</span>
                 </div>
+                {!!item.badge && (
+                  <span className="ml-1 shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+                    {item.badge > 99 ? '99+' : item.badge}
+                  </span>
+                )}
                 {item.hasChevron && (
                   <ChevronRight className="w-3 h-3 shrink-0 opacity-80" />
                 )}

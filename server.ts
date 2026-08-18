@@ -639,8 +639,13 @@ app.post('/api/kpi/employee-tasks', authenticate, async (req: any, res: any) => 
 
 app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   try {
-    if (!DASHBOARD_ROLES.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
+    // ADMIN/SUPERVISEUR see the whole team dashboard. Everyone else (COLLABORATOR,
+    // STAGIAIRE) gets the same endpoint but pinned to their own id server-side —
+    // a collaborator sending a different filterUserIds in the body still only
+    // ever gets their own data back.
+    const isTeamViewer = DASHBOARD_ROLES.includes(req.user.role);
+    if (!isTeamViewer) {
+      req.body.filterUserIds = [req.user.id];
     }
 
     const { startDate, endDate, filterUserIds, filterClientIds } = req.body;
@@ -856,6 +861,22 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       };
     }).filter(Boolean);
 
+    // A non-team viewer's own row is the only one they may see — other
+    // collaborators must not appear even as zero-value rows, since that would
+    // leak coworker names to someone with no MANAGE_USERS permission.
+    const scopedEmployeeStats = isTeamViewer
+      ? employeeStats
+      : employeeStats.filter((e: any) => e.id === req.user.id);
+
+    // Company-wide headcount is a team-viewer figure; a personal dashboard
+    // only ever needs its own totals, already reflected below.
+    if (!isTeamViewer) {
+      delete globalStats.totalHeadcount;
+      delete globalStats.totalCollaborators;
+      delete globalStats.totalSupervisors;
+      delete globalStats.headcountByRole;
+    }
+
     // ----- Per-client breakdown: cost, who worked on it, and what they did.
     // Built from the same already-filtered `timeEntries`, so it always reflects
     // the date / collaborator / client filters applied above.
@@ -921,7 +942,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const stripCost = ({ totalCost, totalCostFormatted, hourlyRate, cost, ...rest }: any) => rest;
     res.json({
       globalStats: stripCost({ ...globalStats, tasksWithoutRate: undefined }),
-      employeeStats: employeeStats.map((e: any) => ({
+      employeeStats: scopedEmployeeStats.map((e: any) => ({
         ...stripCost(e),
         tasks: stripCost(e.tasks),
       })),
@@ -1774,6 +1795,152 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
+  });
+
+  // ---------------------------------------------------------
+  // Chat (direct messages) API Routes & SSE
+  // ---------------------------------------------------------
+
+  // Any authenticated user can message any other user — this is a small
+  // internal team tool, not a permission-gated feature like Clients or Cash.
+  // Connections are kept per-user so a new message is only pushed to the two
+  // people involved, never broadcast to everyone like the time-entries feed.
+  const chatSseClients = new Map<number, Set<any>>();
+
+  const sendToUser = (userId: number, payload: any) => {
+    const conns = chatSseClients.get(userId);
+    if (!conns || conns.size === 0) return;
+    const frame = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const res of conns) res.write(frame);
+  };
+
+  // GET /api/messages/contacts — the roster to start a conversation with.
+  // Deliberately open to every authenticated user (not gated on MANAGE_USERS),
+  // since a collaborator needs to see who they can message.
+  app.get('/api/messages/contacts', authenticate, async (req: any, res: any) => {
+    try {
+      const allUsers = await db.getAllUsers();
+      const messages = await db.getAllMessages();
+      const contacts = allUsers
+        .filter((u: any) => u.id !== req.user.id)
+        .map((u: any) => {
+          const thread = messages.filter((m: any) =>
+            (m.fromUserId === req.user.id && m.toUserId === u.id) ||
+            (m.fromUserId === u.id && m.toUserId === req.user.id)
+          );
+          const last = thread[thread.length - 1];
+          const unreadCount = thread.filter((m: any) => m.toUserId === req.user.id && m.fromUserId === u.id && !m.readAt).length;
+          return {
+            id: u.id,
+            username: u.username,
+            fullName: u.fullName || u.username,
+            role: u.role,
+            lastMessage: last ? { body: last.body, createdAt: last.createdAt, fromUserId: last.fromUserId } : null,
+            unreadCount,
+          };
+        })
+        .sort((a: any, b: any) => {
+          const ta = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+          const tb = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+          if (ta !== tb) return tb - ta;
+          return a.fullName.localeCompare(b.fullName);
+        });
+      res.json(contacts);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/messages/unread-count — total across every conversation, for the sidebar badge.
+  app.get('/api/messages/unread-count', authenticate, async (req: any, res: any) => {
+    try {
+      const messages = await db.getAllMessages();
+      const count = messages.filter((m: any) => m.toUserId === req.user.id && !m.readAt).length;
+      res.json({ count });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/messages/thread/:userId — the DM thread with one other user.
+  // Marks their messages to me as read as a side effect, and tells their
+  // live connections (if any) that I've read them.
+  app.get('/api/messages/thread/:userId', authenticate, async (req: any, res: any) => {
+    try {
+      const otherId = parseInt(req.params.userId, 10);
+      if (!Number.isFinite(otherId)) return res.status(400).json({ error: 'Invalid userId' });
+
+      const messages = await db.getAllMessages();
+      const thread = messages
+        .filter((m: any) =>
+          (m.fromUserId === req.user.id && m.toUserId === otherId) ||
+          (m.fromUserId === otherId && m.toUserId === req.user.id)
+        )
+        .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      const changed = await db.markMessagesRead(req.user.id, otherId);
+      if (changed > 0) {
+        sendToUser(otherId, { type: 'read', by: req.user.id });
+      }
+
+      res.json(thread);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/messages — send a DM.
+  app.post('/api/messages', authenticate, async (req: any, res: any) => {
+    try {
+      const toUserId = parseInt(req.body?.toUserId, 10);
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!Number.isFinite(toUserId)) return res.status(400).json({ error: 'toUserId is required' });
+      if (!body) return res.status(400).json({ error: 'Message body is required' });
+      if (body.length > 4000) return res.status(400).json({ error: 'Message too long' });
+
+      const recipient = await db.get('SELECT * FROM users WHERE id = ?', toUserId);
+      if (!recipient) return res.status(404).json({ error: 'Recipient not found' });
+
+      const message = await db.createMessage({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromUserId: req.user.id,
+        toUserId,
+        body,
+        createdAt: new Date().toISOString(),
+        readAt: null,
+      });
+
+      res.status(201).json(message);
+      sendToUser(toUserId, { type: 'message', message });
+      sendToUser(req.user.id, { type: 'message', message });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/messages/stream — SSE. Pushes new messages and read receipts
+  // that involve this user. Token comes from the query string, same reason
+  // as the time-entries stream: EventSource can't set an Authorization header.
+  app.get('/api/messages/stream', authenticate, (req: any, res: any) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const userId = req.user.id;
+    if (!chatSseClients.has(userId)) chatSseClients.set(userId, new Set());
+    chatSseClients.get(userId)!.add(res);
+
+    req.on('close', () => {
+      const conns = chatSseClients.get(userId);
+      if (conns) {
+        conns.delete(res);
+        if (conns.size === 0) chatSseClients.delete(userId);
+      }
+    });
   });
 
   // ---------------------------------------------------------

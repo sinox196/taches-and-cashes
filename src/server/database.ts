@@ -2,7 +2,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 
-const DB_PATH = path.join(process.cwd(), 'local.db.json');
+// Overridable so a deploy with an ephemeral root filesystem (e.g. Render
+// without this path on a mounted persistent disk) can point it somewhere
+// durable. Defaults to the previous behaviour when unset.
+const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'local.db.json');
 
 /**
  * Default employer charge rates — those a Tunisian services provider actually
@@ -29,6 +32,8 @@ const emptyDb = () => ({
   absenceAuthorizations: [],
   leaveBalances: [],
   timeEntries: [],
+  // Direct messages between two users (chat). See createMessage / getAllMessages.
+  messages: [],
   settings: defaultSettings()
 });
 
@@ -66,6 +71,7 @@ export async function initDb() {
     if (!db.absenceAuthorizations) db.absenceAuthorizations = [];
     if (!db.leaveBalances) db.leaveBalances = [];
     if (!db.timeEntries) db.timeEntries = [];
+    if (!db.messages) db.messages = [];
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
@@ -385,6 +391,29 @@ export async function initDb() {
         return true;
       }
       return false;
+    },
+    // Chat CRUD — flat list of DMs, filtered/grouped at the API layer the same
+    // way KPI stats are: the collection here stays a dumb array.
+    getAllMessages: async () => {
+      return db.messages;
+    },
+    createMessage: async (message: any) => {
+      db.messages.push(message);
+      await saveDb();
+      return message;
+    },
+    /** Marks every message from `fromUserId` to `readerId` as read. Returns how many changed. */
+    markMessagesRead: async (readerId: number, fromUserId: number) => {
+      let changed = 0;
+      const now = new Date().toISOString();
+      db.messages.forEach((m: any) => {
+        if (m.toUserId === readerId && m.fromUserId === fromUserId && !m.readAt) {
+          m.readAt = now;
+          changed++;
+        }
+      });
+      if (changed > 0) await saveDb();
+      return changed;
     },
     // Settings CRUD
     getSettings: async () => {
