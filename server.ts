@@ -557,9 +557,13 @@ app.get('/api/kpi/clients/search', authenticate, async (req: any, res: any) => {
  */
 app.post('/api/kpi/client-tasks', authenticate, async (req: any, res: any) => {
   try {
-    if (!DASHBOARD_ROLES.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
+    // Open to everyone, scoped the same way /api/kpi/dashboard is: a viewer
+    // without a team role is pinned to their own id server-side, so the
+    // personal dashboard can drill into a client and still only ever see its
+    // own tasks — sending someone else's filterUserIds changes nothing.
+    const isTeamViewer = DASHBOARD_ROLES.includes(req.user.role);
+    if (!isTeamViewer) req.body.filterUserIds = [req.user.id];
+
     const { key } = req.body || {};
     if (!key) return res.status(400).json({ error: 'A client key is required' });
 
