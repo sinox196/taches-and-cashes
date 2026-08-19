@@ -7,6 +7,12 @@ import { InvoicePreview } from './InvoicePreview';
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
+/** Payment dates are stored ISO; the Cash screen reads DD/MM/YYYY throughout. */
+const frDate = (iso: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
+};
+
 const KIND_LABEL: Record<string, string> = {
   FACTURE_LEGALE: 'Facture légale',
   AUTRE: 'Autre document',
@@ -139,6 +145,8 @@ export const CashManagement: React.FC = () => {
                   <th className="px-4 py-3">Régime</th>
                   <th className="px-4 py-3 text-right">Total HT</th>
                   <th className="px-4 py-3 text-right bg-emerald-50/40">Net à payer</th>
+                  <th className="px-4 py-3 text-right">Montant encaissé</th>
+                  <th className="px-4 py-3 text-right">Reste à payer</th>
                   <th className="px-4 py-3 text-center">Actions</th>
                 </tr>
               </thead>
@@ -166,6 +174,40 @@ export const CashManagement: React.FC = () => {
                     <td className="px-4 py-3 text-right font-mono text-gray-700">{money(inv.totalHT)}</td>
                     <td className="px-4 py-3 text-right bg-emerald-50/20">
                       <span className="font-mono font-semibold text-emerald-900">{money(inv.totalNetToPay)} DT</span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {(inv.payments?.length ?? 0) === 0 ? (
+                        <span className="text-gray-300">—</span>
+                      ) : (
+                        <div>
+                          <div className="font-mono font-semibold text-gray-900">
+                            {money(inv.totalPaid ?? 0)} DT
+                          </div>
+                          <div className="text-[10.5px] text-gray-500 leading-tight mt-0.5">
+                            {inv.payments.map((pay: any) => (
+                              <div key={pay.id} className="whitespace-nowrap">
+                                {money(pay.amount)} · {frDate(pay.date)}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {(() => {
+                        const remaining = inv.remainingToPay ?? inv.totalNetToPay ?? 0;
+                        // Negative means the client overpaid — shown, never
+                        // clamped to zero, because that hides a real error.
+                        const settled = Math.abs(remaining) < 0.001;
+                        return (
+                          <span className={`font-mono font-semibold ${
+                            settled ? 'text-emerald-700'
+                              : remaining < 0 ? 'text-amber-700' : 'text-gray-900'
+                          }`}>
+                            {settled ? 'Soldé' : `${money(remaining)} DT`}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {canManage && (

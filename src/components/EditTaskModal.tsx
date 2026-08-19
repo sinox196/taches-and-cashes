@@ -7,6 +7,8 @@ interface EditTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (updated: TimeEntry) => void;
+  /** Every type de tâche; the field offers those of this entry's mission. */
+  taskTypes: any[];
 }
 
 export const EditTaskModal: React.FC<EditTaskModalProps> = ({
@@ -14,6 +16,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  taskTypes,
 }) => {
   const [client, setClient] = useState('');
   const [description, setDescription] = useState('');
@@ -21,6 +24,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [heureDebut, setHeureDebut] = useState('');
   const [heureFin, setHeureFin] = useState('');
   const [statut, setStatut] = useState<'COMPLETED' | 'RUNNING' | 'PAUSED'>('COMPLETED');
+  const [taskTypeId, setTaskTypeId] = useState('');
 
   useEffect(() => {
     if (entry) {
@@ -30,10 +34,18 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       setHeureDebut(entry.heureDebut);
       setHeureFin(entry.heureFin);
       setStatut(entry.statut);
+      setTaskTypeId(entry.taskTypeId != null ? String(entry.taskTypeId) : '');
     }
   }, [entry]);
 
   if (!isOpen || !entry) return null;
+
+  // Types belong to a mission, so only that mission's are offered. A mission
+  // with none configured leaves the field empty rather than blocking the save.
+  const availableTaskTypes = entry.serviceId != null
+    ? taskTypes.filter(t => String(t.serviceId) === String(entry.serviceId))
+    : [];
+  const selectedTaskType = taskTypes.find(t => String(t.id) === taskTypeId);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +57,10 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       heureDebut,
       heureFin,
       statut,
+      // The name is snapshotted alongside the id, the same way `pole` snapshots
+      // the mission: renaming a type later must not rewrite history.
+      taskTypeId: selectedTaskType ? Number(selectedTaskType.id) : undefined,
+      taskType: selectedTaskType ? selectedTaskType.name : undefined,
     });
     onClose();
   };
@@ -102,6 +118,25 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                 onChange={(e) => setPole(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Type de tâche
+              </label>
+              <select
+                value={taskTypeId}
+                onChange={(e) => setTaskTypeId(e.target.value)}
+                disabled={availableTaskTypes.length === 0}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:text-slate-400 disabled:cursor-not-allowed"
+              >
+                <option value="">
+                  {availableTaskTypes.length === 0 ? 'Aucun type pour cette mission' : 'Aucun'}
+                </option>
+                {availableTaskTypes.map(t => (
+                  <option key={t.id} value={String(t.id)}>{t.name}</option>
+                ))}
+              </select>
             </div>
 
             <div>

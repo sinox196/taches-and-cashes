@@ -456,7 +456,7 @@ export default function App() {
 
               </div>
 
-              <div className="lg:w-[320px] shrink-0 lg:sticky lg:top-6">
+              <div className="flex-1 min-w-0 lg:sticky lg:top-6">
                 {hasPermission('VIEW') && myRunningEntry ? (
                   <ActiveTimerCard
                     timerState={activeTimer}
@@ -513,6 +513,7 @@ export default function App() {
         isOpen={Boolean(editingEntry)}
         onClose={() => setEditingEntry(null)}
         onSave={handleSaveEdit}
+        taskTypes={taskTypesList}
       />
 
       {toastMessage && (

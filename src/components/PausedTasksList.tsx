@@ -21,12 +21,13 @@ export const PausedTasksList: React.FC<PausedTasksListProps> = ({ entries, onRes
             onClick={() => onResume(entry)}
             className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors group"
           >
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-[13px] text-gray-900">{entry.client}</span>
-                <span className="text-gray-400 text-[11px] px-2 py-0.5 rounded-full bg-gray-100 border border-gray-200">{entry.pole}</span>
-              </div>
-              <span className="text-[12px] text-gray-600">{entry.description}</span>
+            <div className="flex flex-col gap-1 min-w-0">
+              <span className="font-bold text-[13px] text-gray-900 truncate" title={entry.pole}>
+                {entry.pole || '—'}
+              </span>
+              <span className="text-[12px] text-gray-600 truncate" title={entry.taskType || ''}>
+                {entry.taskType || <span className="text-gray-300">—</span>}
+              </span>
             </div>
             
             <div className="flex items-center gap-6">

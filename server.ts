@@ -25,7 +25,13 @@ const publicUser = (u: any) => {
   return { ...rest, permissions: JSON.parse(permissions || '[]') };
 };
 
-const num = (v: any, fallback: number) => (typeof v === 'number' ? v : fallback);
+// NaN must not pass: `typeof NaN === 'number'`, so an absent field read as
+// Number(undefined) used to flow straight into the money cascade and turn
+// totalNetToPay into NaN, stored as null — a document with no amount at all.
+const num = (v: any, fallback: number) =>
+  (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+/** Money is carried to the millime (3 decimals) at every step. */
+const round3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 
 /** Attaches the admin-set annual leave allowance and its consumption to a user payload. */
 const withLeaveBalance = (user: any, balances: any[]) => {
@@ -1316,7 +1322,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const suspended = invoice.vatRegime === 'SUSPENSION';
     const lines = Array.isArray(invoice.lines) ? invoice.lines : [];
 
-    const round3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 
     let totalHT = 0;
     const vatByRate = new Map<number, number>();
@@ -1356,6 +1361,43 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       advances,
       totalNetToPay,
     };
+  };
+
+  /**
+   * Encaissements — what the client has actually paid against a document.
+   *
+   * A document can be settled in several instalments, so this is a *list*, each
+   * entry carrying its own amount and date; the two figures shown in the Cash
+   * table are derived from it and never stored independently:
+   *
+   *   totalPaid     = sum of the encaissements
+   *   remainingToPay = (10) total net à payer − totalPaid
+   *
+   * Deliberately outside `computeInvoiceTotals()`, which owns the numbered
+   * cascade (1)–(10) of the cahier des charges and stops at (10). Payments come
+   * after the document is issued and must not shift any of those numbers.
+   *
+   * `remainingToPay` may go negative (an overpayment); that is surfaced rather
+   * than clamped, because silently showing 0 would hide a real accounting error.
+   */
+  const normalizePayments = (rawPayments: any): any[] => {
+    if (!Array.isArray(rawPayments)) return [];
+    return rawPayments
+      .map((p: any) => ({
+        id: String(p?.id || `pay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        amount: round3(num(Number(p?.amount), 0)),
+        date: String(p?.date || '').slice(0, 10),
+        note: String(p?.note || '').trim(),
+      }))
+      .filter((p: any) => p.date && Number.isFinite(p.amount))
+      // Chronological, so the table reads as a payment history.
+      .sort((a: any, b: any) => a.date.localeCompare(b.date));
+  };
+
+  const computePaymentState = (totalNetToPay: number, rawPayments: any) => {
+    const payments = normalizePayments(rawPayments);
+    const totalPaid = round3(payments.reduce((sum: number, p: any) => sum + p.amount, 0));
+    return { payments, totalPaid, remainingToPay: round3(totalNetToPay - totalPaid) };
   };
 
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
@@ -1449,6 +1491,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
 
       const totals = computeInvoiceTotals(body);
+      const paymentState = computePaymentState(totals.totalNetToPay, body.payments);
       if (kind !== 'AUTRE') number = await db.nextInvoiceNumber();
 
       const invoice = await db.createInvoice({
@@ -1474,6 +1517,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           montantHT: num(Number(l.montantHT), 0),
         })),
         ...totals,
+        ...paymentState,
         createdBy: req.user.id,
         createdAt: new Date().toISOString(),
       });
@@ -1521,10 +1565,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Chaque ligne doit avoir une désignation' });
       }
       const totals = computeInvoiceTotals(merged);
+      const paymentState = computePaymentState(totals.totalNetToPay, merged.payments);
 
       const updated = await db.updateInvoice(req.params.id, {
         ...merged,
         ...totals,
+        ...paymentState,
         updatedAt: new Date().toISOString(),
       });
       res.json(updated);
