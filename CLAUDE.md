@@ -10,6 +10,10 @@ npm run dev      # tsx server.ts — Express + Vite middleware on http://localho
 npm run lint     # tsc --noEmit (the only check in the repo)
 npm run build    # vite build  +  esbuild bundle of server.ts -> dist/server.cjs
 npm start        # node dist/server.cjs (set NODE_ENV=production so it serves dist/ instead of Vite)
+
+# Database (PostgreSQL — see DEPLOY.md)
+DATABASE_URL="postgresql://..." npm run db:import -- local.db.json   # JSON snapshot -> empty Postgres
+DATABASE_URL="postgresql://..." npm run db:backup                     # Postgres -> backups/backup-<ts>.json
 ```
 
 There is **no test runner and no test suite** — don't invent test commands. `npm run lint` is the verification step.
@@ -26,15 +30,31 @@ Seeded logins (created on first boot, see [database.ts:52-99](src/server/databas
 
 React 19 + Vite 6 + Tailwind v4 SPA in [src/](src/), served by a single-file Express API in [server.ts](server.ts) (~1275 lines, all routes inside one `startServer()`).
 
-### Persistence is a JSON file, not SQL
+### Two storage backends behind one interface
 
-[src/server/database.ts](src/server/database.ts) holds the *entire* database in a module-level object and rewrites `local.db.json` (in `process.cwd()`) in full on every mutation. Consequences that bite:
+`server.ts` only ever talks to a `Database` ([src/server/db-types.ts](src/server/db-types.ts)). Which engine sits behind it is decided once, in `initDb()`:
+
+- **`DATABASE_URL` set → PostgreSQL** ([src/server/db-postgres.ts](src/server/db-postgres.ts)). The deployed configuration. In `NODE_ENV=production` the server **refuses to start** without it rather than quietly running on a file with no backups.
+- **unset → the JSON file** ([src/server/database.ts](src/server/database.ts)), so `npm run dev` needs no database running. Development only.
+
+Both are declared as `Database`, which is what stops them drifting: a method added to one and forgotten in the other fails `npm run lint`. **Adding a collection means adding it to both**, plus the shared interface. Seeding is shared too — `seedDefaults()` is written against the interface, so there is one copy of it, not one per engine.
+
+Records are stored **identically in both**: Postgres keeps each one as `(id TEXT PRIMARY KEY, seq BIGSERIAL, data JSONB)` rather than a column per field. That is deliberate — the records are already document-shaped (free-form `customFields`, JSON-stringified `permissions`, nested invoice lines, dates as display strings in two formats), so normalising them would have meant rewriting every read in `server.ts` and putting the invoice cascade and the historical rates in the blast radius. Keeping the shape identical is what let the backend swap without touching `server.ts` at all.
+
+Things that bite in both:
 
 - `db.get('SELECT * FROM users WHERE id = ?', param)` is a **fake SQL shim** that only recognizes `WHERE username = ?` and `WHERE id = ?`, and only over `users`. Any other SQL string silently returns `null`. Everything else goes through named methods (`getAllClients`, `createTimeEntry`, `updateLeaveBalance`, …).
 - `permissions` is stored **JSON-stringified** on the user row. Every user-facing response must go through `publicUser()` in [server.ts](server.ts), which strips the password and parses it back to an array — a route that returns the raw row hands the client a string where it expects an array and crashes the users table on `.map`.
-- The seeded `admin`/`collab` accounts use fixed ids `1` and `2`. Keep them fixed: with `Date.now()` ids, deleting `local.db.json` silently invalidated every issued JWT and every request came back `401 Unauthorized`.
-- Adding a new collection means adding it to the initial object, to the backfill block in `initDb()`, *and* as CRUD methods on the returned object.
-- No transactions, no concurrent-write safety. Reads/writes are whole-array scans.
+- The seeded `admin`/`collab` accounts use fixed ids `1` and `2`. Keep them fixed: with `Date.now()` ids, reseeding silently invalidated every issued JWT and every request came back `401 Unauthorized`.
+- **Ordering is load-bearing.** `createTimeEntry`/`createInvoice` prepend (newest first); everything else appends. Postgres reproduces that with `ORDER BY seq DESC` for those two tables only, which is also why the import inserts them reversed. Get it wrong and history silently displays backwards.
+- Methods return **copies** under Postgres, not live references. Nothing may mutate a returned object and expect it to persist — call the update method.
+- `available` on a leave balance is **derived, never stored**, in both engines.
+
+**PostgreSQL-only properties** (the reasons to use it): transactional writes, so a crash cannot corrupt anything; `nextInvoiceNumber()` is a single atomic `UPDATE … RETURNING`, so two documents created at the same instant can't take the same legal number; row-level updates instead of rewriting the whole file; safe across multiple instances; and the platform's managed backups. Untyped `NULL` parameters must be **cast explicitly** (`$2::float8`) — Postgres assumes `text` and the statement fails.
+
+**JSON-file-only caveats:** no transactions and no concurrent-write safety, whole-array scans, and the whole file is rewritten on every mutation (~12 MB per write at 300 clients / 6000 entries). Writes go to a `.tmp` and are `rename`d into place, keeping the previous copy as `local.db.json.bak`, because writing in place meant a crash mid-write left truncated JSON. A file that exists but won't parse **aborts the boot** — it used to be swallowed, leaving `db` empty, which then saved an empty database over the damaged one.
+
+See [DEPLOY.md](DEPLOY.md) for provisioning, `npm run db:import` (JSON snapshot → empty Postgres) and `npm run db:backup` (Postgres → portable JSON dump; needs no `pg_dump`).
 
 ### Auth and permissions
 
@@ -166,4 +186,4 @@ Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use
 - [README.md](README.md) is the untouched Google AI Studio template; `GEMINI_API_KEY` and the `@google/genai` dependency are unused leftovers.
 - Path alias `@/*` maps to the project root (both [vite.config.ts](vite.config.ts) and [tsconfig.json](tsconfig.json)). Tailwind v4 is configured entirely through the Vite plugin — there is no `tailwind.config.js`.
 - `DISABLE_HMR=true` turns off HMR *and* file watching in [vite.config.ts](vite.config.ts) — it exists so agent edits don't cause flicker.
-- `local.db.json` is not gitignored but is generated on first run; treat it as disposable local state (delete it to reseed the default accounts).
+- `local.db.json` is gitignored (it holds bcrypt hashes and real client data) and generated on first run; treat it as disposable *local* state — delete it to reseed the default accounts. Deployments do not use it at all.

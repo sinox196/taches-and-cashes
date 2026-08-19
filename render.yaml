@@ -1,3 +1,16 @@
+# Render blueprint. Kept for the test deployment; Railway is the intended
+# production target and reads railway.json instead. Both get their database the
+# same way — a managed PostgreSQL instance injecting DATABASE_URL — so the app
+# is identical on either and can move between them with a dump and a restore.
+
+databases:
+  - name: taches-db
+    databaseName: tachescash
+    user: tachescash
+    # Render's free PostgreSQL is deleted after 30 days. Fine for a test
+    # deployment; move to a paid plan (or to Railway) before it holds real data.
+    plan: free
+
 services:
   - type: web
     name: taches-and-cashes
@@ -13,11 +26,10 @@ services:
       # becomes invalid.
       - key: JWT_SECRET
         generateValue: true
-      # Points the JSON "database" at the persistent disk below instead of
-      # the app's ephemeral build directory, which is wiped on every deploy.
-      - key: DB_PATH
-        value: /var/data/local.db.json
-    disk:
-      name: data
-      mountPath: /var/data
-      sizeGB: 1
+      # The whole point of the managed database: durable, transactional, and
+      # backed up by the platform. Without it the app now refuses to start in
+      # production rather than quietly running on a JSON file that has neither.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taches-db
+          property: connectionString

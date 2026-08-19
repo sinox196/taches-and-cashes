@@ -106,7 +106,10 @@ const accruedSeconds = (t: any) => {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Railway (and Render) assign the port at runtime and expect the app to bind
+  // whatever they put in $PORT; a hardcoded one fails their health check and
+  // the deploy never goes live. 3000 stays the local default.
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 

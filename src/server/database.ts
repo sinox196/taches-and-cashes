@@ -1,65 +1,55 @@
 import fs from 'fs/promises';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import {
+  Database,
+  DEFAULT_LEAVE_ENTITLEMENT,
+  defaultSettings,
+  emptyDb,
+  normalizeBalance,
+  seedDefaults,
+} from './db-types.js';
+import { initPostgres } from './db-postgres.js';
+
+export { DEFAULT_LEAVE_ENTITLEMENT } from './db-types.js';
+export type { Database } from './db-types.js';
 
 // Overridable so a deploy with an ephemeral root filesystem (e.g. Render
 // without this path on a mounted persistent disk) can point it somewhere
 // durable. Defaults to the previous behaviour when unset.
 const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'local.db.json');
 
-/**
- * Default employer charge rates — those a Tunisian services provider actually
- * pays. The admin can override them in Settings; this is only the starting point.
- */
-const defaultSettings = () => ({
-  employerCharges: {
-    cnss: 16.57,
-    tfp: 2.0,
-    foprolos: 1.0,
-    accidentTravail: 0.5
-  }
-});
-
-const emptyDb = () => ({
-  users: [],
-  clients: [],
-  services: [],
-  // Types de tâches — each belongs to a mission (service) via serviceId.
-  taskTypes: [],
-  // Cash / facturation documents.
-  invoices: [],
-  leaveRequests: [],
-  absenceAuthorizations: [],
-  leaveBalances: [],
-  timeEntries: [],
-  // Direct messages between two users (chat). See createMessage / getAllMessages.
-  messages: [],
-  settings: defaultSettings()
-});
-
-// In-memory cache
+// In-memory cache of the whole JSON file.
 let db: any = emptyDb();
 
-/** Annual leave allowance given to a user who has never been configured. */
-export const DEFAULT_LEAVE_ENTITLEMENT = 20;
-
 /**
- * A leave balance is stored as { entitlement, used }; `available` is always
- * derived, never stored. Older rows stored a decrementing `available` instead —
- * for those the annual allowance is recovered as available + used.
+ * Chooses the storage engine.
+ *
+ * PostgreSQL whenever DATABASE_URL is set — that is the deployed configuration,
+ * and the only one with transactional writes and managed backups. The JSON file
+ * remains for local development so `npm run dev` needs no database running; it
+ * is not fit for a deployment and refuses to serve one.
  */
-function normalizeBalance(b: any) {
-  const used = typeof b.used === 'number' ? b.used : 0;
-  const entitlement =
-    typeof b.entitlement === 'number'
-      ? b.entitlement
-      : typeof b.available === 'number'
-        ? b.available + used
-        : DEFAULT_LEAVE_ENTITLEMENT;
-  return { userId: b.userId, entitlement, used, available: entitlement - used };
+export async function initDb(): Promise<Database> {
+  const url = process.env.DATABASE_URL;
+  if (url) {
+    let host = '?';
+    try { host = new URL(url).host; } catch { /* keep the URL out of the log either way */ }
+    console.log('Database: PostgreSQL at ' + host);
+    return initPostgres(url);
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'DATABASE_URL is not set. Refusing to start in production against the JSON ' +
+      'file: it has no backups and a crash mid-write loses everything. ' +
+      'Provision a PostgreSQL database and set DATABASE_URL.',
+    );
+  }
+  console.log('Database: JSON file at ' + DB_PATH + ' (development only — no backups)');
+  return initJsonDb();
 }
 
-export async function initDb() {
+async function initJsonDb(): Promise<Database> {
   try {
     const data = await fs.readFile(DB_PATH, 'utf-8');
     db = JSON.parse(data);
@@ -76,71 +66,23 @@ export async function initDb() {
     if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
-      // File doesn't exist, start with empty structure
+      // No file yet: genuinely a first run.
       db = emptyDb();
       await saveDb();
+    } else {
+      // Anything else — above all a SyntaxError from a file truncated by a
+      // crash mid-write — must stop the boot. The previous code swallowed it,
+      // left `db` at its empty initial value, then saved that empty database
+      // over the damaged one: silent, total, unrecoverable loss.
+      throw new Error(
+        'Refusing to start: ' + DB_PATH + ' exists but could not be read (' +
+        error.message + '). Restore it from ' + DB_PATH + '.bak, or move it ' +
+        'aside to start from an empty database.',
+      );
     }
   }
 
-  // Ensure Admin exists
-  const adminIndex = db.users.findIndex((u: any) => u.username === 'admin');
-  if (adminIndex === -1) {
-    const hashed = await bcrypt.hash('admin123', 10);
-    db.users.push({
-      // Fixed ids: a reseeded database keeps issued JWTs valid instead of
-      // failing every request with a confusing "Unauthorized".
-      id: 1,
-      username: 'admin',
-      password: hashed,
-      role: 'ADMIN',
-      permissions: JSON.stringify(['VIEW', 'EDIT', 'MODIFY', 'DELETE', 'MANAGE_USERS', 'VIEW_CLIENTS', 'CREATE_CLIENTS', 'EDIT_CLIENTS', 'DELETE_CLIENTS', 'MANAGE_CLIENT_FIELDS', 'MANAGE_SERVICES', 'VIEW_CASH', 'MANAGE_CASH', 'VIEW_HR', 'CREATE_LEAVE_REQUEST', 'MANAGE_LEAVE_REQUESTS', 'CREATE_ABSENCE_AUTHORIZATION', 'MANAGE_ABSENCE_AUTHORIZATIONS'])
-    });
-    await saveDb();
-    console.log('Created default admin account (admin / admin123)');
-  } else {
-     // Ensure existing admin has client permissions for backward compatibility in dev
-     let perms = JSON.parse(db.users[adminIndex].permissions || '[]');
-     if (!perms.includes('VIEW_HR')) {
-         if (!perms.includes('VIEW_CLIENTS')) perms.push('VIEW_CLIENTS', 'CREATE_CLIENTS', 'EDIT_CLIENTS', 'DELETE_CLIENTS');
-         if (!perms.includes('MANAGE_SERVICES')) perms.push('MANAGE_SERVICES');
-         perms.push('VIEW_HR', 'CREATE_LEAVE_REQUEST', 'MANAGE_LEAVE_REQUESTS', 'CREATE_ABSENCE_AUTHORIZATION', 'MANAGE_ABSENCE_AUTHORIZATIONS');
-         db.users[adminIndex].permissions = JSON.stringify(perms);
-         await saveDb();
-     }
-     // Cash arrived after these accounts existed; grant it to an existing admin.
-     let adminPerms = JSON.parse(db.users[adminIndex].permissions || '[]');
-     if (!adminPerms.includes('VIEW_CASH')) {
-         adminPerms.push('VIEW_CASH', 'MANAGE_CASH');
-         db.users[adminIndex].permissions = JSON.stringify(adminPerms);
-         await saveDb();
-     }
-  }
-
-  // Ensure Collab exists
-  const collabIndex = db.users.findIndex((u: any) => u.username === 'collab');
-  if (collabIndex === -1) {
-    const hashed = await bcrypt.hash('collab123', 10);
-    db.users.push({
-      id: 2,
-      username: 'collab',
-      password: hashed,
-      role: 'COLLABORATOR',
-      permissions: JSON.stringify(['VIEW', 'EDIT', 'MODIFY', 'DELETE', 'VIEW_CLIENTS', 'VIEW_HR', 'CREATE_LEAVE_REQUEST', 'CREATE_ABSENCE_AUTHORIZATION'])
-    });
-    await saveDb();
-    console.log('Created default collab account (collab / collab123)');
-  } else {
-     // Ensure existing collab has VIEW_CLIENTS
-     let perms = JSON.parse(db.users[collabIndex].permissions || '[]');
-     if (!perms.includes('VIEW_HR')) {
-         if (!perms.includes('VIEW_CLIENTS')) perms.push('VIEW_CLIENTS');
-         perms.push('VIEW_HR', 'CREATE_LEAVE_REQUEST', 'CREATE_ABSENCE_AUTHORIZATION');
-         db.users[collabIndex].permissions = JSON.stringify(perms);
-         await saveDb();
-     }
-  }
-
-  return {
+  const impl: Database = {
     get: async (sql: string, param: any) => {
       if (sql.includes('WHERE username = ?')) {
         return db.users.find((u: any) => u.username === param);
@@ -425,6 +367,9 @@ export async function initDb() {
       return db.settings;
     }
   };
+
+  await seedDefaults(impl, bcrypt);
+  return impl;
 }
 
 /**
@@ -443,7 +388,18 @@ let queuedWrite: Promise<void> | null = null;
 async function flushDb() {
   // Serialise inside the flush so we always persist the latest state, not a
   // snapshot taken when the call was queued.
-  await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
+  const payload = JSON.stringify(db, null, 2);
+  // rename() is atomic within a filesystem: a reader either sees the whole old
+  // file or the whole new one, never a half-written one. Writing in place meant
+  // a crash mid-write left truncated JSON, which used to be unrecoverable.
+  const tmp = DB_PATH + '.tmp';
+  await fs.writeFile(tmp, payload, 'utf-8');
+  try {
+    await fs.copyFile(DB_PATH, DB_PATH + '.bak');
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') throw e; // first write: nothing to back up yet
+  }
+  await fs.rename(tmp, DB_PATH);
 }
 
 function saveDb(): Promise<void> {

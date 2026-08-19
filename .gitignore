@@ -9,3 +9,8 @@ coverage/
 
 # Local JSON database — contains bcrypt password hashes and real client data.
 local.db.json
+
+# Local database dumps — bcrypt hashes and real client data.
+backups/
+local.db.json.bak
+local.db.json.tmp
