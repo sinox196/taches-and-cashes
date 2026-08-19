@@ -1394,6 +1394,45 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       .sort((a: any, b: any) => a.date.localeCompare(b.date));
   };
 
+  /**
+   * Dates may not decrease along the legal sequence.
+   *
+   * Numbering and chronology have to agree: invoice n° 2 cannot be dated before
+   * n° 1. Two invoices *may* share a date — only going backwards is refused.
+   *
+   * Both ends are checked, which is what creation alone could not do. A new
+   * invoice always takes the highest number, so it only ever had a predecessor;
+   * an *edit* sits in the middle of the sequence, and moving n° 2 later than
+   * n° 3 breaks the ordering just as surely as moving it before n° 1.
+   *
+   * Pass `Infinity` as the number for a document being created, before its
+   * number is reserved: it is by definition the last one.
+   *
+   * Returns an error message, or null when the date is acceptable.
+   */
+  const legalSequenceDateError = (
+    allInvoices: any[],
+    selfId: string | null,
+    number: number,
+    issueDate: string,
+  ): string | null => {
+    const others = allInvoices
+      .filter((i: any) => i.documentKind !== 'AUTRE' && i.id !== selfId && i.issueDate)
+      .map((i: any) => ({ n: Number(i.number), label: String(i.number), date: String(i.issueDate) }))
+      .filter((i: any) => Number.isFinite(i.n));
+
+    const previous = others.filter(i => i.n < number).sort((a, b) => b.n - a.n)[0];
+    if (previous && issueDate < previous.date) {
+      return `La date ne peut pas précéder celle de la facture n° ${previous.label} (${previous.date}).`;
+    }
+
+    const following = others.filter(i => i.n > number).sort((a, b) => a.n - b.n)[0];
+    if (following && issueDate > following.date) {
+      return `La date ne peut pas suivre celle de la facture n° ${following.label} (${following.date}).`;
+    }
+    return null;
+  };
+
   const computePaymentState = (totalNetToPay: number, rawPayments: any) => {
     const payments = normalizePayments(rawPayments);
     const totalPaid = round3(payments.reduce((sum: number, p: any) => sum + p.amount, 0));
@@ -1482,15 +1521,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           return res.status(400).json({ error: `Le numéro « ${number} » est déjà utilisé.` });
         }
       } else {
-        // "La date de la facture N°2 doit être la même que la facture N°1 ou
-        // bien le jour suivant" — this ordering rule belongs to the sequence,
-        // so it applies to legal invoices only.
-        const lastLegal = all.find((i: any) => i.documentKind !== 'AUTRE');
-        if (lastLegal?.issueDate && body.issueDate < lastLegal.issueDate) {
-          return res.status(400).json({
-            error: `La date doit être postérieure ou égale à celle de la dernière facture (${lastLegal.issueDate}).`,
-          });
-        }
+        // The ordering rule belongs to the sequence, so it applies to legal
+        // invoices only. A new one is always last, hence Infinity.
+        const dateError = legalSequenceDateError(all, null, Infinity, body.issueDate);
+        if (dateError) return res.status(400).json({ error: dateError });
       }
 
       const totals = computeInvoiceTotals(body);
@@ -1566,6 +1600,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
       if (merged.lines.some((l: any) => !String(l.designation || '').trim())) {
         return res.status(400).json({ error: 'Chaque ligne doit avoir une désignation' });
+      }
+      // Editing bypassed the ordering rule entirely, so a legal invoice created
+      // in order could be moved to any date afterwards.
+      if (merged.documentKind !== 'AUTRE') {
+        const dateError = legalSequenceDateError(
+          await db.getAllInvoices(), existing.id, Number(merged.number), merged.issueDate,
+        );
+        if (dateError) return res.status(400).json({ error: dateError });
       }
       const totals = computeInvoiceTotals(merged);
       const paymentState = computePaymentState(totals.totalNetToPay, merged.payments);
