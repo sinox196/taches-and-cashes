@@ -127,6 +127,8 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
               <th className="px-3 py-3 text-center">Intervenants</th>
               <th className="px-4 py-3">Durée</th>
               {isAdmin && <th className="px-4 py-3 text-right bg-emerald-50/40">Coût employeur</th>}
+              {isAdmin && <th className="px-4 py-3 text-right">Net à payer</th>}
+              {isAdmin && <th className="px-4 py-3 text-right">Montant encaissé</th>}
             </tr>
           </thead>
           <tbody className="text-[12.5px] divide-y divide-gray-100">
@@ -188,11 +190,53 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                         )}
                       </td>
                     )}
+                    {/* Invoicing for this client over the same period. A client
+                        with no document in the range reads as a dash, not 0 —
+                        "nothing invoiced" and "invoiced zero" are different. */}
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        {(client.invoiceCount ?? 0) === 0 ? (
+                          <span className="text-gray-300">—</span>
+                        ) : (
+                          <>
+                            <span className="font-semibold text-gray-900">
+                              {formatCostTND(client.netToPay ?? 0)}
+                            </span>
+                            <span className="block text-[10px] text-gray-400 font-normal">
+                              {client.invoiceCount} doc.
+                            </span>
+                          </>
+                        )}
+                      </td>
+                    )}
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        {(client.invoiceCount ?? 0) === 0 ? (
+                          <span className="text-gray-300">—</span>
+                        ) : (
+                          <>
+                            <span className="font-semibold text-gray-900">
+                              {formatCostTND(client.totalPaid ?? 0)}
+                            </span>
+                            {/* The remainder is what an admin actually chases. */}
+                            <span className={`block text-[10px] font-normal ${
+                              Math.abs(client.remainingToPay ?? 0) < 0.001
+                                ? 'text-emerald-600'
+                                : (client.remainingToPay ?? 0) < 0 ? 'text-amber-600' : 'text-gray-400'
+                            }`}>
+                              {Math.abs(client.remainingToPay ?? 0) < 0.001
+                                ? 'soldé'
+                                : `reste ${formatCostTND(client.remainingToPay ?? 0)}`}
+                            </span>
+                          </>
+                        )}
+                      </td>
+                    )}
                   </tr>
 
                   {isOpen && (
                     <tr>
-                      <td colSpan={isAdmin ? 5 : 4} className="px-4 pb-4 pt-1 bg-gray-50/50">
+                      <td colSpan={isAdmin ? 7 : 4} className="px-4 pb-4 pt-1 bg-gray-50/50">
                         {/* Who worked on this client */}
                         <div className="mb-3">
                           <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">

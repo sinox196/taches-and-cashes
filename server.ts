@@ -898,8 +898,35 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       clientBuckets.get(key)!.push(t);
     });
 
+    // ----- Invoicing per client, under the same filters.
+    // Documents carry `clientName` where entries carry `client`, so they are
+    // normalised onto the identical bucket key — otherwise a client tracked by
+    // name on one side and by id on the other would split into two rows.
+    const invoiceBuckets = new Map<string, { netToPay: number; paid: number; count: number }>();
+    const allInvoices = await db.getAllInvoices() || [];
+    for (const inv of allInvoices) {
+      const ts = parseIsoDate(inv.issueDate);
+      if (ts < startTs || ts > endTs) continue;
+      if (filterClientIds && filterClientIds.length > 0 && !filterClientIds.includes(inv.clientId)) continue;
+      const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
+      const acc = invoiceBuckets.get(key) || { netToPay: 0, paid: 0, count: 0 };
+      acc.netToPay += num(Number(inv.totalNetToPay), 0);
+      acc.paid += num(Number(inv.totalPaid), 0);
+      acc.count += 1;
+      invoiceBuckets.set(key, acc);
+      // A client invoiced in the period but with no tracked time still belongs
+      // in the table: otherwise its billing would silently read as zero.
+      if (!clientBuckets.has(key)) clientBuckets.set(key, []);
+    }
+
     const clientStats = [...clientBuckets.entries()].map(([key, entries]) => {
-      const first = entries[0];
+      // A bucket with no entries came from an invoice; fall back to that
+      // document for the client's identity.
+      const invoiceSample = entries.length === 0
+        ? allInvoices.find((i: any) =>
+            clientBucketKey({ clientId: i.clientId, client: i.clientName }) === key)
+        : null;
+      const first = entries[0] ?? { clientId: invoiceSample?.clientId ?? null, client: invoiceSample?.clientName || 'Sans client' };
       const clientRecord = first.clientId != null ? clientsById.get(first.clientId) : null;
 
       const durationSeconds = entries.reduce((s: number, t: any) => s + accruedSeconds(t), 0);
@@ -941,8 +968,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         totalCostFormatted: `${Math.round(totalCost).toLocaleString('fr-FR')} TND`,
         unpricedTasks,
         contributors,
+        // Billing for the same client over the same period. `remainingToPay`
+        // stays derived rather than summed from the documents, so it can never
+        // disagree with the two figures shown beside it.
+        invoiceCount: invoiceBuckets.get(key)?.count ?? 0,
+        netToPay: round3(invoiceBuckets.get(key)?.netToPay ?? 0),
+        totalPaid: round3(invoiceBuckets.get(key)?.paid ?? 0),
+        remainingToPay: round3((invoiceBuckets.get(key)?.netToPay ?? 0) - (invoiceBuckets.get(key)?.paid ?? 0)),
       };
-    }).sort((a, b) => b.totalCost - a.totalCost || b.durationSeconds - a.durationSeconds);
+    }).sort((a, b) => b.totalCost - a.totalCost || b.netToPay - a.netToPay || b.durationSeconds - a.durationSeconds);
 
     if (isAdminViewer) {
       return res.json({ globalStats, employeeStats, clientStats });
@@ -950,7 +984,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
     // Employer cost is admin-only. A supervisor still gets the whole dashboard,
     // just without any money figures — stripped server-side, not merely hidden.
-    const stripCost = ({ totalCost, totalCostFormatted, hourlyRate, cost, ...rest }: any) => rest;
+    // Every money field, not just employer cost: what a client was invoiced
+    // and has paid is exactly as confidential, and hiding it in the UI alone
+    // would still ship it over the wire.
+    const stripCost = ({
+      totalCost, totalCostFormatted, hourlyRate, cost,
+      netToPay, totalPaid, remainingToPay, invoiceCount,
+      ...rest
+    }: any) => rest;
     res.json({
       globalStats: stripCost({ ...globalStats, tasksWithoutRate: undefined }),
       employeeStats: scopedEmployeeStats.map((e: any) => ({

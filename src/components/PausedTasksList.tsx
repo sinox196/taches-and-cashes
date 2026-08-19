@@ -22,11 +22,12 @@ export const PausedTasksList: React.FC<PausedTasksListProps> = ({ entries, onRes
             className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors group"
           >
             <div className="flex flex-col gap-1 min-w-0">
-              <span className="font-bold text-[13px] text-gray-900 truncate" title={entry.pole}>
-                {entry.pole || '—'}
+              <span className="font-bold text-[13px] text-gray-900 truncate" title={entry.client}>
+                {entry.client}
               </span>
-              <span className="text-[12px] text-gray-600 truncate" title={entry.taskType || ''}>
-                {entry.taskType || <span className="text-gray-300">—</span>}
+              <span className="text-[12px] text-gray-600 truncate" title={`${entry.pole || ''} · ${entry.taskType || ''}`}>
+                {entry.pole || '—'}
+                {entry.taskType ? <span className="text-gray-400"> · {entry.taskType}</span> : null}
               </span>
             </div>
             
