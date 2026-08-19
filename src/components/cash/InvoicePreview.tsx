@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Printer, Download, Pencil, Trash2 } from 'lucide-react';
 import { amountToFrenchWords } from '../../utils/amountToWords';
-import { downloadInvoice, printInvoicePdf } from './downloadInvoice';
+import { useAuth } from '../../context/AuthContext';
+import { downloadInvoicePdf, printInvoicePdf, CompanyBlock } from './invoicePdf';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -24,9 +25,22 @@ interface InvoicePreviewProps {
 
 /** The issued document, laid out as described in the cahier des charges. */
 export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose, onEdit, onDelete }) => {
+  const { token } = useAuth();
   const suspended = invoice.vatRegime === 'SUSPENSION';
   const detailed = invoice.billingMode === 'DETAILLEE';
   const custom = Object.entries(invoice.customFields || {});
+
+  // The issuer block belongs on every document, so it is loaded once here and
+  // handed to the PDF as well as rendered below.
+  const [block, setBlock] = useState<CompanyBlock | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/cash/company', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(body => { if (!cancelled && body) setBlock(body); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm overflow-y-auto print:static print:bg-white print:p-0">
@@ -53,14 +67,14 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               </button>
             )}
             <button
-              onClick={() => downloadInvoice(invoice)}
+              onClick={() => downloadInvoicePdf(invoice, block)}
               title="Enregistrer le document sur votre poste"
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
             >
-              <Download className="w-3.5 h-3.5" /> Télécharger (HTML)
+              <Download className="w-3.5 h-3.5" /> Télécharger PDF
             </button>
             <button
-              onClick={() => printInvoicePdf(invoice)}
+              onClick={() => printInvoicePdf(invoice, block)}
               title="Imprimer — choisissez « Enregistrer au format PDF » pour obtenir un PDF"
               className="px-3 py-1.5 bg-navy text-white rounded-lg text-[12px] font-medium hover:bg-navy-hover flex items-center gap-1.5"
             >
@@ -182,6 +196,51 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
             montant total TTC net de{' '}
             <span className="font-semibold">{amountToFrenchWords(invoice.totalNetToPay)}</span>.
           </p>
+
+          {/* Issuer footer — the same block the PDF prints, so the screen and
+              the file agree. */}
+          <div className="border-t border-gray-200 pt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-[11px]">
+            <div>
+              <div className="font-bold text-gray-400 uppercase tracking-[0.05em] text-[9.5px] mb-1">
+                Informations de l'entreprise
+              </div>
+              {block?.company?.name ? (
+                <div className="text-gray-700 leading-relaxed">
+                  <div className="font-semibold text-gray-900">{block.company.name}</div>
+                  {block.company.address && <div>{block.company.address}</div>}
+                  {block.company.taxId && <div>MF: {block.company.taxId}</div>}
+                  {(block.company.email || block.company.phone) && (
+                    <div>{[block.company.email, block.company.phone].filter(Boolean).join('  ')}</div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-gray-300 italic">Non renseignées</div>
+              )}
+            </div>
+
+            <div>
+              <div className="font-bold text-gray-400 uppercase tracking-[0.05em] text-[9.5px] mb-1">
+                Informations bancaires
+              </div>
+              <div className="text-gray-700 leading-relaxed">
+                <div>Banque : {block?.bank?.name || <span className="text-gray-300">—</span>}</div>
+                <div className="font-mono break-all">
+                  IBAN : {block?.bank?.iban || <span className="text-gray-300 font-sans">—</span>}
+                </div>
+              </div>
+            </div>
+
+            <div className="sm:text-right">
+              {block?.signature ? (
+                <>
+                  <img src={block.signature} alt="Signature" className="h-14 inline-block object-contain" />
+                  <div className="text-[9.5px] text-gray-400 mt-1">Signature</div>
+                </>
+              ) : (
+                <div className="text-gray-300 italic">Aucune signature</div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

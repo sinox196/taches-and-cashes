@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, AlertTriangle } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, AlertTriangle, Building2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
+import { CompanySettings } from './CompanySettings';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -37,6 +38,7 @@ export const CashManagement: React.FC = () => {
   const [search, setSearch] = useState('');
   /** false = closed, null = creating, object = editing that document. */
   const [editor, setEditor] = useState<false | { invoice: any | null }>(false);
+  const [companyOpen, setCompanyOpen] = useState(false);
   const [preview, setPreview] = useState<any | null>(null);
 
   const canManage = hasPermission('MANAGE_CASH');
@@ -100,6 +102,16 @@ export const CashManagement: React.FC = () => {
               className="pl-8 pr-3 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-56"
             />
           </div>
+          {canManage && (
+            <button
+              onClick={() => setCompanyOpen(true)}
+              title="Informations affichées au bas de chaque document"
+              className="px-4 py-2.5 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 shrink-0"
+            >
+              <Building2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Informations de facturation</span>
+            </button>
+          )}
           {canManage && (
             <button
               onClick={() => setEditor({ invoice: null })}
@@ -250,6 +262,8 @@ export const CashManagement: React.FC = () => {
           onSaved={() => { setEditor(false); setPreview(null); load(search.trim()); }}
         />
       )}
+
+      {companyOpen && <CompanySettings onClose={() => setCompanyOpen(false)} />}
 
       {preview && (
         <InvoicePreview

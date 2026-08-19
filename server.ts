@@ -119,7 +119,11 @@ async function startServer() {
   // the deploy never goes live. 3000 stays the local default.
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json());
+  // Default is 100kb, which is under the signature image the invoicing
+  // settings accept (400kb) — a legitimate upload came back as an opaque 413
+  // from the body parser instead of the clear message the route returns.
+  // Kept modest: every route is authenticated, and nothing else posts bulk.
+  app.use(express.json({ limit: '1mb' }));
 
   // Initialize SQLite database
   const db = await initDb();
@@ -242,6 +246,80 @@ async function startServer() {
       const updated = await db.updateSettings(updates);
       res.json(updated);
     } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * The issuer block printed at the foot of every document: who is invoicing,
+   * where to pay, and the signature.
+   *
+   * Held in settings rather than snapshotted onto each invoice, so correcting a
+   * typo in the IBAN fixes it everywhere at once. The trade-off is deliberate:
+   * changing the bank details also changes them on documents already issued.
+   * If that ever becomes a problem, snapshot it at creation the way `pole` is.
+   */
+  const companyBlock = (settings: any) => ({
+    company: {
+      name: String(settings?.company?.name || ''),
+      address: String(settings?.company?.address || ''),
+      taxId: String(settings?.company?.taxId || ''),
+      email: String(settings?.company?.email || ''),
+      phone: String(settings?.company?.phone || ''),
+    },
+    bank: {
+      name: String(settings?.bank?.name || ''),
+      iban: String(settings?.bank?.iban || ''),
+    },
+    signature: typeof settings?.signature === 'string' ? settings.signature : '',
+  });
+
+  /** Readable by anyone who may see documents — they all carry this footer. */
+  app.get('/api/cash/company', authenticate, requirePermission('VIEW_CASH'), async (_req: any, res: any) => {
+    try {
+      res.json(companyBlock(await db.getSettings()));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Writable with MANAGE_CASH — it is invoicing identity, not a global setting. */
+  app.put('/api/cash/company', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const body = req.body || {};
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+
+      // A signature is a small inline image. Anything else — a remote URL, a
+      // script-bearing SVG — is refused rather than stored and later rendered.
+      let signature = typeof body.signature === 'string' ? body.signature : undefined;
+      if (signature !== undefined) {
+        if (signature === '') {
+          // explicit removal
+        } else if (!/^data:image\/(png|jpeg|webp);base64,/.test(signature)) {
+          return res.status(400).json({ error: 'La signature doit être une image PNG, JPEG ou WEBP.' });
+        } else if (signature.length > 400_000) {
+          return res.status(400).json({ error: 'Signature trop lourde (400 Ko maximum).' });
+        }
+      }
+
+      const current = await db.getSettings();
+      const updated = await db.updateSettings({
+        company: {
+          name: text(body.company?.name, 120),
+          address: text(body.company?.address, 300),
+          taxId: text(body.company?.taxId, 60),
+          email: text(body.company?.email, 120),
+          phone: text(body.company?.phone, 40),
+        },
+        bank: {
+          name: text(body.bank?.name, 120),
+          iban: text(body.bank?.iban, 60),
+        },
+        signature: signature !== undefined ? signature : (current?.signature ?? ''),
+      });
+      res.json(companyBlock(updated));
+    } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
