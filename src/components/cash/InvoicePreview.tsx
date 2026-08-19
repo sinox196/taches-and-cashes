@@ -62,7 +62,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
             <button
               onClick={() => printInvoicePdf(invoice)}
               title="Imprimer — choisissez « Enregistrer au format PDF » pour obtenir un PDF"
-              className="px-3 py-1.5 bg-[#101828] text-white rounded-lg text-[12px] font-medium hover:bg-[#1d2939] flex items-center gap-1.5"
+              className="px-3 py-1.5 bg-navy text-white rounded-lg text-[12px] font-medium hover:bg-navy-hover flex items-center gap-1.5"
             >
               <Printer className="w-3.5 h-3.5" /> Imprimer / PDF
             </button>
@@ -170,7 +170,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               <Row label="Net à payer (7)" value={money(invoice.netToPay)} strong />
               {invoice.disbursements > 0 && <Row label="Remboursement de débours (8)" value={`+ ${money(invoice.disbursements)}`} />}
               {invoice.advances > 0 && <Row label="Moins avances perçues (9)" value={`− ${money(invoice.advances)}`} />}
-              <div className="flex justify-between px-4 py-3 bg-[#101828] text-white">
+              <div className="flex justify-between px-4 py-3 bg-navy text-white">
                 <span className="font-bold">Total net à payer (10)</span>
                 <span className="font-mono font-bold">{money(invoice.totalNetToPay)} DT</span>
               </div>

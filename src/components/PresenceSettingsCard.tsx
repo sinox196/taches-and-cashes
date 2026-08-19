@@ -92,7 +92,7 @@ export const PresenceSettingsCard: React.FC = () => {
             <button
               onClick={save}
               disabled={!dirty || saving}
-              className="ml-1 px-3 py-2 bg-[#101828] text-white rounded-lg text-[12px] font-medium hover:bg-[#1d2939] disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+              className="ml-1 px-3 py-2 bg-navy text-white rounded-lg text-[12px] font-medium hover:bg-navy-hover disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               {saving && <Loader className="w-3.5 h-3.5 animate-spin" />}
               Enregistrer

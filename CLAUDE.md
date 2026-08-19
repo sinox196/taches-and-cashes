@@ -196,6 +196,29 @@ Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use
 
 - The ~50 `patch_*.cjs` / `fix_*.cjs` / `modify_app.*` scripts at the repo root are **one-off codemods** that were used to generate the current `server.ts` and components by string-splicing. They are not part of build or runtime, they are not idempotent, and re-running them will corrupt the sources. Edit the real files instead. They explain oddities like the KPI routes at [server.ts:417](server.ts#L417) sitting at column 0 inside `startServer()`.
 - [README.md](README.md) is the untouched Google AI Studio template; `GEMINI_API_KEY` and the `@google/genai` dependency are unused leftovers.
+### Design tokens
+
+The visual system comes from the Claude Design project *Taches & Cash Redesign*
+(`1494b2cb-e71f-417d-8e83-daa6c860e9ea`) and lives entirely in the `@theme` block
+of [src/index.css](src/index.css) — palette, Inter, radii. Nothing else was taken
+from it: no field, label, route or behaviour.
+
+Two of those tokens deliberately **override Tailwind's own scale**, and that is
+what applies the design across the app without editing components:
+`--color-gray-*` (the design's slightly blue-cast neutrals) and `--radius-xl`
+(14px cards). So `text-gray-500` and `rounded-xl` are already on-design — don't
+reintroduce raw hex to "fix" a colour.
+
+The brand navy is `bg-navy` / `hover:bg-navy-hover`, not `bg-[#101828]`; the old
+literal was replaced everywhere. Status pills have reserved pairs
+(`run`/`done`/`pause`/`late`/`admin`/`collab`, each `-bg` and `-fg`) which must
+never be reused as a categorical series colour.
+
+**Chart series colours are not part of this.** `SERIES_1`/`SERIES_2` in
+[DashboardCharts.tsx](src/components/dashboard/DashboardCharts.tsx) stay as they
+are — they were validated as a CVD-safe pair against a white surface, and the
+design file carries no equivalently validated categorical ramp.
+
 - Path alias `@/*` maps to the project root (both [vite.config.ts](vite.config.ts) and [tsconfig.json](tsconfig.json)). Tailwind v4 is configured entirely through the Vite plugin — there is no `tailwind.config.js`.
 - `DISABLE_HMR=true` turns off HMR *and* file watching in [vite.config.ts](vite.config.ts) — it exists so agent edits don't cause flicker.
 - `local.db.json` is gitignored (it holds bcrypt hashes and real client data) and generated on first run; treat it as disposable *local* state — delete it to reseed the default accounts. Deployments do not use it at all.

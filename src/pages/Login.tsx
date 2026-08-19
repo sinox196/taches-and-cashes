@@ -53,7 +53,7 @@ export const Login: React.FC = () => {
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <div className="w-12 h-12 bg-[#101828] text-white rounded-xl flex items-center justify-center shadow-lg">
+          <div className="w-12 h-12 bg-navy text-white rounded-xl flex items-center justify-center shadow-lg">
             <div className="w-6 h-6 border-2 border-white rounded-full flex items-center justify-center relative">
               <div className="w-1.5 h-3 border-r-2 border-b-2 border-white transform rotate-45 mb-0.5"></div>
             </div>
@@ -132,7 +132,7 @@ export const Login: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-[14px] font-bold text-white bg-[#101828] hover:bg-[#1d2939] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-[14px] font-bold text-white bg-navy hover:bg-navy-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : t('login.button')}
               </button>

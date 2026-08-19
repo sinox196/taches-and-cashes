@@ -177,7 +177,7 @@ export const MissionEditorModal: React.FC<MissionEditorModalProps> = ({
               onChange={e => setName(e.target.value)}
               autoFocus
               placeholder="Ex: Comptabilité"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
             />
           </div>
 
@@ -201,7 +201,7 @@ export const MissionEditorModal: React.FC<MissionEditorModalProps> = ({
                     <input
                       value={t.name}
                       onChange={e => renameType(i, e.target.value)}
-                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-[12.5px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-[12.5px] focus:ring-2 focus:ring-navy focus:border-transparent"
                     />
                     {!t.id && (
                       <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide shrink-0">
@@ -227,7 +227,7 @@ export const MissionEditorModal: React.FC<MissionEditorModalProps> = ({
                 onChange={e => setNewTypeName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addType(); } }}
                 placeholder="Ex: Collecte des documents comptables"
-                className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-[12.5px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-[12.5px] focus:ring-2 focus:ring-navy focus:border-transparent"
               />
               <button
                 type="button"
@@ -299,7 +299,7 @@ export const MissionEditorModal: React.FC<MissionEditorModalProps> = ({
                 type="button"
                 onClick={handleSave}
                 disabled={isSaving || !name.trim()}
-                className="px-4 py-2 bg-[#101828] text-white rounded-lg text-[13px] font-medium hover:bg-[#1d2939] flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSaving && <Loader className="w-4 h-4 animate-spin" />}
                 {mission ? 'Enregistrer' : 'Créer la mission'}

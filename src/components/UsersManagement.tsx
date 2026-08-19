@@ -281,7 +281,7 @@ export const UsersManagement: React.FC = () => {
         </div>
         <button
           onClick={handleOpenCreate}
-          className="bg-[#101828] hover:bg-[#1d2939] text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
         >
           <Plus className="w-4 h-4" />
           <span>{t('users.add')}</span>
@@ -406,7 +406,7 @@ export const UsersManagement: React.FC = () => {
                     disabled={!!editingUserId}
                     value={formUsername}
                     onChange={e => setFormUsername(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
                     placeholder="Ex: jean.dupont"
                   />
                 </div>
@@ -420,7 +420,7 @@ export const UsersManagement: React.FC = () => {
                     required={!editingUserId}
                     value={formPassword}
                     onChange={e => setFormPassword(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                     placeholder="••••••••"
                   />
                 </div>
@@ -437,7 +437,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.01"
                         value={formSalaireBrut}
                         onChange={e => setFormSalaireBrut(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full max-w-sm px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full max-w-sm px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                         placeholder="Ex: 2000.00"
                       />
                     </div>
@@ -468,7 +468,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.01"
                         value={formPrimesFraisNonCotisables}
                         onChange={e => setFormPrimesFraisNonCotisables(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full max-w-sm px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full max-w-sm px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                         placeholder="Ex: 100.00"
                       />
                     </div>
@@ -491,7 +491,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.5"
                         value={formRegimeHoraire}
                         onChange={e => setFormRegimeHoraire(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                         placeholder="Ex: 48"
                       />
                     </div>
@@ -504,7 +504,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.01"
                         value={formCnss}
                         onChange={e => setFormCnss(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                       />
                     </div>
 
@@ -516,7 +516,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.01"
                         value={formTfp}
                         onChange={e => setFormTfp(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                       />
                     </div>
 
@@ -528,7 +528,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.01"
                         value={formFoprolos}
                         onChange={e => setFormFoprolos(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                       />
                     </div>
 
@@ -540,7 +540,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.01"
                         value={formAccidentTravail}
                         onChange={e => setFormAccidentTravail(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                       />
                     </div>
                   </div>
@@ -570,7 +570,7 @@ export const UsersManagement: React.FC = () => {
                         step="0.5"
                         value={formSoldeConge}
                         onChange={e => setFormSoldeConge(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                         placeholder="Ex: 20"
                       />
                     </div>
@@ -609,7 +609,7 @@ export const UsersManagement: React.FC = () => {
                   <select
                     value={formRole}
                     onChange={e => setFormRole(e.target.value as Role)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                   >
                     {ROLES.map(r => (
                       <option key={r.id} value={r.id}>{r.label}</option>
@@ -644,7 +644,7 @@ export const UsersManagement: React.FC = () => {
                             <label key={perm.id} className="flex items-start gap-2 cursor-pointer ml-1">
                               <input
                                 type="checkbox"
-                                className="mt-0.5 rounded border-gray-300 text-[#101828] focus:ring-[#101828]"
+                                className="mt-0.5 rounded border-gray-300 text-navy focus:ring-navy"
                                 checked={formPermissions.includes(perm.id)}
                                 onChange={() => togglePermission(perm.id)}
                               />
@@ -674,7 +674,7 @@ export const UsersManagement: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSaving}
-                    className="px-4 py-2 bg-[#101828] text-white rounded-lg text-[13px] font-medium hover:bg-[#1d2939] flex items-center gap-2 transition-colors disabled:opacity-60"
+                    className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover flex items-center gap-2 transition-colors disabled:opacity-60"
                   >
                     {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
                     {editingUserId ? 'Enregistrer' : 'Créer l\'utilisateur'}

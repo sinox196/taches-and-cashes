@@ -38,7 +38,7 @@ const money = (v: number) =>
   v.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
 const SELECT_CLS =
-  'w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-white focus:ring-2 focus:ring-[#101828] focus:border-transparent';
+  'w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-white focus:ring-2 focus:ring-navy focus:border-transparent';
 
 /**
  * Defined at module scope on purpose. Declaring a component inside the render
@@ -346,7 +346,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                       value={number}
                       onChange={e => setNumber(e.target.value)}
                       placeholder="Ex: BL-2026-014"
-                      className="w-40 px-2 py-1 border border-gray-300 rounded-lg text-[13px] font-mono font-bold text-right text-gray-900 focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                      className="w-40 px-2 py-1 border border-gray-300 rounded-lg text-[13px] font-mono font-bold text-right text-gray-900 focus:ring-2 focus:ring-navy focus:border-transparent"
                     />
                   </div>
                   <p className="text-[10.5px] text-gray-400">Libre — hors séquence des factures</p>
@@ -703,7 +703,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 </div>
               </div>
 
-              <div className="flex justify-between px-4 py-3 bg-[#101828] text-white rounded-b-xl">
+              <div className="flex justify-between px-4 py-3 bg-navy text-white rounded-b-xl">
                 <span className="font-bold">Total net à payer (10)</span>
                 <span className="font-mono font-bold">{money(totals.totalNet)} DT</span>
               </div>
@@ -735,7 +735,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="px-4 py-2 bg-[#101828] text-white rounded-lg text-[13px] font-medium hover:bg-[#1d2939] flex items-center gap-2 disabled:opacity-50"
+            className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover flex items-center gap-2 disabled:opacity-50"
           >
             {isSaving && <Loader className="w-4 h-4 animate-spin" />}
             {isEdit ? 'Enregistrer' : 'Créer le document'}

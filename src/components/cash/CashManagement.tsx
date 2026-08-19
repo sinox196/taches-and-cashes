@@ -97,7 +97,7 @@ export const CashManagement: React.FC = () => {
           {canManage && (
             <button
               onClick={() => setEditor({ invoice: null })}
-              className="bg-[#101828] hover:bg-[#1d2939] text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 shrink-0"
+              className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 shrink-0"
             >
               <Plus className="w-4 h-4" />
               Nouveau document

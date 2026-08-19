@@ -50,7 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* User Avatar + own presence */}
           <div className="flex items-center gap-2">
             <div className="relative">
-              <div className="w-8 h-8 rounded-full bg-[#101828] text-white flex items-center justify-center font-bold text-xs border border-gray-200">
+              <div className="w-8 h-8 rounded-full bg-navy text-white flex items-center justify-center font-bold text-xs border border-gray-200">
                 {initials}
               </div>
               {/* Status dot on the avatar, ringed so it reads against it. */}

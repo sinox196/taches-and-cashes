@@ -154,7 +154,7 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
       <div className="flex justify-end mb-2">
         <button
           onClick={onToggleOpen}
-          className="w-10 h-10 md:w-12 md:h-12 bg-[#101828] text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-all cursor-pointer"
+          className="w-10 h-10 md:w-12 md:h-12 bg-navy text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-all cursor-pointer"
           title={isOpen ? 'Fermer le panneau' : 'Démarrer nouvelle tâche'}
         >
           {isOpen ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5 stroke-[2.5]" />}
@@ -322,7 +322,7 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                 !selectedServiceId ||
                 (taskTypeRequired && !selectedTaskTypeId)
               }
-              className="w-full mt-3 bg-[#101828] hover:bg-[#1d2939] disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold text-[13px] py-2.5 px-3 rounded-md transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              className="w-full mt-3 bg-navy hover:bg-navy-hover disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold text-[13px] py-2.5 px-3 rounded-md transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
               title={(!selectedClientId || !selectedServiceId || (taskTypeRequired && !selectedTaskTypeId)) ? "Sélectionnez au moins un client et une mission" : ""}
             >
               <Play className="w-3.5 h-3.5 fill-current" />

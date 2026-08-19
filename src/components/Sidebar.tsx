@@ -53,22 +53,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className="w-[153px] min-w-[153px] bg-[#101828] text-white flex flex-col justify-between h-screen sticky top-0 z-30 select-none font-sans flex-shrink-0"
+      className="w-[212px] min-w-[212px] bg-navy text-white flex flex-col justify-between h-screen sticky top-0 z-30 select-none font-sans flex-shrink-0"
     >
       {/* Top Branding & Nav */}
       <div>
         {/* Brand Logo Header */}
-        <div className="p-4 flex items-center gap-2 mb-2">
-          <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-4 h-4 text-[#101828]" />
+        <div className="px-[18px] pt-5 pb-4 flex items-center gap-[9px]">
+          <div className="w-7 h-7 bg-white rounded-full flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-[14px] h-[14px] text-navy" />
           </div>
-          <span className="text-[13px] font-bold tracking-tight text-white truncate">
+          <span className="text-[14px] font-extrabold tracking-tight text-white truncate">
             Tâches & Cash
           </span>
         </div>
 
         {/* Navigation List */}
-        <nav className="space-y-1">
+        <nav className="flex flex-col gap-px px-2.5">
           {mainNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeItem === item.id;
@@ -77,10 +77,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 onClick={() => onSelectItem?.(item.id)}
-                className={`w-full flex items-center justify-between px-4 py-2 text-[12px] font-medium transition-all group ${
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-[9px] text-[12.5px] transition-all group ${
                   isActive
-                    ? 'bg-[#1D2939] text-white rounded-r-lg border-l-2 border-white font-medium'
-                    : 'text-white/60 hover:text-white hover:bg-[#1D2939]/50 rounded-r-md'
+                    ? 'bg-white/10 text-white font-bold'
+                    : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
                 }`}
               >
                 <div className="flex items-center gap-2.5 truncate">

@@ -1,6 +1,78 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------
+   Design tokens — imported from the Claude Design project
+   "Taches & Cash Redesign" (1494b2cb-e71f-417d-8e83-daa6c860e9ea).
+
+   Only the visual system is taken: palette, type, radii, density.
+   No field, label or behaviour is changed by anything in here.
+
+   The neutral ramp deliberately overrides Tailwind's own grays, so
+   the several hundred existing `text-gray-500` / `border-gray-200`
+   utilities across the app adopt the design's slightly blue-cast
+   neutrals without touching a single component. The named brand and
+   status colours below are what new markup should reach for.
+   --------------------------------------------------------------- */
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Brand. The app's old #101828 is replaced by the design's navy,
+     which is a touch lighter and bluer. */
+  --color-navy: oklch(21% 0.025 260);
+  --color-navy-hover: oklch(27% 0.025 260);
+
+  /* Surfaces. `canvas` is the warm off-white the app sits on;
+     `subtle` backs table headers and inset strips. */
+  --color-canvas: oklch(97.5% 0.004 90);
+  --color-subtle: oklch(98% 0.004 90);
+
+  /* Neutral ramp (overrides Tailwind's default gray). */
+  --color-gray-50:  oklch(98% 0.004 90);
+  --color-gray-100: oklch(96% 0.005 260);
+  --color-gray-200: oklch(93% 0.005 260);
+  --color-gray-300: oklch(90% 0.005 260);
+  --color-gray-400: oklch(65% 0.01 260);
+  --color-gray-500: oklch(55% 0.01 260);
+  --color-gray-600: oklch(50% 0.01 260);
+  --color-gray-700: oklch(45% 0.01 260);
+  --color-gray-800: oklch(20% 0.02 260);
+  --color-gray-900: oklch(17% 0.02 260);
+
+  /* Status pairs (background / foreground), used as pills.
+     These are the reserved status colours — never reuse them as a
+     categorical series colour. */
+  --color-run-bg:    oklch(97% 0.06 70);
+  --color-run-fg:    oklch(45% 0.13 60);
+  --color-done-bg:   oklch(95% 0.07 155);
+  --color-done-fg:   oklch(45% 0.13 155);
+  --color-pause-bg:  oklch(95% 0.005 260);
+  --color-pause-fg:  oklch(45% 0.01 260);
+  --color-late-bg:   oklch(95% 0.06 25);
+  --color-late-fg:   oklch(50% 0.16 25);
+  --color-admin-bg:  oklch(94% 0.06 300);
+  --color-admin-fg:  oklch(48% 0.14 300);
+  --color-collab-bg: oklch(95% 0.03 250);
+  --color-collab-fg: oklch(48% 0.13 250);
+
+  /* Cards are 14px in the design. Remapping Tailwind's own `xl` step is what
+     carries that to the existing `rounded-xl` cards without touching them. */
+  --radius-xl: 14px;
+  --radius-card: 14px;
+}
+
+body {
+  background: var(--color-canvas);
+  color: oklch(20% 0.02 260);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: oklch(58% 0.12 250); }
+a:hover { color: oklch(48% 0.14 250); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: oklch(88% 0.005 260); border-radius: 8px; }
+
+/* ---------------------------------------------------------------
    Printing a Cash document.
    The document lives inside a modal in the app tree, so printing the
    page would otherwise emit the sidebar, the list behind it and the

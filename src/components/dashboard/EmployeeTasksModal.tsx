@@ -132,7 +132,7 @@ export const EmployeeTasksModal: React.FC<EmployeeTasksModalProps> = ({ employee
               onClick={() => setStatusFilter(f.id)}
               className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
                 statusFilter === f.id
-                  ? 'bg-[#101828] text-white border-[#101828]'
+                  ? 'bg-navy text-white border-navy'
                   : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
               }`}
             >

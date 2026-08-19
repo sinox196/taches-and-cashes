@@ -389,7 +389,7 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F2F4F7]">
+      <div className="min-h-screen flex items-center justify-center bg-canvas">
         <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
       </div>
     );
@@ -400,7 +400,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F2F4F7] text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
+    <div className="min-h-screen bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
       <Sidebar
         activeItem={activeSidebarItem}
         onSelectItem={(item) => setActiveSidebarItem(item)}
@@ -517,7 +517,7 @@ export default function App() {
       />
 
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 bg-[#101828] text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl z-50 flex items-center gap-2">
+        <div className="fixed bottom-5 right-5 bg-navy text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl z-50 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
           <span>{toastMessage}</span>
         </div>

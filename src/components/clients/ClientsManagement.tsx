@@ -307,7 +307,7 @@ export const ClientsManagement: React.FC = () => {
         {hasPermission('CREATE_CLIENTS') && (
           <button
             onClick={handleOpenCreate}
-            className="bg-[#101828] hover:bg-[#1d2939] text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors shrink-0"
+            className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Nouveau client</span>
@@ -325,7 +325,7 @@ export const ClientsManagement: React.FC = () => {
               placeholder="Rechercher par nom, email, téléphone ou matricule..."
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
-              className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent transition-all outline-none"
+              className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent transition-all outline-none"
             />
           </div>
 
@@ -354,7 +354,7 @@ export const ClientsManagement: React.FC = () => {
                       <select
                         value={filterKey}
                         onChange={(e) => setFilterKey(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-[#101828]"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-navy"
                       >
                         {allFilterableFields.map(f => (
                           <option key={f.key} value={f.key}>{f.label}</option>
@@ -368,7 +368,7 @@ export const ClientsManagement: React.FC = () => {
                         <select
                           value={filterValue}
                           onChange={(e) => setFilterValue(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-[#101828]"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-navy"
                         >
                           <option value="">Sélectionner...</option>
                           <option value="Active">Actif</option>
@@ -378,7 +378,7 @@ export const ClientsManagement: React.FC = () => {
                         <select
                           value={filterValue}
                           onChange={(e) => setFilterValue(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-[#101828]"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-navy"
                         >
                           <option value="">Sélectionner...</option>
                           <option value="Individual">Particulier</option>
@@ -389,7 +389,7 @@ export const ClientsManagement: React.FC = () => {
                           type="text"
                           value={filterValue}
                           onChange={(e) => setFilterValue(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-[#101828]"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-navy"
                           placeholder="Rechercher..."
                         />
                       )}
@@ -398,7 +398,7 @@ export const ClientsManagement: React.FC = () => {
                     <button
                       onClick={handleAddFilter}
                       disabled={!filterValue.trim() && !['status', 'type'].includes(filterKey)}
-                      className="w-full mt-2 py-2 bg-[#101828] text-white rounded-lg text-[13px] font-medium disabled:opacity-50 hover:bg-[#1a2b4b]"
+                      className="w-full mt-2 py-2 bg-navy text-white rounded-lg text-[13px] font-medium disabled:opacity-50 hover:bg-[#1a2b4b]"
                     >
                       Appliquer le filtre
                     </button>
@@ -427,7 +427,7 @@ export const ClientsManagement: React.FC = () => {
                   <div className="space-y-2">
                     {allTableColumns.map(col => (
                       <label key={col.key} className="flex items-center gap-3 cursor-pointer group" onClick={(e) => { e.preventDefault(); toggleColumn(col.key); }}>
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${visibleColumns.includes(col.key) ? 'bg-[#101828] border-[#101828]' : 'border-gray-300 bg-white group-hover:border-gray-400'}`}>
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${visibleColumns.includes(col.key) ? 'bg-navy border-navy' : 'border-gray-300 bg-white group-hover:border-gray-400'}`}>
                           {visibleColumns.includes(col.key) && <Check className="w-3 h-3 text-white" />}
                         </div>
                         <span className="text-[13px] text-gray-700 font-medium select-none">{col.label}</span>
@@ -670,7 +670,7 @@ export const ClientsManagement: React.FC = () => {
                     required
                     value={formData.name}
                     onChange={e => handleFormChange('name', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                     placeholder="Ex: Tech Corp SA"
                   />
                 </div>
@@ -680,7 +680,7 @@ export const ClientsManagement: React.FC = () => {
                   <select
                     value={formData.type}
                     onChange={e => handleFormChange('type', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                   >
                     <option value="Company">Entreprise (B2B)</option>
                     <option value="Individual">Particulier (B2C)</option>
@@ -693,7 +693,7 @@ export const ClientsManagement: React.FC = () => {
                     type="text"
                     value={formData.taxId}
                     onChange={e => handleFormChange('taxId', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                     placeholder="Ex: 1234567M/A/M/000"
                   />
                 </div>
@@ -704,7 +704,7 @@ export const ClientsManagement: React.FC = () => {
                     type="email"
                     value={formData.email}
                     onChange={e => handleFormChange('email', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                     placeholder="contact@exemple.com"
                   />
                 </div>
@@ -715,7 +715,7 @@ export const ClientsManagement: React.FC = () => {
                     type="tel"
                     value={formData.phone}
                     onChange={e => handleFormChange('phone', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                     placeholder="+216 20 000 000"
                   />
                 </div>
@@ -726,7 +726,7 @@ export const ClientsManagement: React.FC = () => {
                     type="text"
                     value={formData.address}
                     onChange={e => handleFormChange('address', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                     placeholder="123 rue de la République"
                   />
                 </div>
@@ -737,7 +737,7 @@ export const ClientsManagement: React.FC = () => {
                     type="text"
                     value={formData.city}
                     onChange={e => handleFormChange('city', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                     placeholder="Tunis"
                   />
                 </div>
@@ -748,7 +748,7 @@ export const ClientsManagement: React.FC = () => {
                     type="text"
                     value={formData.country}
                     onChange={e => handleFormChange('country', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                     placeholder="Tunisie"
                   />
                 </div>
@@ -758,7 +758,7 @@ export const ClientsManagement: React.FC = () => {
                   <select
                     value={formData.status}
                     onChange={e => handleFormChange('status', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
                   >
                     <option value="Active">Actif</option>
                     <option value="Inactive">Inactif</option>
@@ -771,7 +771,7 @@ export const ClientsManagement: React.FC = () => {
                     rows={3}
                     value={formData.notes}
                     onChange={e => handleFormChange('notes', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent resize-none"
                     placeholder="Informations supplémentaires..."
                   />
                 </div>
@@ -788,7 +788,7 @@ export const ClientsManagement: React.FC = () => {
                       value={newFieldName}
                       onChange={e => setNewFieldName(e.target.value)}
                       placeholder="Nom du nouveau champ..."
-                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-[12px] focus:ring-1 focus:ring-[#101828]"
+                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-[12px] focus:ring-1 focus:ring-navy"
                       onKeyDown={e => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -820,7 +820,7 @@ export const ClientsManagement: React.FC = () => {
                         }
                       }}
                       disabled={!newFieldName.trim()}
-                      className="text-[12px] font-medium text-[#101828] bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="text-[12px] font-medium text-navy bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Ajouter
@@ -857,7 +857,7 @@ export const ClientsManagement: React.FC = () => {
                                   }
                                 });
                               }}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-[#101828] focus:border-transparent"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                               placeholder={"Valeur pour " + key}
                             />
                             {hasPermission('MANAGE_CLIENT_FIELDS') && (
@@ -897,7 +897,7 @@ export const ClientsManagement: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="px-4 py-2 bg-[#101828] text-white rounded-lg text-[13px] font-medium hover:bg-[#1d2939] flex items-center gap-2"
+                  className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover flex items-center gap-2"
                 >
                   {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
                   {editingClient ? 'Enregistrer les modifications' : 'Créer le client'}
@@ -1037,7 +1037,7 @@ export const ClientsManagement: React.FC = () => {
                     setViewingClient(null);
                     handleOpenEdit(viewingClient, e);
                   }}
-                  className="font-medium text-[#101828] hover:underline"
+                  className="font-medium text-navy hover:underline"
                 >
                   Modifier les informations
                 </button>

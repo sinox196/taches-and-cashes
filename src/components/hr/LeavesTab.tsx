@@ -186,7 +186,7 @@ export const LeavesTab: React.FC = () => {
         {hasPermission('CREATE_LEAVE_REQUEST') && (
           <button
             onClick={() => setIsCreating(true)}
-            className="bg-[#101828] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#1d2939] transition-colors flex items-center gap-2"
+            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             Nouvelle demande
@@ -452,7 +452,7 @@ export const LeavesTab: React.FC = () => {
               <button
                 type="submit"
                 form="leave-form"
-                className="px-4 py-2 text-sm font-medium text-white bg-[#101828] border border-transparent rounded-lg hover:bg-[#1d2939] focus:outline-none focus:ring-2 focus:ring-gray-900/20"
+                className="px-4 py-2 text-sm font-medium text-white bg-navy border border-transparent rounded-lg hover:bg-navy-hover focus:outline-none focus:ring-2 focus:ring-gray-900/20"
               >
                 Soumettre
               </button>
