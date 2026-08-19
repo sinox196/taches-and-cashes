@@ -75,6 +75,12 @@ A running task is stored as `dureeSeconds` (accumulated) plus `lastStartedAt` (e
 
 `heureFin` is only ever set on a task that has actually completed — the server stamps it on the `RUNNING → COMPLETED` transition and blanks it again if the task resumes. The table renders `—` for an empty one. Don't let the client invent `date`, `heureDebut`, or `heureFin`; the server owns all three so there is one clock and one format.
 
+**An admin's own tasks are hidden from everyone else.** `visibleEntriesFor()` drops ADMIN-owned rows for non-admin viewers, in both `GET /api/time-entries` and the broadcast, and **before pagination** so `total` describes what the viewer can actually see. Both the cost split and this visibility split are admin/non-admin, so the broadcast still builds exactly two frames.
+
+**The server owns the entry id.** The client sends one so it can insert optimistically, but a body without it no longer produces a row with `id: undefined` — such a row could never be updated or deleted (every route looks it up by id) and broke React's keys in the table. `statut` defaults to `RUNNING` the same way.
+
+**The activity description is optional.** A task starts with a client and a mission; the mission and type de tâche identify the work, and the running-timer card shows those rather than the free-text description. Anything rendering `description` must tolerate an empty string.
+
 Every mutating time-entry route calls `broadcastTimeEntries()`, which pushes the **full list of all users' entries** to every SSE subscriber. The client then ticks locally once a second and *keeps its own count* when it differs from the server by <5s, to avoid visible stutter. If you change duration semantics, change all four places.
 
 Two invariants keep that tick honest, both of which were previously broken and are easy to break again:
@@ -115,7 +121,9 @@ Presence is held in a **module-level `Map`, never in the JSON database**. Every 
 
 [PresenceContext](src/context/PresenceContext.tsx) tracks real input events, heartbeats on an interval, beats **immediately** when returning from away (the one transition that must feel instant), and fires a `keepalive` offline beacon on `pagehide`/logout so a closed tab doesn't linger for 95 s. Your own badge reads from local state rather than the poll, so it flips the moment you touch the mouse.
 
-`OFFLINE_AFTER_MS` must stay comfortably above three heartbeats — tightening it makes users flicker offline on one dropped request.
+**The away delay is configurable; the inactive one is not.** It defaults to **30 minutes** and is set on the Users page ([PresenceSettingsCard](src/components/PresenceSettingsCard.tsx)) behind `MANAGE_PRESENCE_SETTINGS`, stored on settings as `awayAfterMinutes`, and served by `GET /api/presence/settings` (readable by anyone — the browser needs it for its own badge) / `PUT` (permission-gated, clamped to 1–480). The server caches it for 10 s rather than re-reading the database on every heartbeat from every user.
+
+`OFFLINE_AFTER_MS` stays a constant and must remain comfortably above three heartbeats — tightening it makes users flicker offline on one dropped request. That is why only the *away* threshold is exposed: it is derived from missing heartbeats, not from reported idleness.
 
 ### Cash (facturation)
 
@@ -126,6 +134,10 @@ Implements workflow #1 of the cahier des charges (`Facturation-Tous-les-types-de
 Numbering splits by document kind. A **facture légale** takes the next value of the legal sequence (`nextInvoiceNumber()`), which is never reassigned on edit, and its date **may not precede the previous invoice's**. An **autre document** carries a free reference typed by the user: it does not follow the sequence, deliberately does not consume a number from it (that would punch gaps in the legal numbering), is exempt from the date rule, and may be corrected later. Both kinds reject a duplicate number. All of it is enforced server-side — a client-supplied number on a legal invoice is ignored.
 
 [amountToWords.ts](src/utils/amountToWords.ts) produces the mandatory footer wording; its reference case is the spec's own example, `1379.1 → "Mille Trois Cent Soixante-Dix-Neuf Dinars Et Cent Millimes"`.
+
+`printInvoicePdf()` in [downloadInvoice.ts](src/components/cash/downloadInvoice.ts) renders the document into an **offscreen iframe and prints that**, not the page: the output carries only the document and does not depend on the app's `@media print` rules, which only know how to isolate the preview modal. No PDF library on purpose — the print engine emits real vector text, while html2canvas-style renderers rasterise it. The iframe's `<title>` is the document name, so "Enregistrer au format PDF" is pre-named. `downloadInvoice()` still saves standalone HTML as an archive copy, and both share one renderer so they cannot diverge.
+
+Validation errors surface **next to the submit button**, not at the top of the form: the editor scrolls and its footer is sticky, so a banner at the top was off-screen behind the button the user had just pressed.
 
 Gated on `VIEW_CASH` / `MANAGE_CASH`.
 

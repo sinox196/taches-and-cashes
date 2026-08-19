@@ -11,8 +11,30 @@
  */
 export type PresenceState = 'ACTIVE' | 'AWAY' | 'INACTIVE';
 
-/** Idle time after which a connected user is considered away. */
-export const AWAY_AFTER_MS = 10 * 60 * 1000;
+/**
+ * Idle time after which a connected user is considered away.
+ *
+ * This is only the *default*. The effective value is configurable by an admin
+ * (or anyone with MANAGE_PRESENCE_SETTINGS) and is served by
+ * `GET /api/presence/settings`; the server decides the state with the stored
+ * value, and the client reads it so both agree on the threshold.
+ */
+export const DEFAULT_AWAY_AFTER_MINUTES = 30;
+export const DEFAULT_AWAY_AFTER_MS = DEFAULT_AWAY_AFTER_MINUTES * 60 * 1000;
+
+/**
+ * Bounds for the configurable value. The floor keeps it well clear of the
+ * heartbeat interval — a threshold near HEARTBEAT_MS would flip people to away
+ * between two beats — and the ceiling keeps "away" meaningful.
+ */
+export const MIN_AWAY_AFTER_MINUTES = 1;
+export const MAX_AWAY_AFTER_MINUTES = 480;
+
+export const clampAwayMinutes = (v: unknown): number => {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return DEFAULT_AWAY_AFTER_MINUTES;
+  return Math.min(MAX_AWAY_AFTER_MINUTES, Math.max(MIN_AWAY_AFTER_MINUTES, n));
+};
 
 /** How often the browser reports in. */
 export const HEARTBEAT_MS = 30 * 1000;

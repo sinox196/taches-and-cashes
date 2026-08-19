@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, Printer, Download, Pencil, Trash2 } from 'lucide-react';
 import { amountToFrenchWords } from '../../utils/amountToWords';
-import { downloadInvoice } from './downloadInvoice';
+import { downloadInvoice, printInvoicePdf } from './downloadInvoice';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -57,10 +57,10 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               title="Enregistrer le document sur votre poste"
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
             >
-              <Download className="w-3.5 h-3.5" /> Télécharger
+              <Download className="w-3.5 h-3.5" /> Télécharger (HTML)
             </button>
             <button
-              onClick={() => window.print()}
+              onClick={() => printInvoicePdf(invoice)}
               title="Imprimer — choisissez « Enregistrer au format PDF » pour obtenir un PDF"
               className="px-3 py-1.5 bg-[#101828] text-white rounded-lg text-[12px] font-medium hover:bg-[#1d2939] flex items-center gap-1.5"
             >

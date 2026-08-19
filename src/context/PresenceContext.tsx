@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 import {
-  AWAY_AFTER_MS, HEARTBEAT_MS, type PresenceState,
+  DEFAULT_AWAY_AFTER_MS, HEARTBEAT_MS, clampAwayMinutes, type PresenceState,
 } from '../constants/presence';
 
 interface PresenceEntry {
@@ -16,6 +16,10 @@ interface PresenceContextType {
   /** Everyone's state, keyed by user id. */
   byUser: Record<string, PresenceEntry>;
   presenceOf: (userId: number | undefined) => PresenceEntry;
+  /** The configured away threshold, in minutes. */
+  awayAfterMinutes: number;
+  /** Re-reads it after an admin changes it, so badges update without a reload. */
+  refreshAwayAfter: () => void;
 }
 
 const OFFLINE: PresenceEntry = { state: 'INACTIVE', idleMs: null, lastSeenAt: null };
@@ -30,6 +34,24 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const lastActivityRef = useRef<number>(Date.now());
   const [own, setOwn] = useState<PresenceState>('ACTIVE');
   const [byUser, setByUser] = useState<Record<string, PresenceEntry>>({});
+  // The threshold is configurable server-side. Held in a ref as well as state
+  // so the input handler reads the current value without being re-subscribed
+  // (it is attached to mousemove, so re-binding it on every change is wasteful).
+  const [awayAfterMs, setAwayAfterMs] = useState(DEFAULT_AWAY_AFTER_MS);
+  const awayAfterMsRef = useRef(DEFAULT_AWAY_AFTER_MS);
+  awayAfterMsRef.current = awayAfterMs;
+
+  const refreshAwayAfter = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/presence/settings', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const body = await res.json();
+      setAwayAfterMs(clampAwayMinutes(body?.awayAfterMinutes) * 60 * 1000);
+    } catch { /* keep the default until the next attempt */ }
+  }, [token]);
+
+  useEffect(() => { refreshAwayAfter(); }, [refreshAwayAfter]);
 
   const beat = useCallback(async (idleMs: number) => {
     if (!token) return;
@@ -47,7 +69,7 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!token) return;
 
     const onActivity = () => {
-      const wasAway = Date.now() - lastActivityRef.current >= AWAY_AFTER_MS;
+      const wasAway = Date.now() - lastActivityRef.current >= awayAfterMsRef.current;
       lastActivityRef.current = Date.now();
       if (wasAway) {
         // Coming back from away is the one transition that must feel instant,
@@ -71,7 +93,7 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const tick = setInterval(() => {
       const idle = Date.now() - lastActivityRef.current;
-      setOwn(idle >= AWAY_AFTER_MS ? 'AWAY' : 'ACTIVE');
+      setOwn(idle >= awayAfterMsRef.current ? 'AWAY' : 'ACTIVE');
       beat(idle);
     }, HEARTBEAT_MS);
 
@@ -127,7 +149,7 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [byUser, own, user]);
 
   return (
-    <PresenceContext.Provider value={{ own, byUser, presenceOf }}>
+    <PresenceContext.Provider value={{ own, byUser, presenceOf, awayAfterMinutes: Math.round(awayAfterMs / 60000), refreshAwayAfter }}>
       {children}
     </PresenceContext.Provider>
   );

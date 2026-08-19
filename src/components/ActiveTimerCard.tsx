@@ -17,7 +17,7 @@ export const ActiveTimerCard: React.FC<ActiveTimerCardProps> = ({
   onPause,
   onStop,
 }) => {
-  const { client, task, elapsedSeconds, isRunning, costRatePerHour } = timerState;
+  const { client, task, pole, taskType, elapsedSeconds, isRunning, costRatePerHour } = timerState;
   const { hasPermission, user } = useAuth();
   // Employer cost (and the DT/h rate) is admin-only information.
   const isAdmin = user?.role === 'ADMIN';
@@ -34,8 +34,15 @@ export const ActiveTimerCard: React.FC<ActiveTimerCardProps> = ({
           Client: <span className="text-gray-500 font-normal">{client}</span>
         </p>
         <p className="text-[13px] font-medium text-gray-800 mt-0.5">
-          Tâche: <span className="text-gray-500 font-normal">{task}</span>
+          Mission: <span className="text-gray-500 font-normal">{pole || '—'}</span>
         </p>
+        <p className="text-[13px] font-medium text-gray-800 mt-0.5">
+          Type de tâche: <span className="text-gray-500 font-normal">{taskType || '—'}</span>
+        </p>
+        {/* The description is free text and may be empty; shown only when set. */}
+        {task && task !== '-' && (
+          <p className="text-[12px] text-gray-400 mt-1 italic truncate" title={task}>{task}</p>
+        )}
       </div>
 
       {/* Center Section: Live Display */}

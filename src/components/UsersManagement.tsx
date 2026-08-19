@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { PresenceSettingsCard } from './PresenceSettingsCard';
 import { useAuth, User } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { ROLES, roleMeta, type Role } from '../constants/roles';
@@ -47,6 +48,7 @@ const PERMISSIONS_GROUPED = [
     group: 'Administration',
     permissions: [
       { id: 'MANAGE_USERS', label: 'Gérer les utilisateurs', desc: 'Accès administrateur complet' },
+      { id: 'MANAGE_PRESENCE_SETTINGS', label: 'Gérer le statut de présence', desc: 'Peut régler le délai avant le passage en absent' },
     ]
   }
 ];
@@ -285,6 +287,8 @@ export const UsersManagement: React.FC = () => {
           <span>{t('users.add')}</span>
         </button>
       </div>
+
+      <PresenceSettingsCard />
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         {isLoading ? (

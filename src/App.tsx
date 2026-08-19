@@ -247,6 +247,7 @@ export default function App() {
     clientId: myRunningEntry.clientId,
     task: myRunningEntry.description,
     pole: myRunningEntry.pole,
+    taskType: myRunningEntry.taskType,
     serviceId: myRunningEntry.serviceId,
     startTime: myRunningEntry.heureDebut,
     elapsedSeconds: myRunningEntry.dureeSeconds,
@@ -343,6 +344,9 @@ export default function App() {
   };
 
   const handleDeleteEntry = async (id: string) => {
+    const entry = timeEntries.find(e => e.id === id);
+    const label = entry ? ` « ${entry.description || entry.taskType || entry.pole || entry.client} »` : '';
+    if (!confirm(`Êtes-vous sûr de supprimer la tâche${label} ? Cette action est irréversible.`)) return;
     setTimeEntries(prev => prev.filter(e => e.id !== id));
     try {
       const res = await fetch(`/api/time-entries/${id}`, {

@@ -7,24 +7,21 @@ const esc = (v: unknown) =>
   String(v ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
-/** Filesystem-safe file name: "Facture-0001-Alpha-SA.html". */
-const fileName = (invoice: any) =>
+/** Filesystem-safe document name, no extension: "Facture-0001-Alpha-SA". */
+const documentName = (invoice: any) =>
   [invoice.title, invoice.number, invoice.clientName]
     .filter(Boolean)
     .join('-')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^A-Za-z0-9-_ ]+/g, '')
-    .trim().replace(/\s+/g, '-') + '.html';
+    .trim().replace(/\s+/g, '-');
 
 /**
- * Renders the document as a standalone HTML file and saves it.
- *
- * Deliberately not a PDF library: the browser's own print engine gives better
- * fidelity than a client-side renderer, so the saved file carries a print
- * stylesheet and the user gets a PDF via "Imprimer → Enregistrer au format PDF"
- * — from the app or from the downloaded file.
+ * The document as a self-contained HTML page — the single source for both the
+ * saved file and the printed/PDF output, so the two can never diverge. It
+ * carries its own print stylesheet and page margins.
  */
-export function downloadInvoice(invoice: any): void {
+function renderInvoiceHtml(invoice: any): string {
   const suspended = invoice.vatRegime === 'SUSPENSION';
   const detailed = invoice.billingMode === 'DETAILLEE';
   const custom = Object.entries(invoice.customFields || {});
@@ -52,7 +49,7 @@ export function downloadInvoice(invoice: any): void {
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>${esc(invoice.title)} ${esc(invoice.number)}</title>
+<title>${esc(documentName(invoice))}</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif; color: #101828;
@@ -151,13 +148,58 @@ export function downloadInvoice(invoice: any): void {
 </body>
 </html>`;
 
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  return html;
+}
+
+/** Saves the document as a standalone HTML file (an offline archive copy). */
+export function downloadInvoice(invoice: any): void {
+  const blob = new Blob([renderInvoiceHtml(invoice)], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = fileName(invoice);
+  a.download = documentName(invoice) + '.html';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Produces the PDF — for a facture légale and an autre document alike.
+ *
+ * The document is rendered into an offscreen iframe and *that* is printed,
+ * rather than printing the page. The output then contains only the document, at
+ * full width, with none of the app around it, and it does not depend on the
+ * app's print stylesheet, which only knows how to isolate the preview modal.
+ *
+ * No PDF library, on purpose: the browser's print engine emits real vector text
+ * that stays selectable and searchable, while html2canvas-style renderers
+ * rasterise the page and produce a blurry picture of an invoice. The user picks
+ * "Enregistrer au format PDF" in the dialog, and the file already carries the
+ * document's name because that is the iframe's <title>.
+ */
+export function printInvoicePdf(invoice: any): void {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText =
+    'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    setTimeout(() => frame.remove(), 500);
+  };
+
+  frame.onload = () => {
+    const win = frame.contentWindow;
+    if (!win) { cleanup(); return; }
+    win.focus();
+    win.onafterprint = cleanup;   // fires whether the user saved or cancelled
+    win.print();
+    setTimeout(cleanup, 120000);  // not every browser fires onafterprint
+  };
+
+  document.body.appendChild(frame);
+  frame.srcdoc = renderInvoiceHtml(invoice);
 }

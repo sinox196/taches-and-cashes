@@ -73,7 +73,7 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
   // so this scales to hundreds of clients. Only 8 matches are ever rendered.
   useEffect(() => {
     const term = clientSearch.trim();
-    if (term.length < 2 || selectedClientId) { setClientResults([]); return; }
+    if (term.length < 1 || selectedClientId) { setClientResults([]); return; }
     let cancelled = false;
     setIsSearchingClients(true);
     const handle = setTimeout(async () => {
@@ -110,7 +110,6 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description.trim()) return;
 
     const client = selectedClient;
     const service = services.find(s => String(s.id) === selectedServiceId);
@@ -162,15 +161,18 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
         </button>
       </div>
 
+      {/* The panel is anchored to the right edge of its 320px column and opens
+          leftwards: it is wider than the column, so laying it out in flow would
+          push it off the right of the viewport. */}
       {isOpen && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-xl p-5 w-full sm:w-[320px] ml-auto transition-all animate-fadeIn">
-          <h3 className="text-[11px] font-bold text-gray-800 mb-4 tracking-wider uppercase">
+        <div className="absolute right-0 z-20 bg-white rounded-xl border border-gray-100 shadow-xl p-6 w-[min(460px,calc(100vw-2rem))] transition-all animate-fadeIn">
+          <h3 className="text-[12px] font-bold text-gray-800 mb-5 tracking-wider uppercase">
             DÉMARRER NOUVELLE TÂCHE
           </h3>
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {/* Field: Client */}
             <div ref={dropdownRef}>
-              <label className="text-[10px] font-semibold text-gray-400 block mb-1">
+              <label className="text-[11px] font-semibold text-gray-400 block mb-1">
                 Client
               </label>
               <div className="relative">
@@ -189,11 +191,11 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                     }}
                     onFocus={() => setIsClientDropdownOpen(true)}
                     placeholder="Rechercher un client..."
-                    className="w-full px-2 py-1.5 text-[12px] font-medium text-gray-800 focus:outline-none bg-transparent"
+                    className="w-full px-2 py-2 text-[13px] font-medium text-gray-800 focus:outline-none bg-transparent"
                   />
                 </div>
                 
-                {isClientDropdownOpen && clientSearch.length >= 2 && (
+                {isClientDropdownOpen && clientSearch.length >= 1 && (
                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-md shadow-lg max-h-48 overflow-y-auto">
                     {isSearchingClients ? (
                       <div className="px-3 py-2 text-[12px] text-gray-400 italic">Recherche…</div>
@@ -212,11 +214,6 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                         Aucun client trouvé.
                       </div>
                     )}
-                  </div>
-                )}
-                {isClientDropdownOpen && clientSearch.length > 0 && clientSearch.length < 2 && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-100 rounded-md shadow-lg p-2 text-[11px] text-gray-500 text-center">
-                    Tapez au moins 2 caractères...
                   </div>
                 )}
               </div>
@@ -273,7 +270,7 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
 
             {/* Field: Type de tâche — options come from the selected mission */}
             <div>
-              <label className="text-[10px] font-semibold text-gray-400 block mb-1">
+              <label className="text-[11px] font-semibold text-gray-400 block mb-1">
                 Type de tâche {taskTypeRequired && <span className="text-red-500">*</span>}
               </label>
               {!selectedServiceId ? (
@@ -305,15 +302,15 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
 
             {/* Field: Description de l'activité */}
             <div>
-              <label className="text-[10px] font-semibold text-gray-400 block mb-1">
-                Description de l'activité <span className="text-red-500">*</span>
+              <label className="text-[11px] font-semibold text-gray-400 block mb-1">
+                Description de l'activité <span className="font-normal text-gray-300">(facultatif)</span>
               </label>
               <input
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Ex: Préparation Bilan"
-                className="w-full border border-gray-200 rounded-md px-3 py-1.5 text-[12px] text-gray-800 focus:outline-none focus:border-gray-400 placeholder-gray-300 transition-colors"
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-[13px] text-gray-800 focus:outline-none focus:border-gray-400 placeholder-gray-300 transition-colors"
               />
             </div>
 
@@ -323,11 +320,10 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
               disabled={
                 !selectedClientId ||
                 !selectedServiceId ||
-                (taskTypeRequired && !selectedTaskTypeId) ||
-                !description.trim()
+                (taskTypeRequired && !selectedTaskTypeId)
               }
-              className="w-full mt-2 bg-[#101828] hover:bg-[#1d2939] disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold text-[12px] py-2 px-3 rounded-md transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              title={(!selectedClientId || !selectedServiceId || (taskTypeRequired && !selectedTaskTypeId) || !description.trim()) ? "Veuillez remplir tous les champs obligatoires" : ""}
+              className="w-full mt-3 bg-[#101828] hover:bg-[#1d2939] disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold text-[13px] py-2.5 px-3 rounded-md transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              title={(!selectedClientId || !selectedServiceId || (taskTypeRequired && !selectedTaskTypeId)) ? "Sélectionnez au moins un client et une mission" : ""}
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               <span>DÉMARRER</span>

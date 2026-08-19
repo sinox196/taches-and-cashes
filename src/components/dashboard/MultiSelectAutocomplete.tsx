@@ -35,7 +35,7 @@ export const MultiSelectAutocomplete: React.FC<MultiSelectAutocompleteProps> = (
 
   // Debounced search
   useEffect(() => {
-    if (query.trim().length < 2) {
+    if (query.trim().length < 1) {
       setResults([]);
       return;
     }
@@ -92,7 +92,7 @@ export const MultiSelectAutocomplete: React.FC<MultiSelectAutocompleteProps> = (
               setQuery(e.target.value);
               if (e.target.value.length > 0) setIsOpen(true);
             }}
-            onFocus={() => { if (query.length >= 2 || results.length > 0) setIsOpen(true); }}
+            onFocus={() => { if (query.length >= 1 || results.length > 0) setIsOpen(true); }}
             placeholder={selectedItems.length === 0 ? placeholder : ''}
             className="bg-transparent text-[13px] text-gray-700 outline-none w-full"
           />
@@ -101,7 +101,7 @@ export const MultiSelectAutocomplete: React.FC<MultiSelectAutocompleteProps> = (
       </div>
 
       {/* Dropdown */}
-      {isOpen && query.length >= 2 && (
+      {isOpen && query.length >= 1 && (
         <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto">
           {results.length > 0 ? (
             <ul className="py-1">

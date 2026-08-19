@@ -140,7 +140,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   // Client lookup is server-side and debounced — the list is never fully loaded.
   useEffect(() => {
     const term = clientSearch.trim();
-    if (term.length < 2 || client) { setClientResults([]); return; }
+    if (term.length < 1 || client) { setClientResults([]); return; }
     let cancelled = false;
     const h = setTimeout(async () => {
       try {
@@ -258,12 +258,6 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
         </div>
 
         <div className="p-5 space-y-6">
-          {error && (
-            <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
-              {error}
-            </div>
-          )}
-
           {/* ---- 1. Choix ---- */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-5 border-b border-gray-200">
             <Choice label="Type de document">
@@ -391,7 +385,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                     className="w-full px-2 py-2 text-[13px] focus:outline-none bg-transparent rounded-lg"
                   />
                 </div>
-                {dropdownOpen && !client && clientSearch.trim().length >= 2 && (
+                {dropdownOpen && !client && clientSearch.trim().length >= 1 && (
                   <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                     {clientResults.length > 0 ? clientResults.map(c => (
                       <div
@@ -725,7 +719,13 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           </div>
         </div>
 
-        <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-3 sticky bottom-0 bg-white rounded-b-xl">
+        <div className="px-5 py-4 border-t border-gray-100 sticky bottom-0 bg-white rounded-b-xl">
+          {error && (
+            <div className="mb-3 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
             className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-100 bg-white"
@@ -740,6 +740,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
             {isSaving && <Loader className="w-4 h-4 animate-spin" />}
             {isEdit ? 'Enregistrer' : 'Créer le document'}
           </button>
+          </div>
         </div>
       </div>
     </div>

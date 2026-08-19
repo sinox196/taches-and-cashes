@@ -29,6 +29,8 @@ export interface ActiveTimerState {
   clientId?: number;
   task: string;
   pole: string;
+  /** Type de tâche picked under the mission, when the mission defines any. */
+  taskType?: string;
   serviceId?: number;
   startTime: string;
   elapsedSeconds: number;

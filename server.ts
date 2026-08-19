@@ -3,7 +3,9 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
 import { STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
-import { AWAY_AFTER_MS, OFFLINE_AFTER_MS, type PresenceState } from './src/constants/presence.js';
+import {
+  DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
+} from './src/constants/presence.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
@@ -1212,17 +1214,35 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * idle, but it cannot report that its own machine is off — that is only
    * visible here, as heartbeats that stopped arriving.
    */
-  const presenceStateOf = (rec?: { lastSeenAt: number; lastActivityAt: number }): PresenceState => {
+  /**
+   * The away threshold is configurable, and presence is evaluated on every
+   * heartbeat from every user, so it is cached rather than re-read from the
+   * database each time. A few seconds of staleness after an admin changes it is
+   * irrelevant to a 30-minute threshold.
+   */
+  let awayMsCache = { value: DEFAULT_AWAY_AFTER_MINUTES * 60 * 1000, at: 0 };
+  const awayAfterMs = async () => {
+    if (Date.now() - awayMsCache.at < 10_000) return awayMsCache.value;
+    const settings = await db.getSettings();
+    const value = clampAwayMinutes(settings?.awayAfterMinutes ?? DEFAULT_AWAY_AFTER_MINUTES) * 60 * 1000;
+    awayMsCache = { value, at: Date.now() };
+    return value;
+  };
+
+  const presenceStateOf = (
+    rec: { lastSeenAt: number; lastActivityAt: number } | undefined,
+    awayMs: number,
+  ): PresenceState => {
     if (!rec) return 'INACTIVE';
     const now = Date.now();
     if (now - rec.lastSeenAt > OFFLINE_AFTER_MS) return 'INACTIVE';
-    if (now - rec.lastActivityAt >= AWAY_AFTER_MS) return 'AWAY';
+    if (now - rec.lastActivityAt >= awayMs) return 'AWAY';
     return 'ACTIVE';
   };
 
-  const presenceFor = (userId: number) => {
+  const presenceFor = (userId: number, awayMs: number) => {
     const rec = presence.get(userId);
-    const state = presenceStateOf(rec);
+    const state = presenceStateOf(rec, awayMs);
     return {
       state,
       // Idle time is meaningless once we've lost contact.
@@ -1232,12 +1252,35 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   };
 
   /** Heartbeat. `idleMs` = time since this user last touched mouse or keyboard. */
-  app.post('/api/presence', authenticate, (req: any, res: any) => {
+  app.post('/api/presence', authenticate, async (req: any, res: any) => {
     const now = Date.now();
+    const awayMs = await awayAfterMs();
     const reported = Number(req.body?.idleMs);
-    const idleMs = Number.isFinite(reported) && reported >= 0 ? Math.min(reported, AWAY_AFTER_MS * 6) : 0;
+    const idleMs = Number.isFinite(reported) && reported >= 0 ? Math.min(reported, awayMs * 6) : 0;
     presence.set(req.user.id, { lastSeenAt: now, lastActivityAt: now - idleMs });
-    res.json({ userId: req.user.id, ...presenceFor(req.user.id) });
+    res.json({ userId: req.user.id, ...presenceFor(req.user.id, awayMs) });
+  });
+
+  /**
+   * The away threshold, readable by anyone (the browser needs it to show its
+   * own badge without waiting for the next poll) and writable only with
+   * MANAGE_PRESENCE_SETTINGS. The server still decides every state — this only
+   * tells the client which threshold it is being judged against.
+   */
+  app.get('/api/presence/settings', authenticate, async (_req: any, res: any) => {
+    const settings = await db.getSettings();
+    res.json({ awayAfterMinutes: clampAwayMinutes(settings?.awayAfterMinutes ?? DEFAULT_AWAY_AFTER_MINUTES) });
+  });
+
+  app.put('/api/presence/settings', authenticate, requirePermission('MANAGE_PRESENCE_SETTINGS'), async (req: any, res: any) => {
+    const raw = req.body?.awayAfterMinutes;
+    if (raw === undefined || raw === null || raw === '' || !Number.isFinite(Number(raw))) {
+      return res.status(400).json({ error: 'awayAfterMinutes doit être un nombre de minutes.' });
+    }
+    const awayAfterMinutes = clampAwayMinutes(raw);
+    await db.updateSettings({ awayAfterMinutes });
+    awayMsCache = { value: awayAfterMinutes * 60 * 1000, at: Date.now() };
+    res.json({ awayAfterMinutes });
   });
 
   /** Sent on logout / tab close so the user drops to inactive immediately. */
@@ -1250,8 +1293,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.get('/api/presence', authenticate, async (req: any, res: any) => {
     try {
       const users = await db.getAllUsers();
+      const awayMs = await awayAfterMs();
       const byUser: Record<string, any> = {};
-      for (const u of users) byUser[u.id] = presenceFor(u.id);
+      for (const u of users) byUser[u.id] = presenceFor(u.id, awayMs);
       res.json(byUser);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -1962,14 +2006,32 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * Cost is employer-confidential, so `hourlyRate`/`cost` are only included for
    * admins — stripping them in the UI alone would still leak them over the wire.
    */
+  /**
+   * An admin's own tasks are not shown to anybody else — they are management
+   * work, not part of the team's shared activity feed.
+   *
+   * Enforced here rather than hidden in the UI, so the rows never reach a
+   * non-admin client over the wire, and applied *before* pagination so the
+   * page size and the `total` count both describe what the viewer can see.
+   */
+  const visibleEntriesFor = (entries: any[], viewerIsAdmin: boolean, adminIds: Set<number>) =>
+    viewerIsAdmin ? entries : entries.filter((e: any) => !adminIds.has(e.userId));
+
+  const adminUserIds = async () =>
+    new Set<number>(
+      (await db.getAllUsers()).filter((u: any) => u.role === 'ADMIN').map((u: any) => u.id),
+    );
+
   const enrichEntries = async (entries: any[], forAdmin: boolean) => {
     const users = await db.getAllUsers();
+    // Indexed once: a find() in here is a linear scan per task.
+    const usersById = new Map<number, any>(users.map((u: any) => [u.id, u]));
     return entries.map((e: any) => {
       const secs = accruedSeconds(e);
       const base = {
         ...e,
         dureeSeconds: secs,
-        userName: users.find((u: any) => u.id === e.userId)?.username || 'Unknown',
+        userName: usersById.get(e.userId)?.username || 'Unknown',
       };
       if (!forAdmin) {
         delete base.hourlyRate;
@@ -1992,15 +2054,16 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   const doBroadcast = async () => {
     const raw = await db.getAllTimeEntries();
-    const total = raw.length;
-    const pageRaw = raw.slice(0, ENTRIES_PAGE_SIZE);
-    // Two payloads only: admins get the cost fields, everyone else doesn't.
+    const adminIds = await adminUserIds();
+    // Two payloads only: admins get the cost fields and every row, everyone
+    // else gets neither. Both axes split admin/non-admin, so one frame each.
     const cache: Record<string, string> = {};
     for (const client of sseClients) {
       const key = client.isAdmin ? 'admin' : 'plain';
       if (!cache[key]) {
-        const data = await enrichEntries(pageRaw, client.isAdmin);
-        cache[key] = `data: ${JSON.stringify({ data, total })}\n\n`;
+        const visible = visibleEntriesFor(raw, client.isAdmin, adminIds);
+        const data = await enrichEntries(visible.slice(0, ENTRIES_PAGE_SIZE), client.isAdmin);
+        cache[key] = `data: ${JSON.stringify({ data, total: visible.length })}\n\n`;
       }
       client.res.write(cache[key]);
     }
@@ -2061,10 +2124,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/time-entries', authenticate, async (req: any, res: any) => {
     try {
-      const all = await db.getAllTimeEntries();
+      const isAdmin = req.user.role === 'ADMIN';
+      const all = visibleEntriesFor(await db.getAllTimeEntries(), isAdmin, await adminUserIds());
       const limit = Math.min(parseInt(req.query.limit, 10) || ENTRIES_PAGE_SIZE, 1000);
       const offset = parseInt(req.query.offset, 10) || 0;
-      const data = await enrichEntries(all.slice(offset, offset + limit), req.user.role === 'ADMIN');
+      const data = await enrichEntries(all.slice(offset, offset + limit), isAdmin);
       res.json({ data, total: all.length, limit, offset });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2083,11 +2147,19 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // drift from the client clock or locale. heureFin stays empty until the
       // task is actually completed.
       const now = new Date();
-      if ((req.body.statut ?? 'RUNNING') === 'RUNNING') {
-        await pauseOtherRunningEntries(req.user.id, req.body.id);
+      // The client supplies an id so it can insert the row optimistically, but
+      // it must never be *required*: a body without one used to be stored as a
+      // row with `id: undefined`, which can then never be updated or deleted
+      // (every route looks it up by id) and breaks React's keys in the table.
+      const id = req.body.id || `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const statut = req.body.statut ?? 'RUNNING';
+      if (statut === 'RUNNING') {
+        await pauseOtherRunningEntries(req.user.id, id);
       }
       const entry = await db.createTimeEntry({
         ...req.body,
+        id,
+        statut,
         date: formatDateFR(now),
         heureDebut: formatTimeFR(now),
         heureFin: '',
