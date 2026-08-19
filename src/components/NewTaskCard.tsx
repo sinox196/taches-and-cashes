@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Plus, X, Settings2, ChevronDown, Search } from 'lucide-react';
+import { Play, Plus, Settings2, ChevronDown, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { MissionEditorModal } from './missions/MissionEditorModal';
 
@@ -15,8 +15,6 @@ interface NewTaskCardProps {
     taskType?: string,
     taskTypeId?: number
   ) => void;
-  isOpen: boolean;
-  onToggleOpen: () => void;
   refreshServices: () => void;
 }
 
@@ -24,8 +22,6 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
   services,
   taskTypes,
   onStartNewTask,
-  isOpen,
-  onToggleOpen,
   refreshServices
 }) => {
   const { hasPermission, token } = useAuth();
@@ -150,26 +146,12 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
   const currentMission = services.find(s => String(s.id) === selectedServiceId) || null;
 
   return (
-    <div className="relative">
-      <div className="flex justify-end mb-2">
-        <button
-          onClick={onToggleOpen}
-          className="w-10 h-10 md:w-12 md:h-12 bg-navy text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-all cursor-pointer"
-          title={isOpen ? 'Fermer le panneau' : 'Démarrer nouvelle tâche'}
-        >
-          {isOpen ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5 stroke-[2.5]" />}
-        </button>
-      </div>
-
-      {/* The panel is anchored to the right edge of its 320px column and opens
-          leftwards: it is wider than the column, so laying it out in flow would
-          push it off the right of the viewport. */}
-      {isOpen && (
-        <div className="absolute right-0 z-20 bg-white rounded-xl border border-gray-100 shadow-xl p-6 w-[min(460px,calc(100vw-2rem))] transition-all animate-fadeIn">
-          <h3 className="text-[12px] font-bold text-gray-800 mb-5 tracking-wider uppercase">
-            DÉMARRER NOUVELLE TÂCHE
+    <>
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h3 className="text-[11px] font-extrabold text-gray-800 mb-4 tracking-[0.05em] uppercase">
+            Démarrer nouvelle tâche
           </h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3.5">
             {/* Field: Client */}
             <div ref={dropdownRef}>
               <label className="text-[11px] font-semibold text-gray-400 block mb-1">
@@ -329,8 +311,7 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
               <span>DÉMARRER</span>
             </button>
           </form>
-        </div>
-      )}
+      </div>
 
       {missionEditor && (
         <MissionEditorModal
@@ -341,6 +322,6 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
           onDeleted={handleMissionDeleted}
         />
       )}
-    </div>
+    </>
   );
 };

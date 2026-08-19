@@ -115,17 +115,17 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm mt-6 flex flex-col overflow-hidden font-sans">
       {/* Card Header */}
       <div className="px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h2 className="text-[13px] font-bold text-gray-800 uppercase tracking-wide">
+        <div className="flex items-center gap-3 shrink-0">
+          <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide whitespace-nowrap">
             MON TIME TRACKING
           </h2>
-          <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+          <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
             {filteredEntries.length} entrées
           </span>
         </div>
 
         {/* Header Controls: Search & Filter */}
-        <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
           {/* Collaborator Filter */}
           {isAdmin && (
             <div className="relative">
@@ -167,19 +167,28 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
             <Filter className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          {/* Status Filter */}
-          <div className="relative">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="appearance-none bg-white border border-gray-200 hover:border-gray-300 rounded-md pl-2.5 pr-7 py-1 text-[11px] font-semibold text-gray-700 focus:outline-none focus:border-gray-400 cursor-pointer max-w-[110px] truncate"
-            >
-              <option value="ALL">Tous (Statuts)</option>
-              <option value="COMPLETED">Completed</option>
-              <option value="RUNNING">Running</option>
-              <option value="PAUSED">Paused</option>
-            </select>
-            <Filter className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+          {/* Status: a segmented control rather than a dropdown — four states,
+              constantly switched, worth showing without opening a menu. */}
+          <div className="flex items-center gap-1.5">
+            {([
+              ['ALL', 'Tous'],
+              ['RUNNING', 'En cours'],
+              ['PAUSED', 'En pause'],
+              ['COMPLETED', 'Terminées'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setStatusFilter(value)}
+                aria-pressed={statusFilter === value}
+                className={`px-3 py-1.5 rounded-lg border text-[11.5px] font-bold transition-colors ${
+                  statusFilter === value
+                    ? 'bg-navy border-navy text-white'
+                    : 'bg-white border-gray-300 text-gray-700 hover:border-gray-400'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
       </div>

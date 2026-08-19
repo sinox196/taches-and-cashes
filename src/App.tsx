@@ -180,7 +180,6 @@ export default function App() {
     };
   }, [token, activeSidebarItem, fetchTimeEntries]);
 
-  const [isNewTaskCardOpen, setIsNewTaskCardOpen] = useState<boolean>(true);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -432,33 +431,56 @@ export default function App() {
           <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1400px] w-full mx-auto">
             
             
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-              <div className="flex-1 w-full mr-0 md:mr-4">
-                <div className="mb-6">
-                  <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">
-                    Team Time Tracking
-                  </h1>
-                  <p className="text-[12px] text-gray-500 mt-1">
-                    Suivi du temps de travail et coût calculé des collaborateurs en temps réel
-                  </p>
-                </div>
-                
-                {hasPermission('VIEW') && !myRunningEntry && myPausedEntries.length > 0 && (
+            <div>
+              <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">
+                Team Time Tracking
+              </h1>
+              <p className="text-[11.5px] text-gray-500 mt-0.5">
+                Suivi du temps de travail et coût calculé des collaborateurs en temps réel
+              </p>
+            </div>
+
+            {/* Two columns: the activity on the left, and on the right a panel
+                that always answers "what are you on right now" — the running
+                timer when there is one, the start form when there isn't. */}
+            <div className="flex flex-col lg:flex-row lg:items-start gap-5">
+              <div className="flex-1 min-w-0 flex flex-col gap-5">
+                {/* Paused tasks stay visible while another task runs: they are
+                    exactly what you might switch back to. */}
+                {hasPermission('VIEW') && myPausedEntries.length > 0 && (
                   <PausedTasksList 
                     entries={myPausedEntries}
                     onResume={handleSelectAsActive}
                   />
                 )}
+
+                {hasPermission('VIEW') && (
+                  <TimeTrackingTable
+                    hasRunningTask={!!myRunningEntry}
+                    entries={timeEntries}
+                    onEdit={(entry) => setEditingEntry(entry)}
+                    onDelete={handleDeleteEntry}
+                    onMore={(entry) => showToast(`Options pour ${entry.client}`)}
+                    onSelectAsActive={handleSelectAsActive}
+                    onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
+                    totalEntries={totalEntries ?? undefined}
+                  />
+                )}
               </div>
 
-              <div className="md:w-80 shrink-0">
-                {hasPermission('EDIT') && !myRunningEntry && (
+              <div className="lg:w-[320px] shrink-0 lg:sticky lg:top-6">
+                {hasPermission('VIEW') && myRunningEntry ? (
+                  <ActiveTimerCard
+                    timerState={activeTimer}
+                    onStart={handleResumeTimer}
+                    onPause={handlePauseTimer}
+                    onStop={handleStopTimer}
+                  />
+                ) : hasPermission('EDIT') && (
                   <NewTaskCard
                     services={servicesList}
                     taskTypes={taskTypesList}
                     onStartNewTask={handleStartNewTask}
-                    isOpen={isNewTaskCardOpen}
-                    onToggleOpen={() => setIsNewTaskCardOpen((prev) => !prev)}
                     refreshServices={() => {
                       if (token) {
                         fetch('/api/services', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -477,30 +499,6 @@ export default function App() {
                 )}
               </div>
             </div>
-
-            {hasPermission('VIEW') && myRunningEntry && (
-              <ActiveTimerCard
-                timerState={activeTimer}
-                onStart={handleResumeTimer}
-                onPause={handlePauseTimer}
-                onStop={handleStopTimer}
-              />
-            )}
-            
-
-
-            {hasPermission('VIEW') && (
-              <TimeTrackingTable
-                   hasRunningTask={!!myRunningEntry}
-                   entries={timeEntries}
-                onEdit={(entry) => setEditingEntry(entry)}
-                onDelete={handleDeleteEntry}
-                onMore={(entry) => showToast(`Options pour ${entry.client}`)}
-                onSelectAsActive={handleSelectAsActive}
-                onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
-                totalEntries={totalEntries ?? undefined}
-              />
-            )}
           </main>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">
