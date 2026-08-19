@@ -454,18 +454,6 @@ export default function App() {
                   />
                 )}
 
-                {hasPermission('VIEW') && (
-                  <TimeTrackingTable
-                    hasRunningTask={!!myRunningEntry}
-                    entries={timeEntries}
-                    onEdit={(entry) => setEditingEntry(entry)}
-                    onDelete={handleDeleteEntry}
-                    onMore={(entry) => showToast(`Options pour ${entry.client}`)}
-                    onSelectAsActive={handleSelectAsActive}
-                    onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
-                    totalEntries={totalEntries ?? undefined}
-                  />
-                )}
               </div>
 
               <div className="lg:w-[320px] shrink-0 lg:sticky lg:top-6">
@@ -499,6 +487,19 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {hasPermission('VIEW') && (
+              <TimeTrackingTable
+                hasRunningTask={!!myRunningEntry}
+                entries={timeEntries}
+                onEdit={(entry) => setEditingEntry(entry)}
+                onDelete={handleDeleteEntry}
+                onMore={(entry) => showToast(`Options pour ${entry.client}`)}
+                onSelectAsActive={handleSelectAsActive}
+                onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
+                totalEntries={totalEntries ?? undefined}
+              />
+            )}
           </main>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">

@@ -194,22 +194,38 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
       </div>
 
       {/* Table Container */}
+      {/* Only scrolls below a genuinely narrow viewport; at desktop widths the
+          fixed layout below makes every column fit. */}
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+        <table className="w-full table-fixed text-left border-collapse min-w-[880px]">
+          <colgroup>
+            <col className={isAdmin ? 'w-[10%]' : 'w-[11%]'} />{/* Collaborateur */}
+            <col className="w-[7.5%]" />{/* Date */}
+            <col className={isAdmin ? 'w-[9%]' : 'w-[12%]'} />{/* Client */}
+            <col className={isAdmin ? 'w-[11%]' : 'w-[16%]'} />{/* Description */}
+            <col className={isAdmin ? 'w-[9%]' : 'w-[13%]'} />{/* Mission */}
+            <col className={isAdmin ? 'w-[9%]' : 'w-[13%]'} />{/* Type de tâche */}
+            <col className="w-[5%]" />{/* Début */}
+            <col className="w-[5%]" />{/* Fin */}
+            <col className={isAdmin ? 'w-[6.5%]' : 'w-[8%]'} />{/* Durée */}
+            {isAdmin && <col className="w-[7%]" />}{/* Coût */}
+            <col className={isAdmin ? 'w-[8%]' : 'w-[9.5%]'} />{/* Statut */}
+            {isAdmin && <col className="w-[13%]" />}{/* Actions */}
+          </colgroup>
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100 text-[11px] text-gray-500 font-bold uppercase select-none">
-              <th className="px-4 py-2.5">Collaborateur</th>
-              <th className="px-4 py-2.5">Date</th>
-              <th className="px-4 py-2.5">Client</th>
-              <th className="px-4 py-2.5">Description de l'activité</th>
-              <th className="px-4 py-2.5">Mission</th>
-              <th className="px-4 py-2.5">Type de tâche</th>
-              <th className="px-3 py-2.5 whitespace-nowrap">Début</th>
-              <th className="px-3 py-2.5 whitespace-nowrap">Fin</th>
-              <th className="px-4 py-2.5">Durée</th>
-              {isAdmin && <th className="px-4 py-2.5 whitespace-nowrap">Coût</th>}
-              <th className="px-4 py-2.5">Statut</th>
-              {isAdmin && <th className="px-4 py-2.5 text-center">Actions</th>}
+            <tr className="bg-gray-50 border-b border-gray-100 text-[10px] text-gray-500 font-extrabold uppercase tracking-[0.04em] select-none">
+              <th className="px-3 py-2.5 truncate">Collaborateur</th>
+              <th className="px-2 py-2.5 truncate">Date</th>
+              <th className="px-2 py-2.5 truncate">Client</th>
+              <th className="px-2 py-2.5 truncate">Description</th>
+              <th className="px-2 py-2.5 truncate">Mission</th>
+              <th className="px-2 py-2.5 truncate">Type</th>
+              <th className="px-2 py-2.5 truncate">Début</th>
+              <th className="px-2 py-2.5 truncate">Fin</th>
+              <th className="px-2 py-2.5 truncate">Durée</th>
+              {isAdmin && <th className="px-2 py-2.5 truncate">Coût</th>}
+              <th className="px-2 py-2.5 truncate">Statut</th>
+              {isAdmin && <th className="px-2 py-2.5 text-center truncate">Actions</th>}
             </tr>
           </thead>
           {filteredEntries.length === 0 ? (
@@ -247,56 +263,56 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                   }`}
                 >
                   {/* Collaborator */}
-                  <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5">
+                  <td className="px-3 py-2.5 font-medium text-gray-900 truncate" title={row.userName || 'Unknown'}>
+                    <span className="inline-flex items-center gap-1.5 max-w-full">
                       {(() => { const p = presenceOf(row.userId);
                         return <PresenceBadge state={p.state} idleMs={p.idleMs} variant="dot" />; })()}
                       {row.userName || 'Unknown'}
                     </span>
                   </td>
                   {/* Date */}
-                  <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">
+                  <td className="px-2 py-2.5 whitespace-nowrap text-gray-600">
                     {row.date}
                   </td>
 
                   {/* Client */}
-                  <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">
+                  <td className="px-2 py-2.5 font-medium text-gray-900 truncate" title={row.client}>
                     {row.client}
                   </td>
 
                   {/* Description */}
-                  <td className="px-4 py-2.5 text-gray-600 max-w-xs truncate" title={row.description}>
+                  <td className="px-2 py-2.5 text-gray-600 truncate" title={row.description}>
                     {row.description}
                   </td>
 
                   {/* Mission */}
-                  <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
+                  <td className="px-2 py-2.5 text-gray-600 truncate" title={row.pole}>
                     {row.pole}
                   </td>
 
                   {/* Type de tâche */}
-                  <td className="px-4 py-2.5 text-gray-600 max-w-[200px] truncate" title={row.taskType || ''}>
+                  <td className="px-2 py-2.5 text-gray-600 truncate" title={row.taskType || ''}>
                     {row.taskType || <span className="text-gray-300">—</span>}
                   </td>
 
                   {/* Heure Début */}
-                  <td className="px-3 py-2.5 font-mono text-gray-600 whitespace-nowrap">
+                  <td className="px-2 py-2.5 font-mono text-gray-600 truncate">
                     {row.heureDebut}
                   </td>
 
                   {/* Heure Fin — only a completed task has one */}
-                  <td className="px-3 py-2.5 font-mono text-gray-600 whitespace-nowrap">
+                  <td className="px-2 py-2.5 font-mono text-gray-600 truncate">
                     {row.heureFin ? row.heureFin : <span className="text-gray-300">—</span>}
                   </td>
 
                   {/* Durée */}
-                  <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">
+                  <td className="px-2 py-2.5 font-medium text-gray-900 truncate" title={row.duree}>
                     {row.duree}
                   </td>
 
                   {/* Coût employeur accumulé pour cette tâche */}
                   {isAdmin && (
-                    <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">
+                    <td className="px-2 py-2.5 font-medium text-gray-900 truncate">
                       {row.hourlyRate == null ? (
                         <span
                           className="text-gray-300"
@@ -313,7 +329,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                   )}
 
                   {/* Statut */}
-                  <td className="px-4 py-2.5 whitespace-nowrap">
+                  <td className="px-2 py-2.5">
                     {row.statut === 'COMPLETED' ? (
                       <span className="px-2 py-0.5 rounded-full bg-[#ECFDF3] text-[#12B76A] font-bold text-[9px] uppercase tracking-wide inline-block">
                         COMPLETED
@@ -338,7 +354,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
 
                   {/* Actions Column */}
                   {isAdmin && (
-                    <td className="px-4 py-2.5 whitespace-nowrap">
+                    <td className="px-2 py-2.5">
                       <div className="flex items-center justify-center gap-1">
                         {/* Timer controls — an admin can drive any collaborator's
                             task, not just their own. */}
