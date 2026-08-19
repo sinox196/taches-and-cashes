@@ -1435,11 +1435,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const settings = await db.getSettings();
       const current = typeof settings.invoiceCounter === 'number' ? settings.invoiceCounter : 0;
       const all = await db.getAllInvoices();
-      // The newest document's date bounds the next one (see the date rule below).
-      const last = all[0];
+      // Only the legal sequence carries the date rule, so only a *legal*
+      // invoice can bound the next one. Returning the newest document of any
+      // kind let an autre document — which is exempt — set a floor the server
+      // would never have enforced.
+      const lastLegal = all.find((i: any) => i.documentKind !== 'AUTRE');
       res.json({
         nextNumber: String(current + 1).padStart(4, '0'),
-        lastIssueDate: last ? last.issueDate : null,
+        lastIssueDate: lastLegal ? lastLegal.issueDate : null,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

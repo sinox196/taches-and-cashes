@@ -213,8 +213,8 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
              paid, remaining: round3(totalNet - paid) };
   }, [lines, suspended, detailed, withholdingRate, stampDuty, showDisbursements, disbursements, showAdvances, advances, payments]);
 
-  const dateWarning = !isEdit && lastIssueDate && issueDate < lastIssueDate
-    ? `La date doit être postérieure ou égale à celle du dernier document (${lastIssueDate}).`
+  const dateWarning = !isEdit && !freeNumber && lastIssueDate && issueDate < lastIssueDate
+    ? `La date doit être postérieure ou égale à celle de la dernière facture légale (${lastIssueDate}).`
     : '';
 
   const handleSave = async () => {
