@@ -1,19 +1,23 @@
 import React from 'react';
-import { Menu, Bell, LogOut } from 'lucide-react';
+import { Menu, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
+import { NotificationBell } from './NotificationBell';
 
 interface HeaderProps {
   onToggleSidebar?: () => void;
   userCode?: string;
   userName?: string;
+  /** Switches the active sidebar section — used by the notification bell. */
+  onNavigate?: (section: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onToggleSidebar,
   userCode = 'ABA01',
   userName = 'Alexandre Dupont',
+  onNavigate,
 }) => {
   const { logout, user } = useAuth();
   const { own } = usePresence();
@@ -41,11 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
         </span>
 
         <div className="flex items-center gap-3 border-l border-gray-200 pl-4">
-          {/* Notification Icon with Red Badge */}
-          <button className="relative p-1 text-gray-500 hover:text-gray-800 rounded transition-colors" title="Notifications">
-            <Bell className="w-5 h-5" />
-            <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 border border-white rounded-full"></div>
-          </button>
+          <NotificationBell onNavigate={(section) => onNavigate?.(section)} />
 
           {/* User Avatar + own presence */}
           <div className="flex items-center gap-2">

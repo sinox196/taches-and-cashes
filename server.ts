@@ -1937,6 +1937,13 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
+      const requester = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+      await notify(
+        Number(approverId),
+        'LEAVE_REQUEST',
+        'Demande de congé à approuver',
+        `${requester?.fullName || requester?.username || 'Un collaborateur'} a demandé un congé du ${startDate} au ${endDate}.`,
+      );
       res.status(201).json(leave);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -1973,6 +1980,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         approverComment: req.body.comment || '',
         updatedAt: new Date().toISOString()
       });
+      await notify(leave.userId, 'LEAVE_DECISION', 'Congé approuvé', `Votre demande de congé du ${leave.startDate} au ${leave.endDate} a été approuvée.`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2004,6 +2012,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         approverComment: comment,
         updatedAt: new Date().toISOString()
       });
+      await notify(leave.userId, 'LEAVE_DECISION', 'Congé refusé', `Votre demande de congé du ${leave.startDate} au ${leave.endDate} a été refusée : ${comment}`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2084,6 +2093,13 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
+      const requester = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+      await notify(
+        Number(approverId),
+        'ABSENCE_REQUEST',
+        "Demande d'autorisation d'absence",
+        `${requester?.fullName || requester?.username || 'Un collaborateur'} a demandé une autorisation d'absence le ${date}.`,
+      );
       res.status(201).json(auth);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2110,6 +2126,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         approverComment: req.body.comment || '',
         updatedAt: new Date().toISOString()
       });
+      await notify(auth.userId, 'ABSENCE_DECISION', "Autorisation d'absence approuvée", `Votre demande d'autorisation d'absence du ${auth.date} a été approuvée.`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2140,6 +2157,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         approverComment: comment,
         updatedAt: new Date().toISOString()
       });
+      await notify(auth.userId, 'ABSENCE_DECISION', "Autorisation d'absence refusée", `Votre demande d'autorisation d'absence du ${auth.date} a été refusée : ${comment}`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2471,38 +2489,49 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
+  /**
+   * The one place a time entry is actually created — used by the normal
+   * "démarrer une tâche" POST below and by starting an assigned task, so the
+   * historical-rate snapshot, server-owned timestamps and the one-running-
+   * task-per-person rule can't drift between the two paths.
+   *
+   * The caller supplies an id so it can insert optimistically, but it is never
+   * *required*: a body without one used to be stored as a row with
+   * `id: undefined`, which no route could then update or delete and which
+   * broke React's keys in the table.
+   */
+  const createRunningEntryForUser = async (userId: number, fields: any) => {
+    const userFull = await db.get('SELECT * FROM users WHERE id = ?', userId);
+    const settings = await db.getSettings() || {};
+    // Snapshot the author's employer cost. Reads resolve it live as well, so
+    // this is only a record of the rate in force when the task was created.
+    const hourlyRate = employerHourlyRate(userFull, settings);
+
+    // Stamp date / heureDebut server-side so the recorded start time can't
+    // drift from the client clock or locale. heureFin stays empty until the
+    // task is actually completed.
+    const now = new Date();
+    const id = fields.id || `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const statut = fields.statut ?? 'RUNNING';
+    if (statut === 'RUNNING') {
+      await pauseOtherRunningEntries(userId, id);
+    }
+    return db.createTimeEntry({
+      ...fields,
+      id,
+      statut,
+      date: formatDateFR(now),
+      heureDebut: formatTimeFR(now),
+      heureFin: '',
+      userId,
+      hourlyRate,
+      lastStartedAt: Date.now(),
+    });
+  };
+
   app.post('/api/time-entries', authenticate, async (req: any, res: any) => {
     try {
-      const userFull = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
-      const settings = await db.getSettings() || {};
-      // Snapshot the author's employer cost. Reads resolve it live as well, so
-      // this is only a record of the rate in force when the task was created.
-      const hourlyRate = employerHourlyRate(userFull, settings);
-
-      // Stamp date / heureDebut server-side so the recorded start time can't
-      // drift from the client clock or locale. heureFin stays empty until the
-      // task is actually completed.
-      const now = new Date();
-      // The client supplies an id so it can insert the row optimistically, but
-      // it must never be *required*: a body without one used to be stored as a
-      // row with `id: undefined`, which can then never be updated or deleted
-      // (every route looks it up by id) and breaks React's keys in the table.
-      const id = req.body.id || `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const statut = req.body.statut ?? 'RUNNING';
-      if (statut === 'RUNNING') {
-        await pauseOtherRunningEntries(req.user.id, id);
-      }
-      const entry = await db.createTimeEntry({
-        ...req.body,
-        id,
-        statut,
-        date: formatDateFR(now),
-        heureDebut: formatTimeFR(now),
-        heureFin: '',
-        userId: req.user.id,
-        hourlyRate: hourlyRate,
-        lastStartedAt: Date.now()
-      });
+      const entry = await createRunningEntryForUser(req.user.id, req.body);
       res.json(entry);
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
@@ -2572,6 +2601,201 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       await db.deleteTimeEntry(entryId);
       res.json({ success: true });
       broadcastTimeEntries(); // Broadcast update
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Notifications — new message, task assigned, HR requests/decisions.
+  // ---------------------------------------------------------
+
+  /**
+   * The one place a notification is created. `type` picks where the bell
+   * sends the user when they click it (see NOTIFICATION_LINK in the client).
+   *
+   * A `function` declaration, not a `const` arrow — it needs to be callable
+   * from the HR routes above, which are defined earlier in this same
+   * function body but registered before this point runs. Declarations are
+   * hoisted through the whole scope; a `const` would not be.
+   */
+  async function notify(userId: number, type: string, title: string, body: string) {
+    await db.createNotification({
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      userId,
+      type,
+      title,
+      body,
+      readAt: null,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const NOTIFICATIONS_PAGE_SIZE = 50;
+
+  app.get('/api/notifications', authenticate, async (req: any, res: any) => {
+    try {
+      const mine = (await db.getAllNotifications()).filter((n: any) => n.userId === req.user.id);
+      const unreadCount = mine.filter((n: any) => !n.readAt).length;
+      res.json({ items: mine.slice(0, NOTIFICATIONS_PAGE_SIZE), unreadCount });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/notifications/:id/read', authenticate, async (req: any, res: any) => {
+    try {
+      const existing = await db.getAllNotifications();
+      const n = existing.find((x: any) => x.id === req.params.id);
+      // Not found *or belongs to someone else* both read as 404 — a
+      // notification id must never let one user probe another's inbox.
+      if (!n || n.userId !== req.user.id) return res.status(404).json({ error: 'Not found' });
+      const updated = await db.updateNotification(req.params.id, { readAt: n.readAt || new Date().toISOString() });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/notifications/read-all', authenticate, async (req: any, res: any) => {
+    try {
+      const mine = (await db.getAllNotifications()).filter((n: any) => n.userId === req.user.id && !n.readAt);
+      const now = new Date().toISOString();
+      await Promise.allSettled(mine.map((n: any) => db.updateNotification(n.id, { readAt: now })));
+      res.json({ updated: mine.length });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Task assignments — admin hands a mission + type de tâche to a staff
+  // member; it shows on their dashboard until started, then it is an
+  // ordinary running time entry like any other.
+  // ---------------------------------------------------------
+
+  /** Staff an assignment can target — the picker in the assign-task dialog. */
+  app.get('/api/users/assignable', authenticate, requirePermission('ASSIGN_TASKS'), async (req: any, res: any) => {
+    try {
+      const users = await db.getAllUsers();
+      res.json(
+        users
+          .filter((u: any) => STAFF_ROLES.includes(u.role))
+          .map((u: any) => ({ id: u.id, name: u.fullName || u.username, role: u.role }))
+          .sort((a: any, b: any) => a.name.localeCompare(b.name)),
+      );
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/task-assignments', authenticate, requirePermission('ASSIGN_TASKS'), async (req: any, res: any) => {
+    try {
+      const { assignedToUserId, client, clientId, pole, serviceId, taskType, taskTypeId, description } = req.body;
+      const targetId = Number(assignedToUserId);
+      if (!Number.isFinite(targetId)) return res.status(400).json({ error: 'assignedToUserId requis' });
+      if (!String(pole || '').trim()) return res.status(400).json({ error: 'La mission est requise' });
+
+      const target = await db.get('SELECT * FROM users WHERE id = ?', targetId);
+      if (!target) return res.status(404).json({ error: 'Collaborateur introuvable' });
+
+      const assigner = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+      const assignment = await db.createTaskAssignment({
+        id: `assign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        assignedToUserId: targetId,
+        assignedByUserId: req.user.id,
+        assignedByName: assigner?.fullName || assigner?.username || 'Admin',
+        client: client || '',
+        clientId: clientId != null ? Number(clientId) : null,
+        pole: String(pole).trim(),
+        serviceId: serviceId != null ? Number(serviceId) : null,
+        taskType: taskType || '',
+        taskTypeId: taskTypeId != null ? Number(taskTypeId) : null,
+        description: description || '',
+        status: 'PENDING',
+        timeEntryId: null,
+        createdAt: new Date().toISOString(),
+        startedAt: null,
+      });
+
+      await notify(
+        targetId,
+        'TASK_ASSIGNED',
+        'Nouvelle tâche assignée',
+        `${assignment.assignedByName} vous a assigné « ${assignment.pole}${assignment.taskType ? ' · ' + assignment.taskType : ''} »` +
+          (assignment.client ? ` pour ${assignment.client}` : ''),
+      );
+
+      res.status(201).json(assignment);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Pending assignments for the logged-in user — the dashboard widget. */
+  app.get('/api/task-assignments/mine', authenticate, async (req: any, res: any) => {
+    try {
+      const mine = (await db.getAllTaskAssignments())
+        .filter((a: any) => a.assignedToUserId === req.user.id && a.status === 'PENDING');
+      res.json(mine);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * The assignee starts it: this becomes exactly the same thing as clicking
+   * "Démarrer" on a manually-created task, through the same helper — so it
+   * obeys the one-running-task-per-person rule and appears in Pointage the
+   * instant that page fetches, no special casing anywhere else in the app.
+   */
+  app.put('/api/task-assignments/:id/start', authenticate, async (req: any, res: any) => {
+    try {
+      const assignment = await db.getTaskAssignmentById(req.params.id);
+      if (!assignment) return res.status(404).json({ error: 'Not found' });
+      if (assignment.assignedToUserId !== req.user.id) {
+        return res.status(403).json({ error: 'Cette tâche ne vous est pas assignée' });
+      }
+      if (assignment.status !== 'PENDING') {
+        return res.status(409).json({ error: 'Cette tâche a déjà été démarrée ou annulée' });
+      }
+
+      const entry = await createRunningEntryForUser(req.user.id, {
+        client: assignment.client,
+        clientId: assignment.clientId,
+        pole: assignment.pole,
+        serviceId: assignment.serviceId,
+        taskType: assignment.taskType,
+        taskTypeId: assignment.taskTypeId,
+        description: assignment.description,
+        statut: 'RUNNING',
+      });
+
+      const updated = await db.updateTaskAssignment(assignment.id, {
+        status: 'STARTED',
+        timeEntryId: entry.id,
+        startedAt: new Date().toISOString(),
+      });
+
+      res.json({ assignment: updated, entry });
+      broadcastTimeEntries();
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Cancels a pending assignment. A started one is real history — left alone. */
+  app.delete('/api/task-assignments/:id', authenticate, requirePermission('ASSIGN_TASKS'), async (req: any, res: any) => {
+    try {
+      const assignment = await db.getTaskAssignmentById(req.params.id);
+      if (!assignment) return res.status(404).json({ error: 'Not found' });
+      if (assignment.status !== 'PENDING') {
+        return res.status(400).json({ error: 'Seule une tâche en attente peut être annulée' });
+      }
+      await db.deleteTaskAssignment(req.params.id);
+      res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

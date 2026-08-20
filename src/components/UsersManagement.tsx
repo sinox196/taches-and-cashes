@@ -15,6 +15,7 @@ const PERMISSIONS_GROUPED = [
       { id: 'EDIT', label: 'Modifier (EDIT)', desc: 'Peut modifier le suivi du temps' },
       { id: 'DELETE', label: 'Supprimer (DELETE)', desc: 'Peut supprimer des données du suivi du temps' },
       { id: 'MANAGE_SERVICES', label: 'Gérer missions & types de tâches', desc: 'Peut ajouter, modifier et supprimer les missions et leurs types de tâches' },
+      { id: 'ASSIGN_TASKS', label: 'Assigner des tâches', desc: 'Peut assigner une mission et un type de tâche à un collaborateur' },
     ]
   },
   {

@@ -6,6 +6,7 @@ import { NewTaskCard } from './components/NewTaskCard';
 import { TimeTrackingTable } from './components/TimeTrackingTable';
 import { PausedTasksList } from './components/PausedTasksList';
 import { EditTaskModal } from './components/EditTaskModal';
+import { AssignTaskModal } from './components/AssignTaskModal';
 import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { MyDashboard } from './components/dashboard/MyDashboard';
 import { ChatPage } from './components/chat/ChatPage';
@@ -17,7 +18,7 @@ import { CashManagement } from './components/cash/CashManagement';
 import { useAuth } from './context/AuthContext';
 import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ClipboardCheck } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -181,6 +182,7 @@ export default function App() {
   }, [token, activeSidebarItem, fetchTimeEntries]);
 
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
+  const [isAssignTaskOpen, setIsAssignTaskOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Interval timer tick: Update running durations locally
@@ -407,7 +409,7 @@ export default function App() {
       />
       
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <Header userCode="ABA01" userName="Alexandre Dupont" />
+        <Header userCode="ABA01" userName="Alexandre Dupont" onNavigate={setActiveSidebarItem} />
         
         
         {activeSidebarItem === 'Dashboard' ? (
@@ -431,13 +433,24 @@ export default function App() {
           <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1400px] w-full mx-auto">
             
             
-            <div>
-              <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">
-                Team Time Tracking
-              </h1>
-              <p className="text-[11.5px] text-gray-500 mt-0.5">
-                Suivi du temps de travail et coût calculé des collaborateurs en temps réel
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">
+                  Team Time Tracking
+                </h1>
+                <p className="text-[11.5px] text-gray-500 mt-0.5">
+                  Suivi du temps de travail et coût calculé des collaborateurs en temps réel
+                </p>
+              </div>
+              {hasPermission('ASSIGN_TASKS') && (
+                <button
+                  onClick={() => setIsAssignTaskOpen(true)}
+                  className="shrink-0 flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <ClipboardCheck className="w-3.5 h-3.5" />
+                  Assigner une tâche
+                </button>
+              )}
             </div>
 
             {/* Two columns: the activity on the left, and on the right a panel
@@ -515,6 +528,15 @@ export default function App() {
         onSave={handleSaveEdit}
         taskTypes={taskTypesList}
       />
+
+      {isAssignTaskOpen && (
+        <AssignTaskModal
+          services={servicesList}
+          taskTypes={taskTypesList}
+          onClose={() => setIsAssignTaskOpen(false)}
+          onAssigned={() => showToast('Tâche assignée.')}
+        />
+      )}
 
       {toastMessage && (
         <div className="fixed bottom-5 right-5 bg-navy text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl z-50 flex items-center gap-2">

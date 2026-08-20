@@ -174,6 +174,20 @@ Charts live in [DashboardCharts.tsx](src/components/dashboard/DashboardCharts.ts
 
 The per-client breakdown is a **table, not a chart** — several measures per row plus a drill-down is tabular work. Cost figures inside it use `formatCostTND` throughout, including the row total, so a total and its parts are never shown at different precisions.
 
+### Task assignments and notifications
+
+An admin (gated on `ASSIGN_TASKS`, not a raw role check — the permission can be delegated the same way `MANAGE_SERVICES`/`ASSIGN_TASKS` etc. already are) hands a mission + type de tâche to a staff member from a button in Pointage ([AssignTaskModal.tsx](src/components/AssignTaskModal.tsx)), which reuses the same client-search-and-mission-cascade UI as [NewTaskCard.tsx](src/components/NewTaskCard.tsx).
+
+The assignment sits **pending** — visible on the assignee's dashboard via [AssignedTasksCard.tsx](src/components/dashboard/AssignedTasksCard.tsx), mounted on **both** MyDashboard and AdminDashboard. That duplication is deliberate: `STAFF_ROLES` (who can be assigned work) is a superset of the roles that see MyDashboard — a SUPERVISEUR is staff but sees the team-wide AdminDashboard instead, so without mounting it there too, a SUPERVISEUR could be assigned work and never see it.
+
+**Starting** an assignment (`PUT /api/task-assignments/:id/start`, assignee-only) does not create a second kind of record — it calls `createRunningEntryForUser()`, the exact same helper `POST /api/time-entries` calls, so it obeys the one-running-task-per-person rule and the entry appears in Pointage the moment that page fetches. There is deliberately no live-push into Pointage from the dashboard: starting an assignment while looking at the dashboard behaves like starting a task any other way — go to Pointage and it is there — which matches the existing rule that the SSE stream only connects while Pointage is the active tab.
+
+Notifications (`notifications` collection, `GET/PUT /api/notifications*`) are generic — `type` decides both the icon and where the bell sends you on click (`TYPE_META` in [NotificationBell.tsx](src/components/NotificationBell.tsx)). Wired at four more places besides task assignment: a leave/absence request notifies its chosen `approverId` directly (no need to scan every user's permissions — the requester already picked one approver), and an approve/reject decision notifies the requester back. The `notify()` helper in server.ts is a `function` declaration, not a `const` arrow — it has to be callable from the HR routes, which are registered earlier in `startServer()` than the point where it is defined; declarations are hoisted through the whole function body, a `const` would not be visible yet at that point in execution.
+
+**Chat unread counts are not duplicated into notifications.** The bell reads `GET /api/messages/contacts` directly (the same endpoint ChatPage already uses) and synthesizes a "message" row per contact with unread messages, rather than writing a notification row on every message sent that would then need to be kept in sync with `readAt` on the thread. One source of truth for "is this message read", not two.
+
+### Leave balances
+
 ### Leave balances
 
 A balance is stored as `{ userId, entitlement, used }` — **`available` is always derived** (`entitlement - used`), never stored. `entitlement` is the annual allowance the admin sets per user in the Users form (`soldeConge` on the users API); `used` is the only thing approve/cancel move. `normalizeBalance()` in [database.ts](src/server/database.ts) migrates legacy rows that stored a decrementing `available` by recovering `entitlement = available + used`.

@@ -43,6 +43,8 @@ try {
     leaveBalances: await db.getAllLeaveBalances(),
     timeEntries: await db.getAllTimeEntries(),
     messages: await db.getAllMessages(),
+    taskAssignments: await db.getAllTaskAssignments(),
+    notifications: await db.getAllNotifications(),
     settings: await db.getSettings(),
   };
 

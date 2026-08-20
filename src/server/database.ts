@@ -62,6 +62,8 @@ async function initJsonDb(): Promise<Database> {
     if (!db.leaveBalances) db.leaveBalances = [];
     if (!db.timeEntries) db.timeEntries = [];
     if (!db.messages) db.messages = [];
+    if (!db.taskAssignments) db.taskAssignments = [];
+    if (!db.notifications) db.notifications = [];
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
@@ -357,6 +359,45 @@ async function initJsonDb(): Promise<Database> {
       if (changed > 0) await saveDb();
       return changed;
     },
+    // Task assignments — an admin handing a mission + type de tâche to a
+    // collaborator. Newest first, like time entries and invoices.
+    getAllTaskAssignments: async () => db.taskAssignments,
+    getTaskAssignmentById: async (id: string) => db.taskAssignments.find((a: any) => a.id === id),
+    createTaskAssignment: async (assignment: any) => {
+      db.taskAssignments.unshift(assignment);
+      await saveDb();
+      return assignment;
+    },
+    updateTaskAssignment: async (id: string, updates: any) => {
+      const index = db.taskAssignments.findIndex((a: any) => a.id === id);
+      if (index === -1) return null;
+      db.taskAssignments[index] = { ...db.taskAssignments[index], ...updates };
+      await saveDb();
+      return db.taskAssignments[index];
+    },
+    deleteTaskAssignment: async (id: string) => {
+      const index = db.taskAssignments.findIndex((a: any) => a.id === id);
+      if (index === -1) return false;
+      db.taskAssignments.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    // Notifications — newest first.
+    getAllNotifications: async () => db.notifications,
+    createNotification: async (notification: any) => {
+      db.notifications.unshift(notification);
+      await saveDb();
+      return notification;
+    },
+    updateNotification: async (id: string, updates: any) => {
+      const index = db.notifications.findIndex((n: any) => n.id === id);
+      if (index === -1) return null;
+      db.notifications[index] = { ...db.notifications[index], ...updates };
+      await saveDb();
+      return db.notifications[index];
+    },
+
     // Settings CRUD
     getSettings: async () => {
       return db.settings;

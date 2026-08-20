@@ -51,6 +51,8 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   absence_authorizations: { desc: false },
   time_entries: { desc: true },
   messages: { desc: false },
+  task_assignments: { desc: true },
+  notifications: { desc: true },
 };
 
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
@@ -64,6 +66,8 @@ const TABLE_FOR: Record<string, string> = {
   absenceAuthorizations: 'absence_authorizations',
   timeEntries: 'time_entries',
   messages: 'messages',
+  taskAssignments: 'task_assignments',
+  notifications: 'notifications',
 };
 
 function makePool(connectionString: string) {
@@ -109,6 +113,8 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`CREATE INDEX IF NOT EXISTS task_types_service_idx  ON task_types ((data->>'serviceId'))`);
   await q(`CREATE INDEX IF NOT EXISTS time_entries_user_idx   ON time_entries ((data->>'userId'))`);
   await q(`CREATE INDEX IF NOT EXISTS messages_to_idx         ON messages ((data->>'toUserId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS task_assignments_to_idx ON task_assignments ((data->>'assignedToUserId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS notifications_user_idx  ON notifications ((data->>'userId'))`);
 }
 
 export async function initPostgres(connectionString: string): Promise<Database> {
@@ -161,6 +167,8 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const absences = collection('absence_authorizations');
   const timeEntries = collection('time_entries');
   const messages = collection('messages');
+  const taskAssignments = collection('task_assignments');
+  const notifications = collection('notifications');
 
   const db: Database = {
     get: async (sql: string, param: any) => {
@@ -297,6 +305,16 @@ export async function initPostgres(connectionString: string): Promise<Database> 
       );
       return res.rowCount ?? 0;
     },
+
+    getAllTaskAssignments: taskAssignments.all,
+    getTaskAssignmentById: taskAssignments.byId,
+    createTaskAssignment: taskAssignments.create,
+    updateTaskAssignment: taskAssignments.update,
+    deleteTaskAssignment: taskAssignments.remove,
+
+    getAllNotifications: notifications.all,
+    createNotification: notifications.create,
+    updateNotification: notifications.update,
 
     getSettings: async () => {
       const rows = await q('SELECT data, invoice_counter FROM settings WHERE only_row');

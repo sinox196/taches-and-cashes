@@ -70,6 +70,18 @@ export interface Database {
   createMessage(message: any): Promise<any>;
   markMessagesRead(readerId: number, fromUserId: number): Promise<number>;
 
+  /** A mission + type de tâche an admin hands to a collaborator to work on. */
+  getAllTaskAssignments(): Promise<any[]>;
+  getTaskAssignmentById(id: string): Promise<any | undefined>;
+  createTaskAssignment(assignment: any): Promise<any>;
+  updateTaskAssignment(id: string, updates: any): Promise<any | null>;
+  deleteTaskAssignment(id: string): Promise<boolean>;
+
+  /** Generic per-user notifications — new message, task assigned, HR events. */
+  getAllNotifications(): Promise<any[]>;
+  createNotification(notification: any): Promise<any>;
+  updateNotification(id: string, updates: any): Promise<any | null>;
+
   getSettings(): Promise<any>;
   updateSettings(updates: any): Promise<any>;
 
@@ -107,6 +119,10 @@ export const emptyDb = () => ({
   timeEntries: [],
   // Direct messages between two users (chat).
   messages: [],
+  // Mission + type de tâche handed by an admin to a collaborator.
+  taskAssignments: [],
+  // Per-user notifications: new message, task assigned, HR events.
+  notifications: [],
   settings: defaultSettings(),
 });
 
@@ -130,7 +146,7 @@ export const ADMIN_PERMISSIONS = [
   'VIEW', 'EDIT', 'MODIFY', 'DELETE', 'MANAGE_USERS',
   'VIEW_CLIENTS', 'CREATE_CLIENTS', 'EDIT_CLIENTS', 'DELETE_CLIENTS',
   'MANAGE_CLIENT_FIELDS', 'MANAGE_SERVICES', 'VIEW_CASH', 'MANAGE_CASH',
-  'MANAGE_PRESENCE_SETTINGS',
+  'MANAGE_PRESENCE_SETTINGS', 'ASSIGN_TASKS',
   'VIEW_HR', 'CREATE_LEAVE_REQUEST', 'MANAGE_LEAVE_REQUESTS',
   'CREATE_ABSENCE_AUTHORIZATION', 'MANAGE_ABSENCE_AUTHORIZATIONS',
 ];

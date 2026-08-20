@@ -8,6 +8,7 @@ import { EmployeeDetailsModal } from './EmployeeDetailsModal';
 import { EmployeeTasksModal } from './EmployeeTasksModal';
 import { ClientBreakdown } from './ClientBreakdown';
 import { MultiSelectAutocomplete } from './MultiSelectAutocomplete';
+import { AssignedTasksCard } from './AssignedTasksCard';
 
 
 export const AdminDashboard: React.FC = () => {
@@ -122,6 +123,11 @@ export const AdminDashboard: React.FC = () => {
             />
           </div>
         </div>
+
+        {/* An ADMIN/SUPERVISEUR can themselves be assigned a task by another
+            admin — this dashboard is their only one, so it needs the same
+            widget MyDashboard shows a collaborator. */}
+        <AssignedTasksCard />
 
         {stats && (
           <>
