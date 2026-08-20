@@ -283,22 +283,52 @@ export function downloadInvoicePdf(invoice: any, block?: CompanyBlock | null): v
 /**
  * Prints the very same PDF.
  *
- * The blob is handed to a hidden iframe and printed from there, so the print
- * dialog is the PDF viewer's own and previews exactly the document — never the
- * surrounding page. That is what removes the step of cancelling a first,
- * wrong preview.
+ * The blob is handed to a hidden iframe and printed by calling `.print()` on
+ * *that frame's own window* once it has loaded — not by embedding a
+ * "this.print()" action inside the PDF itself (jsPDF's `autoPrint()`).
+ * Chromium's built-in PDF viewer disables JavaScript actions embedded in a
+ * PDF for security, so `autoPrint()` silently did nothing in Chrome and Edge:
+ * the iframe loaded the document but nothing ever asked to print it. Calling
+ * `print()` on the hosting window instead is a normal DOM API call, unrelated
+ * to the PDF's own scripting, and is what every "print this PDF blob" pattern
+ * actually relies on.
+ *
+ * The dialog previews exactly this document — never the surrounding app page
+ * — which is what removes the step of cancelling a first, wrong preview.
  */
 export function printInvoicePdf(invoice: any, block?: CompanyBlock | null): void {
   const doc = buildInvoicePdf(invoice, block);
-  doc.autoPrint();
   const url = URL.createObjectURL(doc.output('blob'));
 
   const frame = document.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
-  frame.src = url;
-  document.body.appendChild(frame);
 
-  // The viewer needs the object URL until the dialog is done with it.
-  setTimeout(() => { URL.revokeObjectURL(url); frame.remove(); }, 120000);
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    setTimeout(() => { URL.revokeObjectURL(url); frame.remove(); }, 500);
+  };
+
+  frame.onload = () => {
+    const win = frame.contentWindow;
+    if (!win) { cleanup(); return; }
+    // The PDF viewer needs a moment after 'load' to finish laying out the
+    // document; printing immediately can open a blank dialog.
+    setTimeout(() => {
+      try {
+        win.focus();
+        win.print();
+      } catch {
+        /* some browsers refuse programmatic print in ways that throw */
+      }
+    }, 200);
+  };
+
+  document.body.appendChild(frame);
+  frame.src = url;
+
+  // Not every browser closes the loop cleanly; don't leak the iframe forever.
+  setTimeout(cleanup, 120000);
 }
