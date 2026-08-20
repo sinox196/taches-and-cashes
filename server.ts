@@ -119,11 +119,11 @@ async function startServer() {
   // the deploy never goes live. 3000 stays the local default.
   const PORT = Number(process.env.PORT) || 3000;
 
-  // Default is 100kb, which is under the signature image the invoicing
-  // settings accept (400kb) — a legitimate upload came back as an opaque 413
-  // from the body parser instead of the clear message the route returns.
-  // Kept modest: every route is authenticated, and nothing else posts bulk.
-  app.use(express.json({ limit: '1mb' }));
+  // Default is 100kb. Raised for two authenticated, bounded uploads: the
+  // signature image (400kb) and a parsed client spreadsheet (the import route
+  // caps it at MAX_IMPORT_ROWS regardless, but the row data itself — a real
+  // 163-row/29-column sheet ran ~120kb — has to fit through the parser first).
+  app.use(express.json({ limit: '8mb' }));
 
   // Initialize SQLite database
   const db = await initDb();
@@ -1156,6 +1156,128 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       
       res.json(updated);
     } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /api/clients/import — bulk creation from a spreadsheet.
+   *
+   * The file itself is parsed in the browser (SheetJS), not here: the server
+   * only ever sees an already-mapped array of plain client rows, the same
+   * shape a single POST /api/clients would send. That keeps this route from
+   * needing a file-upload middleware, and means the row limit below is the
+   * only thing standing between a spreadsheet and the database — validation
+   * doesn't have to be duplicated between a "parse" step and an "import" step.
+   *
+   * Gated on CREATE_CLIENTS, the same permission a single creation needs:
+   * bulk creation is still creation, not a distinct capability.
+   */
+  const MAX_IMPORT_ROWS = 5000;
+
+  app.post('/api/clients/import', authenticate, requirePermission('CREATE_CLIENTS'), async (req: any, res: any) => {
+    try {
+      const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+      if (!rows) return res.status(400).json({ error: 'rows doit être un tableau.' });
+      if (rows.length === 0) return res.status(400).json({ error: 'Aucune ligne à importer.' });
+      if (rows.length > MAX_IMPORT_ROWS) {
+        return res.status(400).json({ error: `Trop de lignes (${rows.length}). Maximum ${MAX_IMPORT_ROWS} par import.` });
+      }
+      const skipDuplicates = req.body?.skipDuplicates !== false;
+
+      const existing = await db.getAllClients();
+      // Case/whitespace-insensitive: "1399521M/A/M/000" and " 1399521m/a/m/000 "
+      // are the same matricule fiscal to an accountant, not to a === check.
+      const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+      const existingTaxIds = new Set(existing.map((c: any) => norm(c.taxId)).filter(Boolean));
+      const existingNames = new Set(existing.map((c: any) => norm(c.name)).filter(Boolean));
+      // Two rows in the same file with the same matricule fiscal must not both
+      // become clients — the second is a duplicate of the first, not of
+      // something already in the database.
+      const seenTaxIds = new Set<string>();
+
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      // A fresh, larger-than-Date.now() base so every row in this batch gets a
+      // distinct id even when created within the same millisecond — Date.now()
+      // alone collides across a fast bulk loop, which single-client creation
+      // never hits but hundreds of rows created together will.
+      const idBase = Date.now() * 1000;
+
+      const toCreate: any[] = [];
+      const skipped: { row: number; reason: string; name: string }[] = [];
+      const invalid: { row: number; reason: string }[] = [];
+
+      rows.forEach((raw: any, i: number) => {
+        const rowNum = i + 2; // header is row 1 in the sheet the user is looking at
+        const name = text(raw?.name, 200);
+        if (!name) { invalid.push({ row: rowNum, reason: 'Nom manquant' }); return; }
+
+        const taxId = text(raw?.taxId, 60);
+        const key = norm(taxId);
+        if (skipDuplicates && key) {
+          if (existingTaxIds.has(key) || seenTaxIds.has(key)) {
+            skipped.push({ row: rowNum, reason: 'Matricule fiscal déjà existant', name });
+            return;
+          }
+        } else if (skipDuplicates && !key && existingNames.has(norm(name))) {
+          // No matricule fiscal to key on — fall back to an exact name match
+          // rather than importing every re-run of the same file as new rows.
+          skipped.push({ row: rowNum, reason: 'Nom déjà existant', name });
+          return;
+        }
+        if (key) seenTaxIds.add(key);
+
+        // Anything the client didn't map to a native field arrives as
+        // customFields already — the same free-form column set the Clients
+        // screen has always supported, so an imported sheet's extra columns
+        // (RNE, gérant, CNSS…) show up exactly like a hand-added custom field.
+        const customFields: Record<string, string> = {};
+        if (raw?.customFields && typeof raw.customFields === 'object') {
+          for (const [k, v] of Object.entries(raw.customFields)) {
+            const cleanKey = text(k, 60);
+            if (!cleanKey) continue;
+            customFields[cleanKey] = text(v, 500);
+          }
+        }
+
+        toCreate.push({
+          id: idBase + toCreate.length,
+          name,
+          type: raw?.type === 'Individual' ? 'Individual' : 'Company',
+          email: text(raw?.email, 200),
+          phone: text(raw?.phone, 60),
+          address: text(raw?.address, 300),
+          city: text(raw?.city, 100),
+          country: text(raw?.country, 100),
+          taxId,
+          status: 'Active',
+          notes: text(raw?.notes, 1000),
+          customFields,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          createdBy: req.user.id,
+        });
+      });
+
+      // Fired together rather than awaited one at a time: saveDb() coalesces
+      // concurrent writes into a single trailing flush, so hundreds of rows
+      // still cost roughly one file write, not hundreds.
+      const results = await Promise.allSettled(toCreate.map((c) => db.createClient(c)));
+      let created = 0;
+      results.forEach((r, idx) => {
+        if (r.status === 'fulfilled') created++;
+        else invalid.push({ row: idx, reason: 'Échec d’enregistrement' });
+      });
+
+      res.status(201).json({
+        created,
+        skipped: skipped.length,
+        invalid: invalid.length,
+        skippedDetails: skipped.slice(0, 20),
+        invalidDetails: invalid.slice(0, 20),
+      });
+    } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

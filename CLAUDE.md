@@ -186,6 +186,18 @@ Never subtract `daysTaken` from `available` when displaying a remainder — `ava
 
 Because there is no URL state, anything that remounts the app loses the current page. That is why the watcher note above matters.
 
+### Bulk client import
+
+`POST /api/clients/import` ([ClientsManagement.tsx](src/components/clients/ClientsManagement.tsx), [ImportClientsModal.tsx](src/components/clients/ImportClientsModal.tsx), [parseClientsExcel.ts](src/components/clients/parseClientsExcel.ts)) bulk-creates from an uploaded spreadsheet. The file is parsed **entirely in the browser** (SheetJS) — the server never sees the file, only an array of already-mapped rows shaped exactly like a single `POST /api/clients` body. That is what keeps the route from needing upload middleware, and keeps the mapping the user confirmed in the dialog from ever being reinterpreted server-side.
+
+**xlsx is dynamically imported** inside `parseClientsWorkbook()`, not statically — it is several hundred kB and would otherwise ship to every visitor who never touches the import dialog. It only loads once a file is actually picked.
+
+Any Excel column the user does not map to a native field (name/taxId/email/phone/address/city/country) becomes a `customField`, keyed by its own (whitespace-normalised) header — the same free-form column set the Clients screen has always rendered. `guessMapping()` only pre-fills a starting guess by header name; the user confirms or overrides every field before importing, so a misnamed column never silently maps to the wrong one.
+
+Duplicate detection compares the matricule fiscal (`taxId`) case/whitespace-insensitively against both the existing database and earlier rows in the same file — two rows in one sheet sharing a tax ID do not both become clients. A row with no tax ID falls back to an exact name match. Rows are created via `Promise.allSettled`, not one at a time: `saveDb()`'s write-coalescing collapses that into roughly one file write regardless of row count, the same property every other bulk mutation in this app already relies on.
+
+Import ids are `Date.now() * 1000 + index` rather than bare `Date.now()` (what single-client creation uses) — a fast loop of a few hundred rows can land multiple creates in the same millisecond, which single-creation never has to worry about but a bulk import always will.
+
 ### Clients have user-defined columns
 
 Clients carry a free-form `customFields` object. `GET /api/clients/fields` derives the available column set from the union of all clients' `customFields` keys, and the list endpoint's filtering/sorting falls back to `customFields[key]` when a top-level property is missing ([server.ts:314-359](server.ts#L314-L359)). Pagination only kicks in when `?page=` is passed; otherwise a bare array is returned (backward compatibility).

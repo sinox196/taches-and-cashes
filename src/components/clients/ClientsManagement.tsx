@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase } from 'lucide-react';
+import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
+import { ImportClientsModal } from './ImportClientsModal';
 
 export interface Client {
   id: number;
@@ -29,6 +30,7 @@ export const ClientsManagement: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'Active' | 'Inactive'>('ALL');
   
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   
   const [viewingClient, setViewingClient] = useState<Client | null>(null);
@@ -305,13 +307,23 @@ export const ClientsManagement: React.FC = () => {
           <p className="text-[12px] text-gray-500 mt-1">Gérez votre base de clients, entreprises et particuliers.</p>
         </div>
         {hasPermission('CREATE_CLIENTS') && (
-          <button
-            onClick={handleOpenCreate}
-            className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nouveau client</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setIsImportOpen(true)}
+              title="Importer une liste de clients depuis un fichier Excel"
+              className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Importer</span>
+            </button>
+            <button
+              onClick={handleOpenCreate}
+              className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nouveau client</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -641,6 +653,16 @@ export const ClientsManagement: React.FC = () => {
         )}
       </div>
 
+      {isImportOpen && (
+        <ImportClientsModal
+          onClose={() => setIsImportOpen(false)}
+          onImported={() => {
+            setPage(1);
+            fetchClients();
+            fetchAvailableFields();
+          }}
+        />
+      )}
 
       {/* Form Modal */}
       {isModalOpen && (
