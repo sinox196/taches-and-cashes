@@ -16,15 +16,20 @@
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  /* Brand. The app's old #101828 is replaced by the design's navy,
-     which is a touch lighter and bluer. */
-  --color-navy: oklch(21% 0.025 260);
-  --color-navy-hover: oklch(27% 0.025 260);
+  /* Brand — from the charte graphique (Logo.tsx carries the mark itself).
+     Bleu Profond is the ink used everywhere "navy" already meant "brand
+     dark" (sidebar, primary buttons, PDF ink); Turquoise and Vert
+     Croissance are named tokens for anything that wants an accent rather
+     than a neutral. */
+  --color-navy: #0D1B2A;         /* Bleu Profond — confiance, expertise */
+  --color-navy-hover: #263543;
+  --color-turquoise: #00B3A6;    /* technologie, fluidité, efficacité */
+  --color-growth: #22C55E;       /* croissance, valeur, résultats */
 
-  /* Surfaces. `canvas` is the warm off-white the app sits on;
-     `subtle` backs table headers and inset strips. */
-  --color-canvas: oklch(97.5% 0.004 90);
-  --color-subtle: oklch(98% 0.004 90);
+  /* Surfaces. Gris Clair from the charte — a cool light gray, not the
+     previous warm off-white. `subtle` backs table headers and inset strips. */
+  --color-canvas: #F2F4F7;
+  --color-subtle: #F6F7F9;
 
   /* Neutral ramp (overrides Tailwind's default gray). */
   --color-gray-50:  oklch(98% 0.004 90);
@@ -62,7 +67,7 @@
 
 body {
   background: var(--color-canvas);
-  color: oklch(20% 0.02 260);
+  color: var(--color-navy);
   -webkit-font-smoothing: antialiased;
 }
 

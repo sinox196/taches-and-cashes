@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Lock, User, Loader2, Globe } from 'lucide-react';
+import { Logo } from '../components/Logo';
 
 export const Login: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -38,7 +39,7 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#F2F4F7] flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans antialiased relative">
+    <div className="min-h-screen bg-canvas flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans antialiased relative">
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <Globe className="w-5 h-5 text-gray-500" />
         <select 
@@ -53,13 +54,14 @@ export const Login: React.FC = () => {
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <div className="w-12 h-12 bg-navy text-white rounded-xl flex items-center justify-center shadow-lg">
-            <div className="w-6 h-6 border-2 border-white rounded-full flex items-center justify-center relative">
-              <div className="w-1.5 h-3 border-r-2 border-b-2 border-white transform rotate-45 mb-0.5"></div>
-            </div>
+          <div className="w-12 h-12 bg-navy rounded-xl flex items-center justify-center shadow-lg">
+            <Logo size={28} variant="white" />
           </div>
         </div>
-        <h2 className="mt-6 text-center text-[24px] font-extrabold text-gray-900 tracking-tight">
+        <p className="mt-4 text-center text-[15px] font-extrabold text-navy tracking-tight">
+          Tâches <span className="text-turquoise">&amp;</span> Cash
+        </p>
+        <h2 className="mt-3 text-center text-[24px] font-extrabold text-gray-900 tracking-tight">
           {t('login.title')}
         </h2>
         <p className="mt-2 text-center text-[14px] text-gray-600">

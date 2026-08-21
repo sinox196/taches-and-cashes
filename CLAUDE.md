@@ -228,6 +228,14 @@ Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use
 
 - The ~50 `patch_*.cjs` / `fix_*.cjs` / `modify_app.*` scripts at the repo root are **one-off codemods** that were used to generate the current `server.ts` and components by string-splicing. They are not part of build or runtime, they are not idempotent, and re-running them will corrupt the sources. Edit the real files instead. They explain oddities like the KPI routes at [server.ts:417](server.ts#L417) sitting at column 0 inside `startServer()`.
 - [README.md](README.md) is the untouched Google AI Studio template; `GEMINI_API_KEY` and the `@google/genai` dependency are unused leftovers.
+### Brand identity
+
+The palette and mark come from the official charte graphique, not the earlier Claude Design import — `--color-navy` (`#0D1B2A`, Bleu Profond), `--color-turquoise` (`#00B3A6`) and `--color-canvas`/`--color-gray-50` (`#F2F4F7`, Gris Clair) in [src/index.css](src/index.css) are the brand's exact hex values, not approximations — check against the sheet before nudging any of them. `--color-growth` (`#22C55E`) is declared but not retrofitted onto the existing status pills (run/done/pause/late): those were validated separately for contrast/CVD and swapping them to match the charte without re-running that validation would regress an already-checked property.
+
+[Logo.tsx](src/components/Logo.tsx) draws the mark itself — ring, checkmark, three ascending growth bars, and the turquoise dot marking the ring's gap — rather than shipping it as an image asset. `variant="white"` is for navy surfaces (sidebar badge, login badge): ink flips to white, but the turquoise stays turquoise, matching the charte's own dark lockup where the accent survives against a dark background and only the ink inverts. **The growth bars drop out below 32px** (`showBars = size >= 32`) — they read as a smudge, not a shape, at the sizes this app actually uses the mark (16px sidebar, 28px login); ring + check + dot alone stay legible at any size and are what `favicon.svg`'s hand-built markup (inlined as a base64 data URI in [index.html](index.html) — no separate asset file to keep in sync) also settles for.
+
+### Design tokens
+
 ### Design tokens
 
 The visual system comes from the Claude Design project *Taches & Cash Redesign*

@@ -47,7 +47,7 @@ export const documentName = (invoice: any) =>
     .replace(/[^A-Za-z0-9-_ ]+/g, '')
     .trim().replace(/\s+/g, '-') || 'document';
 
-const INK: [number, number, number] = [16, 24, 40];
+const INK: [number, number, number] = [13, 27, 42]; // #0D1B2A — Bleu Profond
 const MUTED: [number, number, number] = [102, 112, 133];
 const LINE: [number, number, number] = [228, 231, 236];
 const HEAD: [number, number, number] = [249, 250, 251];

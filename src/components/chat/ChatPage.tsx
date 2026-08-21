@@ -233,7 +233,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
   };
 
   return (
-    <div className="flex-1 flex min-w-0 overflow-hidden bg-[#F2F4F7]">
+    <div className="flex-1 flex min-w-0 overflow-hidden bg-canvas">
       {/* Conversation list */}
       <aside className="w-[280px] shrink-0 border-r border-gray-200 bg-white flex flex-col">
         <div className="p-4 border-b border-gray-100">

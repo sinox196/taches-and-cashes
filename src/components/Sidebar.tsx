@@ -1,6 +1,6 @@
 import React from 'react';
+import { Logo } from './Logo';
 import {
-  CheckCircle2,
   LayoutDashboard,
   Users,
   UserCheck,
@@ -60,10 +60,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Logo Header */}
         <div className="px-[18px] pt-5 pb-4 flex items-center gap-[9px]">
           <div className="w-7 h-7 bg-white rounded-full flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-[14px] h-[14px] text-navy" />
+            <Logo size={16} variant="color" />
           </div>
           <span className="text-[14px] font-extrabold tracking-tight text-white truncate">
-            Tâches & Cash
+            Tâches <span className="text-turquoise">&amp;</span> Cash
           </span>
         </div>
 

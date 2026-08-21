@@ -80,7 +80,7 @@ export const AdminDashboard: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#F2F4F7]">
+    <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-canvas">
       <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1400px] w-full mx-auto">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div>
