@@ -117,20 +117,13 @@ const accruedSeconds = (t: any) => {
  * checklists and the bank-investment checklist from the cabinet's own
  * reference documents (not placeholder content), the cabinet's actual
  * useful links (each with its institution's logo, copied into
- * public/logos/), and the recurring obligation types read off the
- * cabinet's own échéances tracking sheet. Idempotent — checked by id,
- * safe on every boot.
+ * public/logos/), and the 28 échéance columns of the cabinet's own 2025
+ * suivi mensuel sheet. Idempotent — checked by id, safe on every boot.
  *
  * The "Détail des frais administratifs" reference table from the SARL
  * document has no table of its own in the V1 data model (the spec defines
  * none for it); it is attached as an informational, non-blocking item on the
  * Patente checklist rather than inventing a new structure for one table.
- *
- * The exact statutory day for each échéance type below is a best-effort
- * default read off well-known Tunisian filing conventions (the TVA-mensuelle
- * one — jour 28 — is the cahier des charges' own worked example). They are
- * fully editable from the Ressources métier screen: a cabinet should verify
- * each one against the current tax calendar before relying on the alerts.
  */
 async function seedResourceLibrary(db: import('./src/server/db-types.js').Database) {
   const SECTOR_COMPTA = 'Expertise comptable';
@@ -238,23 +231,32 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
     'https://tej.finances.gov.tn/home', { icon: '/logos/tej.jpg' },
   );
 
-  const existingDeadlines = await db.getAllDeadlineTemplates();
-  const seedDeadline = async (id: string, name: string, recurrenceRule: string, leadTimeDays = 7) => {
-    if (existingDeadlines.some((t: any) => t.id === id)) return;
-    await db.createDeadlineTemplate({
-      id, name, recurrenceRule, leadTimeDays, sector: SECTOR_COMPTA,
-      missionId: null, taskTypeId: null, isActive: true, isSystem: true,
-    });
+  // The 28 échéance columns of the cabinet's own 2025 suivi mensuel sheet —
+  // real column headers (month + précis label), not placeholder ones. Cell
+  // values are left for the cabinet to fill in from the grid itself.
+  const existingColumns = await db.getAllEcheanceColumns();
+  const seedColumn = async (id: string, year: number, month: number, label: string, sortOrder: number) => {
+    if (existingColumns.some((c: any) => c.id === id)) return;
+    await db.createEcheanceColumn({ id, year, month, label, sortOrder });
   };
-  // Recurring obligation types read off the cabinet's own échéances tracking
-  // sheet (DM, D SUSP TVA TRx, CNSS TRx, IS, IRPP, DEC EMPLOYEUR, RNE Bilan).
-  await seedDeadline('dtpl-seed-tva-mensuelle', 'Déclaration mensuelle de TVA (DM)', 'MONTHLY(day=28)');
-  await seedDeadline('dtpl-seed-tva-suspension-trim', 'Déclaration de suspension de TVA (trimestrielle)', 'QUARTERLY(day=28)');
-  await seedDeadline('dtpl-seed-cnss-trim', 'Déclaration CNSS (trimestrielle)', 'QUARTERLY(day=15)');
-  await seedDeadline('dtpl-seed-is-annuel', "Déclaration de l'impôt sur les sociétés (IS)", 'ANNUAL(month=3,day=25)', 14);
-  await seedDeadline('dtpl-seed-irpp-annuel', 'Déclaration IRPP (personnes physiques)', 'ANNUAL(month=12,day=5)', 14);
-  await seedDeadline('dtpl-seed-declaration-employeur', "Déclaration annuelle de l'employeur", 'ANNUAL(month=2,day=28)', 14);
-  await seedDeadline('dtpl-seed-rne-bilan', 'Dépôt du bilan annuel au RNE', 'ANNUAL(month=7,day=31)', 14);
+  const E2025: [number, string][] = [
+    [1, 'DM 12/2025'], [1, 'D SUSP TVA TR04'], [1, 'CNSS TR04'],
+    [2, 'DM 1'],
+    [3, 'DM 2'], [3, 'IS 2025'],
+    [4, 'DM 3'], [4, 'D SUSP TVA TR01'], [4, 'CNSS TR01'], [4, 'IRPP 2025-COMMERCE'], [4, 'DEC EMPLOYEUR 2025'],
+    [5, 'DM 4'], [5, 'IRPP 2025-SERVICE + FONC LIBERALE + REV FONCIER'],
+    [6, 'DM 5'], [6, 'Acompte 1'],
+    [7, 'DM 6'], [7, 'D SUSP TVA TR02'], [7, 'CNSS TR02'], [7, 'RNE Bilan 2025'],
+    [8, 'DM 7'],
+    [9, 'DM 8'], [9, 'Acompte 2'],
+    [10, 'DM 9'], [10, 'D SUSP TVA TR03'], [10, 'CNSS TR03'],
+    [11, 'DM 10'],
+    [12, 'DM 11'], [12, 'Acompte 3'],
+  ];
+  for (let i = 0; i < E2025.length; i++) {
+    const [month, label] = E2025[i];
+    await seedColumn(`ec-seed-2025-${i}`, 2025, month, label, i);
+  }
 }
 
 async function startServer() {
@@ -2970,104 +2972,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   const genId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  /** Number of days in `year`/`month` (0-indexed month), for day-of-month clamping. */
-  const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-
-  /**
-   * The three recurrence patterns the cahier des charges' own examples use.
-   * Returns the smallest due date >= `seed`. Regeneration passes the previous
-   * due date + 1 day as the seed, so it always lands on the *next* cycle.
-   */
-  const computeDueDate = (rule: string, seed: Date): Date => {
-    let m = /^MONTHLY\(day=(\d+)\)$/.exec(rule);
-    if (m) {
-      const day = Number(m[1]);
-      let y = seed.getFullYear(), mo = seed.getMonth();
-      let candidate = new Date(y, mo, Math.min(day, daysInMonth(y, mo)));
-      if (candidate < seed) {
-        mo += 1; if (mo > 11) { mo = 0; y += 1; }
-        candidate = new Date(y, mo, Math.min(day, daysInMonth(y, mo)));
-      }
-      return candidate;
-    }
-    m = /^QUARTERLY(?:\(day=(\d+)\))?$/.exec(rule);
-    if (m) {
-      const day = Number(m[1] || 28);
-      // Due the month after each calendar quarter ends: Jan, Apr, Jul, Oct.
-      const dueMonths = [0, 3, 6, 9];
-      const y = seed.getFullYear();
-      const mo = dueMonths.find(dm => new Date(y, dm, Math.min(day, daysInMonth(y, dm))) >= seed);
-      if (mo === undefined) return new Date(y + 1, 0, Math.min(day, daysInMonth(y + 1, 0)));
-      return new Date(y, mo, Math.min(day, daysInMonth(y, mo)));
-    }
-    m = /^ANNUAL\(month=(\d+),day=(\d+)\)$/.exec(rule);
-    if (m) {
-      const month = Number(m[1]) - 1, day = Number(m[2]);
-      let y = seed.getFullYear();
-      let candidate = new Date(y, month, Math.min(day, daysInMonth(y, month)));
-      if (candidate < seed) { y += 1; candidate = new Date(y, month, Math.min(day, daysInMonth(y, month))); }
-      return candidate;
-    }
-    throw new Error('Règle de récurrence non reconnue: ' + rule);
-  };
-
-  /** §3.6 of the cahier des charges — recalculated on every read, never stored. */
-  const deadlineInstanceStatus = (instance: any): 'realisee' | 'en_retard' | 'a_venir' | 'en_cours' => {
-    if (instance.completedAt) return 'realisee';
-    const due = new Date(instance.dueDate + 'T00:00:00');
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    if (due < today) return 'en_retard';
-    const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
-    if (diffDays <= (typeof instance.leadTimeDays === 'number' ? instance.leadTimeDays : 7)) return 'a_venir';
-    return 'en_cours';
-  };
-
-  const formatDateISO = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-  /**
-   * Lazily ensures each already-activated (client, template) pair has exactly
-   * one open (uncompleted) instance. Never generates further ahead than that —
-   * a client's declaration going unpaid for a year must not silently pile up
-   * twelve rows. Scoped to `clientId` when given, otherwise runs over every
-   * activated pair (bounded by clients × active templates, not by history).
-   */
-  const ensureDeadlineInstances = async (clientId?: number) => {
-    const templates = await db.getAllDeadlineTemplates();
-    const templatesById = new Map(templates.map((t: any) => [t.id, t]));
-    let all = await db.getAllClientDeadlineInstances();
-    if (clientId != null) all = all.filter((i: any) => i.clientId === clientId);
-
-    const groups = new Map<string, any[]>();
-    for (const inst of all) {
-      const key = `${inst.clientId}:${inst.templateId}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(inst);
-    }
-
-    for (const [, instances] of groups) {
-      const hasOpen = instances.some((i: any) => !i.completedAt);
-      if (hasOpen) continue;
-      const latest = instances.reduce((a: any, b: any) => (a.dueDate > b.dueDate ? a : b));
-      const template = templatesById.get(latest.templateId);
-      if (!template || !template.isActive) continue;
-      const seed = new Date(latest.dueDate + 'T00:00:00');
-      seed.setDate(seed.getDate() + 1);
-      const dueDate = computeDueDate(template.recurrenceRule, seed);
-      await db.createClientDeadlineInstance({
-        id: genId('deadline'),
-        clientId: latest.clientId,
-        templateId: template.id,
-        name: template.name,
-        leadTimeDays: template.leadTimeDays,
-        dueDate: formatDateISO(dueDate),
-        completedAt: null,
-        completedBy: null,
-        createdAt: new Date().toISOString(),
-      });
-    }
-  };
-
   // --- Resource templates (documents à fournir / procédures) ---
 
   app.get('/api/resource-templates', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
@@ -3395,149 +3299,102 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
-  // --- Échéances ---
+  // --- Échéances — suivi mensuel grid: a fixed set of named échéance
+  // columns per year (month + précis label), one status cell per
+  // (client, column). No recurrence engine, no generated instances — every
+  // cell is set directly, the same shape as the cabinet's own spreadsheet.
 
-  app.get('/api/deadline-templates', authenticate, requirePermission('VIEW_RESOURCES'), async (_req: any, res: any) => {
+  const ECHEANCE_STATUSES = ['Oui', 'Client non concerné par l\'échéance', 'DEFAUT', 'Préparée (en attente de confirmation client)', 'CHEZ BC'];
+
+  app.get('/api/echeance-columns', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      res.json(await db.getAllDeadlineTemplates());
+      let columns = await db.getAllEcheanceColumns();
+      if (req.query.year) columns = columns.filter((c: any) => c.year === Number(req.query.year));
+      res.json(columns.sort((a: any, b: any) => a.sortOrder - b.sortOrder));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.post('/api/deadline-templates', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+  app.post('/api/echeance-columns', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const { name, recurrenceRule, leadTimeDays, sector, missionId, taskTypeId } = req.body;
-      if (!String(name || '').trim()) return res.status(400).json({ error: 'Le nom est requis' });
-      try { computeDueDate(recurrenceRule, new Date()); } catch {
-        return res.status(400).json({ error: 'Règle de récurrence invalide (attendu: MONTHLY(day=N), QUARTERLY ou ANNUAL(month=M,day=N))' });
-      }
-      const template = await db.createDeadlineTemplate({
-        id: genId('dtpl'),
-        name: String(name).trim(),
-        recurrenceRule,
-        leadTimeDays: typeof leadTimeDays === 'number' ? leadTimeDays : 7,
-        sector: sector || null,
-        missionId: missionId != null ? Number(missionId) : null,
-        taskTypeId: taskTypeId != null ? Number(taskTypeId) : null,
-        isActive: true,
-        isSystem: false,
+      const { year, month, label } = req.body;
+      const y = Number(year), m = Number(month);
+      if (!Number.isFinite(y)) return res.status(400).json({ error: 'Année invalide' });
+      if (!Number.isFinite(m) || m < 1 || m > 12) return res.status(400).json({ error: 'Mois invalide (1-12)' });
+      if (!String(label || '').trim()) return res.status(400).json({ error: 'Le libellé est requis' });
+      const existing = (await db.getAllEcheanceColumns()).filter((c: any) => c.year === y);
+      const column = await db.createEcheanceColumn({
+        id: genId('ec'), year: y, month: m, label: String(label).trim(), sortOrder: existing.length,
       });
-      res.status(201).json(template);
+      res.status(201).json(column);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.put('/api/deadline-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+  app.put('/api/echeance-columns/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const template = await db.getDeadlineTemplateById(req.params.id);
-      if (!template) return res.status(404).json({ error: 'Not found' });
-      if (template.isSystem) return res.status(403).json({ error: 'Un modèle système ne peut pas être modifié.' });
-      const { name, recurrenceRule, leadTimeDays, isActive } = req.body;
+      const { month, label, sortOrder } = req.body;
       const updates: any = {};
-      if (name !== undefined) updates.name = String(name).trim();
-      if (recurrenceRule !== undefined) {
-        try { computeDueDate(recurrenceRule, new Date()); } catch {
-          return res.status(400).json({ error: 'Règle de récurrence invalide' });
-        }
-        updates.recurrenceRule = recurrenceRule;
+      if (month !== undefined) {
+        const m = Number(month);
+        if (m < 1 || m > 12) return res.status(400).json({ error: 'Mois invalide (1-12)' });
+        updates.month = m;
       }
-      if (leadTimeDays !== undefined) updates.leadTimeDays = Number(leadTimeDays);
-      if (isActive !== undefined) updates.isActive = !!isActive;
-      const updated = await db.updateDeadlineTemplate(req.params.id, updates);
+      if (label !== undefined) updates.label = String(label).trim();
+      if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
+      const updated = await db.updateEcheanceColumn(req.params.id, updates);
+      if (!updated) return res.status(404).json({ error: 'Not found' });
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.delete('/api/deadline-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+  /** Cascades to every client's status cell for this column. */
+  app.delete('/api/echeance-columns/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const template = await db.getDeadlineTemplateById(req.params.id);
-      if (!template) return res.status(404).json({ error: 'Not found' });
-      if (template.isSystem) return res.status(403).json({ error: 'Un modèle système ne peut pas être supprimé.' });
-      await db.deleteDeadlineTemplate(req.params.id);
+      const ok = await db.deleteEcheanceColumn(req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  /** §2.4 flow step 1 — activates a recurring deadline model for one client. */
-  app.post('/api/client-deadlines/activate', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+  app.get('/api/echeance-statuses', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const { clientId, templateId } = req.body;
-      if (clientId == null) return res.status(400).json({ error: 'Client requis' });
-      const template = await db.getDeadlineTemplateById(templateId);
-      if (!template) return res.status(404).json({ error: 'Modèle introuvable' });
-      const client = await db.getClientById(Number(clientId));
-      if (!client) return res.status(404).json({ error: 'Client introuvable' });
-
-      const already = (await db.getAllClientDeadlineInstances())
-        .some((i: any) => i.clientId === Number(clientId) && i.templateId === template.id && !i.completedAt);
-      if (already) return res.status(409).json({ error: 'Cette échéance est déjà activée pour ce client.' });
-
-      const instance = await db.createClientDeadlineInstance({
-        id: genId('deadline'),
-        clientId: Number(clientId),
-        templateId: template.id,
-        name: template.name,
-        leadTimeDays: template.leadTimeDays,
-        dueDate: formatDateISO(computeDueDate(template.recurrenceRule, new Date())),
-        completedAt: null,
-        completedBy: null,
-        createdAt: new Date().toISOString(),
-      });
-      res.status(201).json(instance);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
-
-  /** Échéances for one client — the "Suivi & Ressources" tab. */
-  app.get('/api/client-deadlines', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
-    try {
-      const clientId = req.query.clientId != null ? Number(req.query.clientId) : null;
-      if (clientId == null) return res.status(400).json({ error: 'clientId requis' });
-      await ensureDeadlineInstances(clientId);
-      const instances = (await db.getAllClientDeadlineInstances()).filter((i: any) => i.clientId === clientId);
-      res.json(instances.map((i: any) => ({ ...i, status: deadlineInstanceStatus(i) })));
-    } catch (error) {
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
-
-  /** §4.4 — vision globale portefeuille. Same team-viewer gate as the KPI dashboard. */
-  app.get('/api/deadlines/portfolio', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
-    try {
-      if (!DASHBOARD_ROLES.includes(req.user.role)) {
-        return res.status(403).json({ error: 'Forbidden' });
+      let statuses = await db.getAllEcheanceStatuses();
+      if (req.query.year) {
+        const columnIds = new Set((await db.getAllEcheanceColumns()).filter((c: any) => c.year === Number(req.query.year)).map((c: any) => c.id));
+        statuses = statuses.filter((s: any) => columnIds.has(s.columnId));
       }
-      await ensureDeadlineInstances();
-      const [instances, clients] = await Promise.all([db.getAllClientDeadlineInstances(), db.getAllClients()]);
-      const clientsById = new Map(clients.map((c: any) => [c.id, c]));
-      res.json(instances.map((i: any) => ({
-        ...i,
-        status: deadlineInstanceStatus(i),
-        clientName: clientsById.get(i.clientId)?.name ?? 'Client supprimé',
-      })));
+      res.json(statuses);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  /** Toggles completion — the one thing a collaborator or manager does to an échéance. */
-  app.put('/api/client-deadlines/:id/complete', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+  /** Upserts a single cell — one call per edit, so a 900×30 grid never sends more than one changed cell at a time. */
+  app.put('/api/echeance-statuses', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const { completed } = req.body;
-      const updated = await db.updateClientDeadlineInstance(req.params.id, {
-        completedAt: completed ? new Date().toISOString() : null,
-        completedBy: completed ? req.user.id : null,
+      const { clientId, columnId, status } = req.body;
+      if (clientId == null || !columnId) return res.status(400).json({ error: 'Client et colonne requis' });
+      if (status !== null && status !== '' && !ECHEANCE_STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Statut invalide' });
+      }
+      const normalizedStatus = status === '' ? null : status;
+      const existing = (await db.getAllEcheanceStatuses())
+        .find((s: any) => s.clientId === Number(clientId) && s.columnId === columnId);
+      if (existing) {
+        const updated = await db.updateEcheanceStatus(existing.id, { status: normalizedStatus });
+        return res.json(updated);
+      }
+      const created = await db.createEcheanceStatus({
+        id: genId('ecs'), clientId: Number(clientId), columnId, status: normalizedStatus,
       });
-      if (!updated) return res.status(404).json({ error: 'Not found' });
-      res.json({ ...updated, status: deadlineInstanceStatus(updated) });
+      res.status(201).json(created);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

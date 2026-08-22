@@ -155,7 +155,6 @@ export const MyResourcesWork: React.FC = () => {
       {assigning && client && (
         <AssignResourceModal
           client={client}
-          allowedKinds={['document_checklist']}
           onClose={() => setAssigning(false)}
           onAssigned={() => { setAssigning(false); load(client.id); }}
         />

@@ -69,8 +69,8 @@ async function initJsonDb(): Promise<Database> {
     if (!db.clientResourceInstances) db.clientResourceInstances = [];
     if (!db.clientResourceItemStatuses) db.clientResourceItemStatuses = [];
     if (!db.usefulLinks) db.usefulLinks = [];
-    if (!db.deadlineTemplates) db.deadlineTemplates = [];
-    if (!db.clientDeadlineInstances) db.clientDeadlineInstances = [];
+    if (!db.echeanceColumns) db.echeanceColumns = [];
+    if (!db.echeanceStatuses) db.echeanceStatuses = [];
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
@@ -510,41 +510,41 @@ async function initJsonDb(): Promise<Database> {
       return true;
     },
 
-    // Échéances
-    getAllDeadlineTemplates: async () => db.deadlineTemplates,
-    getDeadlineTemplateById: async (id: string) => db.deadlineTemplates.find((t: any) => t.id === id),
-    createDeadlineTemplate: async (template: any) => {
-      db.deadlineTemplates.push(template);
+    // Échéances — suivi mensuel grid: named columns + one status cell per (client, column)
+    getAllEcheanceColumns: async () => db.echeanceColumns,
+    createEcheanceColumn: async (column: any) => {
+      db.echeanceColumns.push(column);
       await saveDb();
-      return template;
+      return column;
     },
-    updateDeadlineTemplate: async (id: string, updates: any) => {
-      const index = db.deadlineTemplates.findIndex((t: any) => t.id === id);
+    updateEcheanceColumn: async (id: string, updates: any) => {
+      const index = db.echeanceColumns.findIndex((c: any) => c.id === id);
       if (index === -1) return null;
-      db.deadlineTemplates[index] = { ...db.deadlineTemplates[index], ...updates };
+      db.echeanceColumns[index] = { ...db.echeanceColumns[index], ...updates };
       await saveDb();
-      return db.deadlineTemplates[index];
+      return db.echeanceColumns[index];
     },
-    deleteDeadlineTemplate: async (id: string) => {
-      const index = db.deadlineTemplates.findIndex((t: any) => t.id === id);
+    deleteEcheanceColumn: async (id: string) => {
+      const index = db.echeanceColumns.findIndex((c: any) => c.id === id);
       if (index === -1) return false;
-      db.deadlineTemplates.splice(index, 1);
+      db.echeanceColumns.splice(index, 1);
+      db.echeanceStatuses = db.echeanceStatuses.filter((s: any) => s.columnId !== id);
       await saveDb();
       return true;
     },
 
-    getAllClientDeadlineInstances: async () => db.clientDeadlineInstances,
-    createClientDeadlineInstance: async (instance: any) => {
-      db.clientDeadlineInstances.push(instance);
+    getAllEcheanceStatuses: async () => db.echeanceStatuses,
+    createEcheanceStatus: async (status: any) => {
+      db.echeanceStatuses.push(status);
       await saveDb();
-      return instance;
+      return status;
     },
-    updateClientDeadlineInstance: async (id: string, updates: any) => {
-      const index = db.clientDeadlineInstances.findIndex((i: any) => i.id === id);
+    updateEcheanceStatus: async (id: string, updates: any) => {
+      const index = db.echeanceStatuses.findIndex((s: any) => s.id === id);
       if (index === -1) return null;
-      db.clientDeadlineInstances[index] = { ...db.clientDeadlineInstances[index], ...updates };
+      db.echeanceStatuses[index] = { ...db.echeanceStatuses[index], ...updates };
       await saveDb();
-      return db.clientDeadlineInstances[index];
+      return db.echeanceStatuses[index];
     },
 
     // Settings CRUD

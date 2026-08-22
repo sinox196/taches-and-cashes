@@ -58,8 +58,8 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   client_resource_instances: { desc: true },
   client_resource_item_statuses: { desc: false },
   useful_links: { desc: false },
-  deadline_templates: { desc: false },
-  client_deadline_instances: { desc: false },
+  echeance_columns: { desc: false },
+  echeance_statuses: { desc: false },
 };
 
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
@@ -80,8 +80,8 @@ const TABLE_FOR: Record<string, string> = {
   clientResourceInstances: 'client_resource_instances',
   clientResourceItemStatuses: 'client_resource_item_statuses',
   usefulLinks: 'useful_links',
-  deadlineTemplates: 'deadline_templates',
-  clientDeadlineInstances: 'client_deadline_instances',
+  echeanceColumns: 'echeance_columns',
+  echeanceStatuses: 'echeance_statuses',
 };
 
 function makePool(connectionString: string) {
@@ -132,8 +132,8 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`CREATE INDEX IF NOT EXISTS resource_template_items_template_idx ON resource_template_items ((data->>'templateId'))`);
   await q(`CREATE INDEX IF NOT EXISTS client_resource_instances_client_idx ON client_resource_instances ((data->>'clientId'))`);
   await q(`CREATE INDEX IF NOT EXISTS client_resource_item_statuses_instance_idx ON client_resource_item_statuses ((data->>'instanceId'))`);
-  await q(`CREATE INDEX IF NOT EXISTS client_deadline_instances_client_idx ON client_deadline_instances ((data->>'clientId'))`);
-  await q(`CREATE INDEX IF NOT EXISTS client_deadline_instances_template_idx ON client_deadline_instances ((data->>'templateId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS echeance_statuses_client_idx ON echeance_statuses ((data->>'clientId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS echeance_statuses_column_idx ON echeance_statuses ((data->>'columnId'))`);
 }
 
 export async function initPostgres(connectionString: string): Promise<Database> {
@@ -193,8 +193,8 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const clientResourceInstances = collection('client_resource_instances');
   const clientResourceItemStatuses = collection('client_resource_item_statuses');
   const usefulLinks = collection('useful_links');
-  const deadlineTemplates = collection('deadline_templates');
-  const clientDeadlineInstances = collection('client_deadline_instances');
+  const echeanceColumns = collection('echeance_columns');
+  const echeanceStatuses = collection('echeance_statuses');
 
   const db: Database = {
     get: async (sql: string, param: any) => {
@@ -396,15 +396,28 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     updateUsefulLink: usefulLinks.update,
     deleteUsefulLink: usefulLinks.remove,
 
-    getAllDeadlineTemplates: deadlineTemplates.all,
-    getDeadlineTemplateById: deadlineTemplates.byId,
-    createDeadlineTemplate: deadlineTemplates.create,
-    updateDeadlineTemplate: deadlineTemplates.update,
-    deleteDeadlineTemplate: deadlineTemplates.remove,
+    getAllEcheanceColumns: echeanceColumns.all,
+    createEcheanceColumn: echeanceColumns.create,
+    updateEcheanceColumn: echeanceColumns.update,
+    deleteEcheanceColumn: async (id: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const res = await client.query('DELETE FROM echeance_columns WHERE id = $1', [String(id)]);
+        await client.query(`DELETE FROM echeance_statuses WHERE data->>'columnId' = $1`, [String(id)]);
+        await client.query('COMMIT');
+        return (res.rowCount ?? 0) > 0;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
 
-    getAllClientDeadlineInstances: clientDeadlineInstances.all,
-    createClientDeadlineInstance: clientDeadlineInstances.create,
-    updateClientDeadlineInstance: clientDeadlineInstances.update,
+    getAllEcheanceStatuses: echeanceStatuses.all,
+    createEcheanceStatus: echeanceStatuses.create,
+    updateEcheanceStatus: echeanceStatuses.update,
 
     getSettings: async () => {
       const rows = await q('SELECT data, invoice_counter FROM settings WHERE only_row');

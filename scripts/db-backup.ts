@@ -50,8 +50,8 @@ try {
     clientResourceInstances: await db.getAllClientResourceInstances(),
     clientResourceItemStatuses: await db.getAllClientResourceItemStatuses(),
     usefulLinks: await db.getAllUsefulLinks(),
-    deadlineTemplates: await db.getAllDeadlineTemplates(),
-    clientDeadlineInstances: await db.getAllClientDeadlineInstances(),
+    echeanceColumns: await db.getAllEcheanceColumns(),
+    echeanceStatuses: await db.getAllEcheanceStatuses(),
     settings: await db.getSettings(),
   };
 

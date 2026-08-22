@@ -113,16 +113,17 @@ export interface Database {
   updateUsefulLink(id: string, updates: any): Promise<any | null>;
   deleteUsefulLink(id: string): Promise<boolean>;
 
-  getAllDeadlineTemplates(): Promise<any[]>;
-  getDeadlineTemplateById(id: string): Promise<any | undefined>;
-  createDeadlineTemplate(template: any): Promise<any>;
-  updateDeadlineTemplate(id: string, updates: any): Promise<any | null>;
-  deleteDeadlineTemplate(id: string): Promise<boolean>;
+  /** Suivi mensuel des échéances — a named column (year, month, label) on the grid. */
+  getAllEcheanceColumns(): Promise<any[]>;
+  createEcheanceColumn(column: any): Promise<any>;
+  updateEcheanceColumn(id: string, updates: any): Promise<any | null>;
+  /** Cascades to every client's status cell for this column. */
+  deleteEcheanceColumn(id: string): Promise<boolean>;
 
-  /** Generated lazily, one open (uncompleted) instance per client+template at a time. */
-  getAllClientDeadlineInstances(): Promise<any[]>;
-  createClientDeadlineInstance(instance: any): Promise<any>;
-  updateClientDeadlineInstance(id: string, updates: any): Promise<any | null>;
+  /** One status cell per (clientId, columnId); absent = vide. */
+  getAllEcheanceStatuses(): Promise<any[]>;
+  createEcheanceStatus(status: any): Promise<any>;
+  updateEcheanceStatus(id: string, updates: any): Promise<any | null>;
 
   getSettings(): Promise<any>;
   updateSettings(updates: any): Promise<any>;
@@ -171,8 +172,8 @@ export const emptyDb = () => ({
   clientResourceInstances: [],
   clientResourceItemStatuses: [],
   usefulLinks: [],
-  deadlineTemplates: [],
-  clientDeadlineInstances: [],
+  echeanceColumns: [],
+  echeanceStatuses: [],
   settings: defaultSettings(),
 });
 
