@@ -37,7 +37,7 @@ export default function App() {
   
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Reports', 'Users'];
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     const saved = localStorage.getItem('active_nav');
     return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';

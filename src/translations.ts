@@ -11,7 +11,6 @@ export const translations: Translations = {
     'nav.timeTracking': 'Pointage',
     'nav.invoicing': 'Facturation',
     'nav.hr': 'RH',
-    'nav.reports': 'Rapports',
     'nav.logout': 'Déconnexion',
 
     // Common
@@ -72,7 +71,6 @@ export const translations: Translations = {
     'nav.timeTracking': 'Time Tracking',
     'nav.invoicing': 'Invoicing',
     'nav.hr': 'HR',
-    'nav.reports': 'Reports',
     'nav.logout': 'Logout',
 
     // Common

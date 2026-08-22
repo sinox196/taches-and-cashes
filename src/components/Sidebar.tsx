@@ -7,7 +7,6 @@ import {
   Clock,
   Receipt,
   Users2,
-  BarChart3,
   ChevronRight,
   ShieldAlert,
   Layers,
@@ -31,7 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectItem,
   unreadMessages = 0,
 }) => {
-  const { hasPermission, user } = useAuth();
+  const { hasPermission } = useAuth();
   const { t, language, setLanguage } = useLanguage();
 
   // Every authenticated user gets a "Dashboard" entry: DASHBOARD_ROLES see the
@@ -46,7 +45,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Ressources métier', icon: FileCheck2, hasChevron: false }] : []),
     ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Cash', icon: Receipt, hasChevron: false }] : []),
     ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: Users2, hasChevron: true }] : []),
-    ...(user?.role === 'ADMIN' ? [{ id: 'Reports', label: t('nav.reports'), icon: BarChart3, hasChevron: false }] : []),
   ];
 
   if (hasPermission('MANAGE_USERS')) {
