@@ -15,6 +15,7 @@ import { ClientsManagement } from './components/clients/ClientsManagement';
 import { HRManagement } from './components/hr/HRManagement';
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
+import { ResourcesManagement } from './components/resources/ResourcesManagement';
 import { useAuth } from './context/AuthContext';
 import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
@@ -36,7 +37,7 @@ export default function App() {
   
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Cash', 'HR', 'Reports', 'Users'];
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Reports', 'Users'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     const saved = localStorage.getItem('active_nav');
     return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';
@@ -425,6 +426,8 @@ export default function App() {
           <ClientsManagement />
         ) : activeSidebarItem === 'Missions' && hasPermission('MANAGE_SERVICES') ? (
           <MissionsManagement />
+        ) : activeSidebarItem === 'Ressources' && hasPermission('VIEW_RESOURCES') ? (
+          <ResourcesManagement />
         ) : activeSidebarItem === 'Cash' && hasPermission('VIEW_CASH') ? (
           <CashManagement />
         ) : activeSidebarItem === 'HR' && hasPermission('VIEW_HR') ? (

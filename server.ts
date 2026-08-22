@@ -112,6 +112,151 @@ const accruedSeconds = (t: any) => {
   return s;
 };
 
+/**
+ * Seeds the system resource library once: the SARL/SUARL formation
+ * checklists and the bank-investment checklist from the cabinet's own
+ * reference documents (not placeholder content), the cabinet's actual
+ * useful links (each with its institution's logo, copied into
+ * public/logos/), and the recurring obligation types read off the
+ * cabinet's own échéances tracking sheet. Idempotent — checked by id,
+ * safe on every boot.
+ *
+ * The "Détail des frais administratifs" reference table from the SARL
+ * document has no table of its own in the V1 data model (the spec defines
+ * none for it); it is attached as an informational, non-blocking item on the
+ * Patente checklist rather than inventing a new structure for one table.
+ *
+ * The exact statutory day for each échéance type below is a best-effort
+ * default read off well-known Tunisian filing conventions (the TVA-mensuelle
+ * one — jour 28 — is the cahier des charges' own worked example). They are
+ * fully editable from the Ressources métier screen: a cabinet should verify
+ * each one against the current tax calendar before relying on the alerts.
+ */
+async function seedResourceLibrary(db: import('./src/server/db-types.js').Database) {
+  const SECTOR_COMPTA = 'Expertise comptable';
+
+  const existingTemplates = await db.getAllResourceTemplates();
+  const seedChecklist = async (id: string, name: string, sector: string, items: string[]) => {
+    if (existingTemplates.some((t: any) => t.id === id)) return;
+    const template = await db.createResourceTemplate({
+      id, type: 'document_checklist', name, sector,
+      isSequential: false, isActive: true, isSystem: true,
+      sourceSystemTemplateId: null, createdAt: new Date().toISOString(),
+    });
+    let i = 0;
+    for (const label of items) {
+      await db.createResourceTemplateItem({ id: `${template.id}-item-${i}`, templateId: template.id, label, sortOrder: i });
+      i++;
+    }
+  };
+
+  await seedChecklist('tpl-seed-reservation-nom', 'Réservation de nom — SARL/SUARL', SECTOR_COMPTA, [
+    'CIN du gérant (recto-verso)',
+    'Carte bancaire (recto-verso) — frais de réservation 15 DT',
+    "Adresse électronique (pour la notification du résultat de la réservation)",
+    'Numéro de téléphone du gérant',
+    'Forme juridique de la société à créer (SUARL, SARL, SA…)',
+    "Proposition de dénomination — nom arabe et nom français (jusqu'à 3 choix)",
+  ]);
+
+  await seedChecklist('tpl-seed-patente', 'Patente — SARL/SUARL', SECTOR_COMPTA, [
+    'CIN du gérant (4 copies)',
+    'CIN des associés (4 copies)',
+    'Attestation de réservation de nom (3 copies)',
+    'Contrat de location, signature légalisée et enregistré (6 copies)',
+    'Statut de la société daté, signatures de tous les associés non légalisées (8 copies)',
+    'Attestation de compte bancaire indisponible — choix du promoteur (3 copies)',
+    "Attestation de déclaration d'investissement — services, industrie, agricole (3 copies)",
+    'Cahier des charges et/ou autorisation préalable — activités concernées (3 copies)',
+  ]);
+
+  await seedChecklist('tpl-seed-rne', 'RNE — SARL/SUARL', SECTOR_COMPTA, [
+    "Formulaire de déclaration d'immatriculation",
+    'Statut de la société daté (signatures de tous les associés, non légalisées)',
+    'Déclaration de bénéficiaire effectif (associés détenant au moins 20% des parts sociales)',
+    'Copie de la patente',
+    'Mandat de 50 DT au nom du CNRE',
+  ]);
+
+  await seedChecklist('tpl-seed-code-douane', 'Code en douane — SARL/SUARL', SECTOR_COMPTA, [
+    'Extrait RNE',
+    'Copie conforme de la patente',
+    "Copie conforme de la déclaration d'existence",
+    'CIN du gérant',
+    'Timbre fiscal 5 DT',
+    "Formulaire de demande d'octroi d'un code en douane",
+  ]);
+
+  await seedChecklist('tpl-seed-compte-indisponible', 'Attestation de compte bancaire indisponible — SARL/SUARL', SECTOR_COMPTA, [
+    'CIN du gérant',
+    'CIN des associés',
+    'Projet de statut de la société',
+    'Copie du contrat de location',
+    "Copie de l'attestation de réservation de nom",
+  ]);
+
+  await seedChecklist(
+    'tpl-seed-banque-regularisation-investissement',
+    "Demande d'autorisation — régularisation fiche investissement (dépassement des délais)",
+    'Banque',
+    [
+      'Une lettre explicative',
+      "Les documents juridiques de la société : extrait récent et détaillé du RNE, Patente, Statuts dûment " +
+        "enregistrés, attestations de dépôt de déclaration délivrées par l'APII, cartes d'identification fiscale " +
+        'et douanière, carte SINDA…',
+      "Les justificatifs d'importation de devise : swifts, avis de crédit, attestation bancaire…",
+      "Une copie intégrale et en couleur du passeport de l'associé non-résident (personne physique) : toutes les pages",
+      "Extrait KBIS de l'associé non-résident (personne morale)",
+      'Extrait récent des comptes ouverts au nom de la société',
+      'Une attestation bancaire sur la nature des comptes ouverts au nom de la société',
+    ],
+  );
+
+  const existingLinks = await db.getAllUsefulLinks();
+  const seedLink = async (
+    id: string, category: string, label: string, url: string,
+    opts: { description?: string; icon?: string } = {},
+  ) => {
+    if (existingLinks.some((l: any) => l.id === id)) return;
+    await db.createUsefulLink({
+      id, category, label, url,
+      description: opts.description || null,
+      icon: opts.icon || null,
+      sector: SECTOR_COMPTA, sortOrder: existingLinks.length, isActive: true, isSystem: true,
+    });
+  };
+  await seedLink(
+    'link-seed-cnss', 'Organismes sociaux', 'Télédéclaration des salaires & télépaiement des cotisations CNSS',
+    'https://www.cnss.tn/', { description: 'Via Certificat ID-TRUST.', icon: '/logos/cnss.png' },
+  );
+  await seedLink(
+    'link-seed-aneti-civp', 'Emploi', 'Contrat CIVP en ligne',
+    'https://inscription.emploi.nat.tn/', { icon: '/logos/aneti.png' },
+  );
+  await seedLink(
+    'link-seed-tej', 'Impôts', 'Plateforme TEJ de retenue à la source',
+    'https://tej.finances.gov.tn/home', { icon: '/logos/tej.jpg' },
+  );
+
+  const existingDeadlines = await db.getAllDeadlineTemplates();
+  const seedDeadline = async (id: string, name: string, recurrenceRule: string, leadTimeDays = 7) => {
+    if (existingDeadlines.some((t: any) => t.id === id)) return;
+    await db.createDeadlineTemplate({
+      id, name, recurrenceRule, leadTimeDays, sector: SECTOR_COMPTA,
+      missionId: null, taskTypeId: null, isActive: true, isSystem: true,
+    });
+  };
+  // Recurring obligation types read off the cabinet's own échéances tracking
+  // sheet (DM, D SUSP TVA TRx, CNSS TRx, IS, IRPP, DEC EMPLOYEUR, RNE Bilan).
+  await seedDeadline('dtpl-seed-tva-mensuelle', 'Déclaration mensuelle de TVA (DM)', 'MONTHLY(day=28)');
+  await seedDeadline('dtpl-seed-tva-suspension-trim', 'Déclaration de suspension de TVA (trimestrielle)', 'QUARTERLY(day=28)');
+  await seedDeadline('dtpl-seed-cnss-trim', 'Déclaration CNSS (trimestrielle)', 'QUARTERLY(day=15)');
+  await seedDeadline('dtpl-seed-is-annuel', "Déclaration de l'impôt sur les sociétés (IS)", 'ANNUAL(month=3,day=25)', 14);
+  await seedDeadline('dtpl-seed-irpp-annuel', 'Déclaration IRPP (personnes physiques)', 'ANNUAL(month=12,day=5)', 14);
+  await seedDeadline('dtpl-seed-declaration-employeur', "Déclaration annuelle de l'employeur", 'ANNUAL(month=2,day=28)', 14);
+  await seedDeadline('dtpl-seed-rne-bilan', 'Dépôt du bilan annuel au RNE', 'ANNUAL(month=7,day=31)', 14);
+}
+
 async function startServer() {
   const app = express();
   // Railway (and Render) assign the port at runtime and expect the app to bind
@@ -127,6 +272,7 @@ async function startServer() {
 
   // Initialize SQLite database
   const db = await initDb();
+  await seedResourceLibrary(db);
 
   // ---------------------------------------------------------
   // Auth & API Routes
@@ -2810,6 +2956,588 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
       await db.deleteTaskAssignment(req.params.id);
       res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Ressources Métier — documents à fournir, procédures, liens utiles et
+  // échéances. Documents and procédures share one generic template/instance
+  // engine (differentiated by `type`); links and deadlines are simpler,
+  // separate models, per the cahier des charges.
+  // ---------------------------------------------------------
+
+  const genId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  /** Number of days in `year`/`month` (0-indexed month), for day-of-month clamping. */
+  const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
+
+  /**
+   * The three recurrence patterns the cahier des charges' own examples use.
+   * Returns the smallest due date >= `seed`. Regeneration passes the previous
+   * due date + 1 day as the seed, so it always lands on the *next* cycle.
+   */
+  const computeDueDate = (rule: string, seed: Date): Date => {
+    let m = /^MONTHLY\(day=(\d+)\)$/.exec(rule);
+    if (m) {
+      const day = Number(m[1]);
+      let y = seed.getFullYear(), mo = seed.getMonth();
+      let candidate = new Date(y, mo, Math.min(day, daysInMonth(y, mo)));
+      if (candidate < seed) {
+        mo += 1; if (mo > 11) { mo = 0; y += 1; }
+        candidate = new Date(y, mo, Math.min(day, daysInMonth(y, mo)));
+      }
+      return candidate;
+    }
+    m = /^QUARTERLY(?:\(day=(\d+)\))?$/.exec(rule);
+    if (m) {
+      const day = Number(m[1] || 28);
+      // Due the month after each calendar quarter ends: Jan, Apr, Jul, Oct.
+      const dueMonths = [0, 3, 6, 9];
+      const y = seed.getFullYear();
+      const mo = dueMonths.find(dm => new Date(y, dm, Math.min(day, daysInMonth(y, dm))) >= seed);
+      if (mo === undefined) return new Date(y + 1, 0, Math.min(day, daysInMonth(y + 1, 0)));
+      return new Date(y, mo, Math.min(day, daysInMonth(y, mo)));
+    }
+    m = /^ANNUAL\(month=(\d+),day=(\d+)\)$/.exec(rule);
+    if (m) {
+      const month = Number(m[1]) - 1, day = Number(m[2]);
+      let y = seed.getFullYear();
+      let candidate = new Date(y, month, Math.min(day, daysInMonth(y, month)));
+      if (candidate < seed) { y += 1; candidate = new Date(y, month, Math.min(day, daysInMonth(y, month))); }
+      return candidate;
+    }
+    throw new Error('Règle de récurrence non reconnue: ' + rule);
+  };
+
+  /** §3.6 of the cahier des charges — recalculated on every read, never stored. */
+  const deadlineInstanceStatus = (instance: any): 'realisee' | 'en_retard' | 'a_venir' | 'en_cours' => {
+    if (instance.completedAt) return 'realisee';
+    const due = new Date(instance.dueDate + 'T00:00:00');
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (due < today) return 'en_retard';
+    const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+    if (diffDays <= (typeof instance.leadTimeDays === 'number' ? instance.leadTimeDays : 7)) return 'a_venir';
+    return 'en_cours';
+  };
+
+  const formatDateISO = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  /**
+   * Lazily ensures each already-activated (client, template) pair has exactly
+   * one open (uncompleted) instance. Never generates further ahead than that —
+   * a client's declaration going unpaid for a year must not silently pile up
+   * twelve rows. Scoped to `clientId` when given, otherwise runs over every
+   * activated pair (bounded by clients × active templates, not by history).
+   */
+  const ensureDeadlineInstances = async (clientId?: number) => {
+    const templates = await db.getAllDeadlineTemplates();
+    const templatesById = new Map(templates.map((t: any) => [t.id, t]));
+    let all = await db.getAllClientDeadlineInstances();
+    if (clientId != null) all = all.filter((i: any) => i.clientId === clientId);
+
+    const groups = new Map<string, any[]>();
+    for (const inst of all) {
+      const key = `${inst.clientId}:${inst.templateId}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(inst);
+    }
+
+    for (const [, instances] of groups) {
+      const hasOpen = instances.some((i: any) => !i.completedAt);
+      if (hasOpen) continue;
+      const latest = instances.reduce((a: any, b: any) => (a.dueDate > b.dueDate ? a : b));
+      const template = templatesById.get(latest.templateId);
+      if (!template || !template.isActive) continue;
+      const seed = new Date(latest.dueDate + 'T00:00:00');
+      seed.setDate(seed.getDate() + 1);
+      const dueDate = computeDueDate(template.recurrenceRule, seed);
+      await db.createClientDeadlineInstance({
+        id: genId('deadline'),
+        clientId: latest.clientId,
+        templateId: template.id,
+        name: template.name,
+        leadTimeDays: template.leadTimeDays,
+        dueDate: formatDateISO(dueDate),
+        completedAt: null,
+        completedBy: null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  };
+
+  // --- Resource templates (documents à fournir / procédures) ---
+
+  app.get('/api/resource-templates', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      let templates = await db.getAllResourceTemplates();
+      if (req.query.type) templates = templates.filter((t: any) => t.type === req.query.type);
+      res.json(templates);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/resource-template-items', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      res.json(await db.getAllResourceTemplateItems());
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/resource-templates', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { type, name, sector, isSequential } = req.body;
+      if (!['document_checklist', 'procedure'].includes(type)) {
+        return res.status(400).json({ error: 'Type de ressource invalide' });
+      }
+      if (!String(name || '').trim()) return res.status(400).json({ error: 'Le titre est requis' });
+      const template = await db.createResourceTemplate({
+        id: genId('tpl'),
+        type,
+        name: String(name).trim(),
+        sector: sector ? String(sector).trim() : null,
+        isSequential: !!isSequential,
+        isActive: true,
+        isSystem: false,
+        sourceSystemTemplateId: null,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(template);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/resource-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const template = await db.getResourceTemplateById(req.params.id);
+      if (!template) return res.status(404).json({ error: 'Not found' });
+      const { name, sector, isSequential, isActive } = req.body;
+      const updates: any = {};
+      if (name !== undefined) updates.name = String(name).trim();
+      if (sector !== undefined) updates.sector = sector ? String(sector).trim() : null;
+      if (isSequential !== undefined) updates.isSequential = !!isSequential;
+      if (isActive !== undefined) updates.isActive = !!isActive;
+      const updated = await db.updateResourceTemplate(req.params.id, updates);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/resource-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const template = await db.getResourceTemplateById(req.params.id);
+      if (!template) return res.status(404).json({ error: 'Not found' });
+      await db.deleteResourceTemplate(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/resource-template-items', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { templateId, label } = req.body;
+      const template = await db.getResourceTemplateById(templateId);
+      if (!template) return res.status(404).json({ error: 'Modèle introuvable' });
+      if (!String(label || '').trim()) return res.status(400).json({ error: 'Le libellé est requis' });
+      const existing = (await db.getAllResourceTemplateItems()).filter((i: any) => i.templateId === templateId);
+      const item = await db.createResourceTemplateItem({
+        id: genId('tplitem'),
+        templateId,
+        label: String(label).trim(),
+        sortOrder: existing.length,
+      });
+      res.status(201).json(item);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/resource-template-items/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { label, sortOrder } = req.body;
+      const updates: any = {};
+      if (label !== undefined) updates.label = String(label).trim();
+      if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
+      const updated = await db.updateResourceTemplateItem(req.params.id, updates);
+      if (!updated) return res.status(404).json({ error: 'Not found' });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/resource-template-items/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteResourceTemplateItem(req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // --- Client resource instances (assignment + suivi) ---
+
+  /** §4.1 — affecte un modèle à un client. Frozen copy per §3.5. */
+  app.post('/api/client-resources', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { clientId, templateId, assignedTo } = req.body;
+      if (clientId == null) return res.status(400).json({ error: 'Client requis' });
+      const template = await db.getResourceTemplateById(templateId);
+      if (!template) return res.status(404).json({ error: 'Modèle introuvable' });
+      const client = await db.getClientById(Number(clientId));
+      if (!client) return res.status(404).json({ error: 'Client introuvable' });
+
+      const instance = await db.createClientResourceInstance({
+        id: genId('inst'),
+        clientId: Number(clientId),
+        sourceTemplateId: template.id,
+        name: template.name,
+        type: template.type,
+        isSequential: template.isSequential,
+        status: 'en_cours',
+        assignedTo: assignedTo != null ? Number(assignedTo) : null,
+        createdAt: new Date().toISOString(),
+        createdBy: req.user.id,
+      });
+
+      const items = (await db.getAllResourceTemplateItems())
+        .filter((i: any) => i.templateId === template.id)
+        .sort((a: any, b: any) => a.sortOrder - b.sortOrder);
+      for (const item of items) {
+        await db.createClientResourceItemStatus({
+          id: genId('itemstatus'),
+          instanceId: instance.id,
+          sourceItemId: item.id,
+          label: item.label,
+          sortOrder: item.sortOrder,
+          done: false,
+          completedAt: null,
+          completedBy: null,
+        });
+      }
+
+      res.status(201).json(instance);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Instances for one client, with their item statuses — the "Suivi & Ressources" tab. */
+  app.get('/api/client-resources', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const clientId = req.query.clientId != null ? Number(req.query.clientId) : null;
+      if (clientId == null) return res.status(400).json({ error: 'clientId requis' });
+      const instances = (await db.getAllClientResourceInstances()).filter((i: any) => i.clientId === clientId);
+      const allStatuses = await db.getAllClientResourceItemStatuses();
+      res.json(instances.map((instance: any) => ({
+        ...instance,
+        items: allStatuses
+          .filter((s: any) => s.instanceId === instance.id)
+          .sort((a: any, b: any) => a.sortOrder - b.sortOrder),
+      })));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/client-resources/:id', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteClientResourceInstance(req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * §4.2 — met à jour le statut d'un item. Quand l'instance est séquentielle,
+   * un item ne peut passer à "terminé"/"non applicable" que si tous les items
+   * qui le précèdent (sortOrder inférieur) sont déjà résolus.
+   */
+  app.put('/api/client-resource-items/:id', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { done } = req.body;
+      if (typeof done !== 'boolean') return res.status(400).json({ error: 'Statut invalide' });
+      const allStatuses = await db.getAllClientResourceItemStatuses();
+      const item = allStatuses.find((s: any) => s.id === req.params.id);
+      if (!item) return res.status(404).json({ error: 'Not found' });
+
+      if (done) {
+        const instance = await db.getClientResourceInstanceById(item.instanceId);
+        if (instance?.isSequential) {
+          const blocked = allStatuses.some((s: any) =>
+            s.instanceId === item.instanceId && s.sortOrder < item.sortOrder && !s.done,
+          );
+          if (blocked) return res.status(409).json({ error: 'Les étapes précédentes doivent être résolues d\'abord.' });
+        }
+      }
+
+      const updated = await db.updateClientResourceItemStatus(req.params.id, {
+        done,
+        completedAt: done ? new Date().toISOString() : null,
+        completedBy: done ? req.user.id : null,
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Admin-dashboard summary — per-client progress on documents/procédures,
+   * separate from Pointage. Aggregates only (resolved/total counts), never
+   * the item lists themselves, same "nothing unbounded crosses the wire"
+   * rule the KPI dashboard already follows. Same team-viewer gate as the
+   * échéances portfolio.
+   */
+  app.get('/api/resources/portfolio', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      if (!DASHBOARD_ROLES.includes(req.user.role)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const [instances, statuses, clients] = await Promise.all([
+        db.getAllClientResourceInstances(), db.getAllClientResourceItemStatuses(), db.getAllClients(),
+      ]);
+      const clientsById = new Map(clients.map((c: any) => [c.id, c]));
+      const statusesByInstance = new Map<string, any[]>();
+      for (const s of statuses) {
+        if (!statusesByInstance.has(s.instanceId)) statusesByInstance.set(s.instanceId, []);
+        statusesByInstance.get(s.instanceId)!.push(s);
+      }
+      res.json(instances.map((i: any) => {
+        const items = statusesByInstance.get(i.id) ?? [];
+        return {
+          id: i.id,
+          clientId: i.clientId,
+          clientName: clientsById.get(i.clientId)?.name ?? 'Client supprimé',
+          name: i.name,
+          type: i.type,
+          total: items.length,
+          resolved: items.filter((x: any) => x.done).length,
+          createdAt: i.createdAt,
+        };
+      }));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // --- Liens utiles ---
+
+  app.get('/api/useful-links', authenticate, requirePermission('VIEW_RESOURCES'), async (_req: any, res: any) => {
+    try {
+      res.json(await db.getAllUsefulLinks());
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/useful-links', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { category, label, url, sector, description, icon } = req.body;
+      if (!String(category || '').trim() || !String(label || '').trim() || !String(url || '').trim()) {
+        return res.status(400).json({ error: 'Catégorie, libellé et URL sont requis' });
+      }
+      const existing = await db.getAllUsefulLinks();
+      const link = await db.createUsefulLink({
+        id: genId('link'),
+        category: String(category).trim(),
+        label: String(label).trim(),
+        url: String(url).trim(),
+        description: description ? String(description).trim() : null,
+        icon: icon || null,
+        sector: sector || null,
+        sortOrder: existing.length,
+        isActive: true,
+        isSystem: false,
+      });
+      res.status(201).json(link);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/useful-links/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { category, label, url, description, isActive, sortOrder } = req.body;
+      const updates: any = {};
+      if (category !== undefined) updates.category = String(category).trim();
+      if (label !== undefined) updates.label = String(label).trim();
+      if (url !== undefined) updates.url = String(url).trim();
+      if (description !== undefined) updates.description = description ? String(description).trim() : null;
+      if (isActive !== undefined) updates.isActive = !!isActive;
+      if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
+      const updated = await db.updateUsefulLink(req.params.id, updates);
+      if (!updated) return res.status(404).json({ error: 'Not found' });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/useful-links/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteUsefulLink(req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // --- Échéances ---
+
+  app.get('/api/deadline-templates', authenticate, requirePermission('VIEW_RESOURCES'), async (_req: any, res: any) => {
+    try {
+      res.json(await db.getAllDeadlineTemplates());
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/deadline-templates', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { name, recurrenceRule, leadTimeDays, sector, missionId, taskTypeId } = req.body;
+      if (!String(name || '').trim()) return res.status(400).json({ error: 'Le nom est requis' });
+      try { computeDueDate(recurrenceRule, new Date()); } catch {
+        return res.status(400).json({ error: 'Règle de récurrence invalide (attendu: MONTHLY(day=N), QUARTERLY ou ANNUAL(month=M,day=N))' });
+      }
+      const template = await db.createDeadlineTemplate({
+        id: genId('dtpl'),
+        name: String(name).trim(),
+        recurrenceRule,
+        leadTimeDays: typeof leadTimeDays === 'number' ? leadTimeDays : 7,
+        sector: sector || null,
+        missionId: missionId != null ? Number(missionId) : null,
+        taskTypeId: taskTypeId != null ? Number(taskTypeId) : null,
+        isActive: true,
+        isSystem: false,
+      });
+      res.status(201).json(template);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/deadline-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const template = await db.getDeadlineTemplateById(req.params.id);
+      if (!template) return res.status(404).json({ error: 'Not found' });
+      if (template.isSystem) return res.status(403).json({ error: 'Un modèle système ne peut pas être modifié.' });
+      const { name, recurrenceRule, leadTimeDays, isActive } = req.body;
+      const updates: any = {};
+      if (name !== undefined) updates.name = String(name).trim();
+      if (recurrenceRule !== undefined) {
+        try { computeDueDate(recurrenceRule, new Date()); } catch {
+          return res.status(400).json({ error: 'Règle de récurrence invalide' });
+        }
+        updates.recurrenceRule = recurrenceRule;
+      }
+      if (leadTimeDays !== undefined) updates.leadTimeDays = Number(leadTimeDays);
+      if (isActive !== undefined) updates.isActive = !!isActive;
+      const updated = await db.updateDeadlineTemplate(req.params.id, updates);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/deadline-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const template = await db.getDeadlineTemplateById(req.params.id);
+      if (!template) return res.status(404).json({ error: 'Not found' });
+      if (template.isSystem) return res.status(403).json({ error: 'Un modèle système ne peut pas être supprimé.' });
+      await db.deleteDeadlineTemplate(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** §2.4 flow step 1 — activates a recurring deadline model for one client. */
+  app.post('/api/client-deadlines/activate', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { clientId, templateId } = req.body;
+      if (clientId == null) return res.status(400).json({ error: 'Client requis' });
+      const template = await db.getDeadlineTemplateById(templateId);
+      if (!template) return res.status(404).json({ error: 'Modèle introuvable' });
+      const client = await db.getClientById(Number(clientId));
+      if (!client) return res.status(404).json({ error: 'Client introuvable' });
+
+      const already = (await db.getAllClientDeadlineInstances())
+        .some((i: any) => i.clientId === Number(clientId) && i.templateId === template.id && !i.completedAt);
+      if (already) return res.status(409).json({ error: 'Cette échéance est déjà activée pour ce client.' });
+
+      const instance = await db.createClientDeadlineInstance({
+        id: genId('deadline'),
+        clientId: Number(clientId),
+        templateId: template.id,
+        name: template.name,
+        leadTimeDays: template.leadTimeDays,
+        dueDate: formatDateISO(computeDueDate(template.recurrenceRule, new Date())),
+        completedAt: null,
+        completedBy: null,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(instance);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Échéances for one client — the "Suivi & Ressources" tab. */
+  app.get('/api/client-deadlines', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const clientId = req.query.clientId != null ? Number(req.query.clientId) : null;
+      if (clientId == null) return res.status(400).json({ error: 'clientId requis' });
+      await ensureDeadlineInstances(clientId);
+      const instances = (await db.getAllClientDeadlineInstances()).filter((i: any) => i.clientId === clientId);
+      res.json(instances.map((i: any) => ({ ...i, status: deadlineInstanceStatus(i) })));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** §4.4 — vision globale portefeuille. Same team-viewer gate as the KPI dashboard. */
+  app.get('/api/deadlines/portfolio', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      if (!DASHBOARD_ROLES.includes(req.user.role)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      await ensureDeadlineInstances();
+      const [instances, clients] = await Promise.all([db.getAllClientDeadlineInstances(), db.getAllClients()]);
+      const clientsById = new Map(clients.map((c: any) => [c.id, c]));
+      res.json(instances.map((i: any) => ({
+        ...i,
+        status: deadlineInstanceStatus(i),
+        clientName: clientsById.get(i.clientId)?.name ?? 'Client supprimé',
+      })));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Toggles completion — the one thing a collaborator or manager does to an échéance. */
+  app.put('/api/client-deadlines/:id/complete', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const { completed } = req.body;
+      const updated = await db.updateClientDeadlineInstance(req.params.id, {
+        completedAt: completed ? new Date().toISOString() : null,
+        completedBy: completed ? req.user.id : null,
+      });
+      if (!updated) return res.status(404).json({ error: 'Not found' });
+      res.json({ ...updated, status: deadlineInstanceStatus(updated) });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

@@ -45,6 +45,13 @@ try {
     messages: await db.getAllMessages(),
     taskAssignments: await db.getAllTaskAssignments(),
     notifications: await db.getAllNotifications(),
+    resourceTemplates: await db.getAllResourceTemplates(),
+    resourceTemplateItems: await db.getAllResourceTemplateItems(),
+    clientResourceInstances: await db.getAllClientResourceInstances(),
+    clientResourceItemStatuses: await db.getAllClientResourceItemStatuses(),
+    usefulLinks: await db.getAllUsefulLinks(),
+    deadlineTemplates: await db.getAllDeadlineTemplates(),
+    clientDeadlineInstances: await db.getAllClientDeadlineInstances(),
     settings: await db.getSettings(),
   };
 

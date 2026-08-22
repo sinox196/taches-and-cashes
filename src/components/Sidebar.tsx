@@ -12,7 +12,8 @@ import {
   ShieldAlert,
   Layers,
   Globe,
-  MessageCircle
+  MessageCircle,
+  FileCheck2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -42,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
     { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
     ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
+    ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Ressources métier', icon: FileCheck2, hasChevron: false }] : []),
     ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Cash', icon: Receipt, hasChevron: false }] : []),
     ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: Users2, hasChevron: true }] : []),
     ...(user?.role === 'ADMIN' ? [{ id: 'Reports', label: t('nav.reports'), icon: BarChart3, hasChevron: false }] : []),

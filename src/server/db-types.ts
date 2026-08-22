@@ -82,6 +82,48 @@ export interface Database {
   createNotification(notification: any): Promise<any>;
   updateNotification(id: string, updates: any): Promise<any | null>;
 
+  // Ressources Métier — the reusable "template -> client instance" engine
+  // shared by documents à fournir and procédures (differentiated by `type`).
+  getAllResourceTemplates(): Promise<any[]>;
+  getResourceTemplateById(id: string): Promise<any | undefined>;
+  createResourceTemplate(template: any): Promise<any>;
+  updateResourceTemplate(id: string, updates: any): Promise<any | null>;
+  /** Cascades to the template's items. */
+  deleteResourceTemplate(id: string): Promise<boolean>;
+
+  getAllResourceTemplateItems(): Promise<any[]>;
+  createResourceTemplateItem(item: any): Promise<any>;
+  updateResourceTemplateItem(id: string, updates: any): Promise<any | null>;
+  deleteResourceTemplateItem(id: string): Promise<boolean>;
+
+  /** A template affected to a client — a frozen copy, per §3.5 of the cahier des charges. */
+  getAllClientResourceInstances(): Promise<any[]>;
+  getClientResourceInstanceById(id: string): Promise<any | undefined>;
+  createClientResourceInstance(instance: any): Promise<any>;
+  updateClientResourceInstance(id: string, updates: any): Promise<any | null>;
+  /** Cascades to the instance's item statuses. */
+  deleteClientResourceInstance(id: string): Promise<boolean>;
+
+  getAllClientResourceItemStatuses(): Promise<any[]>;
+  createClientResourceItemStatus(status: any): Promise<any>;
+  updateClientResourceItemStatus(id: string, updates: any): Promise<any | null>;
+
+  getAllUsefulLinks(): Promise<any[]>;
+  createUsefulLink(link: any): Promise<any>;
+  updateUsefulLink(id: string, updates: any): Promise<any | null>;
+  deleteUsefulLink(id: string): Promise<boolean>;
+
+  getAllDeadlineTemplates(): Promise<any[]>;
+  getDeadlineTemplateById(id: string): Promise<any | undefined>;
+  createDeadlineTemplate(template: any): Promise<any>;
+  updateDeadlineTemplate(id: string, updates: any): Promise<any | null>;
+  deleteDeadlineTemplate(id: string): Promise<boolean>;
+
+  /** Generated lazily, one open (uncompleted) instance per client+template at a time. */
+  getAllClientDeadlineInstances(): Promise<any[]>;
+  createClientDeadlineInstance(instance: any): Promise<any>;
+  updateClientDeadlineInstance(id: string, updates: any): Promise<any | null>;
+
   getSettings(): Promise<any>;
   updateSettings(updates: any): Promise<any>;
 
@@ -123,6 +165,14 @@ export const emptyDb = () => ({
   taskAssignments: [],
   // Per-user notifications: new message, task assigned, HR events.
   notifications: [],
+  // Ressources Métier — see the interface comments above for what each holds.
+  resourceTemplates: [],
+  resourceTemplateItems: [],
+  clientResourceInstances: [],
+  clientResourceItemStatuses: [],
+  usefulLinks: [],
+  deadlineTemplates: [],
+  clientDeadlineInstances: [],
   settings: defaultSettings(),
 });
 
@@ -149,11 +199,13 @@ export const ADMIN_PERMISSIONS = [
   'MANAGE_PRESENCE_SETTINGS', 'ASSIGN_TASKS',
   'VIEW_HR', 'CREATE_LEAVE_REQUEST', 'MANAGE_LEAVE_REQUESTS',
   'CREATE_ABSENCE_AUTHORIZATION', 'MANAGE_ABSENCE_AUTHORIZATIONS',
+  'VIEW_RESOURCES', 'MANAGE_RESOURCES',
 ];
 
 export const COLLAB_PERMISSIONS = [
   'VIEW', 'EDIT', 'MODIFY', 'DELETE', 'VIEW_CLIENTS',
   'VIEW_HR', 'CREATE_LEAVE_REQUEST', 'CREATE_ABSENCE_AUTHORIZATION',
+  'VIEW_RESOURCES',
 ];
 
 /**

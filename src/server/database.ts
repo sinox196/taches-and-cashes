@@ -64,6 +64,13 @@ async function initJsonDb(): Promise<Database> {
     if (!db.messages) db.messages = [];
     if (!db.taskAssignments) db.taskAssignments = [];
     if (!db.notifications) db.notifications = [];
+    if (!db.resourceTemplates) db.resourceTemplates = [];
+    if (!db.resourceTemplateItems) db.resourceTemplateItems = [];
+    if (!db.clientResourceInstances) db.clientResourceInstances = [];
+    if (!db.clientResourceItemStatuses) db.clientResourceItemStatuses = [];
+    if (!db.usefulLinks) db.usefulLinks = [];
+    if (!db.deadlineTemplates) db.deadlineTemplates = [];
+    if (!db.clientDeadlineInstances) db.clientDeadlineInstances = [];
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
@@ -396,6 +403,148 @@ async function initJsonDb(): Promise<Database> {
       db.notifications[index] = { ...db.notifications[index], ...updates };
       await saveDb();
       return db.notifications[index];
+    },
+
+    // Ressources Métier — resource templates (documents & procédures)
+    getAllResourceTemplates: async () => db.resourceTemplates,
+    getResourceTemplateById: async (id: string) => db.resourceTemplates.find((t: any) => t.id === id),
+    createResourceTemplate: async (template: any) => {
+      db.resourceTemplates.push(template);
+      await saveDb();
+      return template;
+    },
+    updateResourceTemplate: async (id: string, updates: any) => {
+      const index = db.resourceTemplates.findIndex((t: any) => t.id === id);
+      if (index === -1) return null;
+      db.resourceTemplates[index] = { ...db.resourceTemplates[index], ...updates };
+      await saveDb();
+      return db.resourceTemplates[index];
+    },
+    deleteResourceTemplate: async (id: string) => {
+      const index = db.resourceTemplates.findIndex((t: any) => t.id === id);
+      if (index === -1) return false;
+      db.resourceTemplates.splice(index, 1);
+      db.resourceTemplateItems = db.resourceTemplateItems.filter((i: any) => i.templateId !== id);
+      await saveDb();
+      return true;
+    },
+
+    getAllResourceTemplateItems: async () => db.resourceTemplateItems,
+    createResourceTemplateItem: async (item: any) => {
+      db.resourceTemplateItems.push(item);
+      await saveDb();
+      return item;
+    },
+    updateResourceTemplateItem: async (id: string, updates: any) => {
+      const index = db.resourceTemplateItems.findIndex((i: any) => i.id === id);
+      if (index === -1) return null;
+      db.resourceTemplateItems[index] = { ...db.resourceTemplateItems[index], ...updates };
+      await saveDb();
+      return db.resourceTemplateItems[index];
+    },
+    deleteResourceTemplateItem: async (id: string) => {
+      const index = db.resourceTemplateItems.findIndex((i: any) => i.id === id);
+      if (index === -1) return false;
+      db.resourceTemplateItems.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    // Client resource instances — frozen copies affected to a client.
+    getAllClientResourceInstances: async () => db.clientResourceInstances,
+    getClientResourceInstanceById: async (id: string) => db.clientResourceInstances.find((i: any) => i.id === id),
+    createClientResourceInstance: async (instance: any) => {
+      db.clientResourceInstances.unshift(instance);
+      await saveDb();
+      return instance;
+    },
+    updateClientResourceInstance: async (id: string, updates: any) => {
+      const index = db.clientResourceInstances.findIndex((i: any) => i.id === id);
+      if (index === -1) return null;
+      db.clientResourceInstances[index] = { ...db.clientResourceInstances[index], ...updates };
+      await saveDb();
+      return db.clientResourceInstances[index];
+    },
+    deleteClientResourceInstance: async (id: string) => {
+      const index = db.clientResourceInstances.findIndex((i: any) => i.id === id);
+      if (index === -1) return false;
+      db.clientResourceInstances.splice(index, 1);
+      db.clientResourceItemStatuses = db.clientResourceItemStatuses.filter((s: any) => s.instanceId !== id);
+      await saveDb();
+      return true;
+    },
+
+    getAllClientResourceItemStatuses: async () => db.clientResourceItemStatuses,
+    createClientResourceItemStatus: async (status: any) => {
+      db.clientResourceItemStatuses.push(status);
+      await saveDb();
+      return status;
+    },
+    updateClientResourceItemStatus: async (id: string, updates: any) => {
+      const index = db.clientResourceItemStatuses.findIndex((s: any) => s.id === id);
+      if (index === -1) return null;
+      db.clientResourceItemStatuses[index] = { ...db.clientResourceItemStatuses[index], ...updates };
+      await saveDb();
+      return db.clientResourceItemStatuses[index];
+    },
+
+    // Liens utiles
+    getAllUsefulLinks: async () => db.usefulLinks,
+    createUsefulLink: async (link: any) => {
+      db.usefulLinks.push(link);
+      await saveDb();
+      return link;
+    },
+    updateUsefulLink: async (id: string, updates: any) => {
+      const index = db.usefulLinks.findIndex((l: any) => l.id === id);
+      if (index === -1) return null;
+      db.usefulLinks[index] = { ...db.usefulLinks[index], ...updates };
+      await saveDb();
+      return db.usefulLinks[index];
+    },
+    deleteUsefulLink: async (id: string) => {
+      const index = db.usefulLinks.findIndex((l: any) => l.id === id);
+      if (index === -1) return false;
+      db.usefulLinks.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    // Échéances
+    getAllDeadlineTemplates: async () => db.deadlineTemplates,
+    getDeadlineTemplateById: async (id: string) => db.deadlineTemplates.find((t: any) => t.id === id),
+    createDeadlineTemplate: async (template: any) => {
+      db.deadlineTemplates.push(template);
+      await saveDb();
+      return template;
+    },
+    updateDeadlineTemplate: async (id: string, updates: any) => {
+      const index = db.deadlineTemplates.findIndex((t: any) => t.id === id);
+      if (index === -1) return null;
+      db.deadlineTemplates[index] = { ...db.deadlineTemplates[index], ...updates };
+      await saveDb();
+      return db.deadlineTemplates[index];
+    },
+    deleteDeadlineTemplate: async (id: string) => {
+      const index = db.deadlineTemplates.findIndex((t: any) => t.id === id);
+      if (index === -1) return false;
+      db.deadlineTemplates.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllClientDeadlineInstances: async () => db.clientDeadlineInstances,
+    createClientDeadlineInstance: async (instance: any) => {
+      db.clientDeadlineInstances.push(instance);
+      await saveDb();
+      return instance;
+    },
+    updateClientDeadlineInstance: async (id: string, updates: any) => {
+      const index = db.clientDeadlineInstances.findIndex((i: any) => i.id === id);
+      if (index === -1) return null;
+      db.clientDeadlineInstances[index] = { ...db.clientDeadlineInstances[index], ...updates };
+      await saveDb();
+      return db.clientDeadlineInstances[index];
     },
 
     // Settings CRUD

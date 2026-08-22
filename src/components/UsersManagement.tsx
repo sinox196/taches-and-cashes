@@ -46,6 +46,13 @@ const PERMISSIONS_GROUPED = [
     ]
   },
   {
+    group: 'Ressources Métier',
+    permissions: [
+      { id: 'VIEW_RESOURCES', label: 'Voir les ressources', desc: 'Peut consulter documents, procédures, liens utiles et échéances' },
+      { id: 'MANAGE_RESOURCES', label: 'Gérer le référentiel', desc: 'Peut créer, modifier et supprimer les modèles, liens et échéances du cabinet' },
+    ]
+  },
+  {
     group: 'Administration',
     permissions: [
       { id: 'MANAGE_USERS', label: 'Gérer les utilisateurs', desc: 'Accès administrateur complet' },

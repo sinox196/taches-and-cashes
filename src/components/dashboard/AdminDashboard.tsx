@@ -9,6 +9,7 @@ import { EmployeeTasksModal } from './EmployeeTasksModal';
 import { ClientBreakdown } from './ClientBreakdown';
 import { MultiSelectAutocomplete } from './MultiSelectAutocomplete';
 import { AssignedTasksCard } from './AssignedTasksCard';
+import { ResourcesProgressCard } from './ResourcesProgressCard';
 
 
 export const AdminDashboard: React.FC = () => {
@@ -128,6 +129,10 @@ export const AdminDashboard: React.FC = () => {
             admin — this dashboard is their only one, so it needs the same
             widget MyDashboard shows a collaborator. */}
         <AssignedTasksCard />
+
+        {/* Ressources métier — independent of the Pointage-driven stats below:
+            no date range, no collaborateur/client filter, just current state. */}
+        <ResourcesProgressCard selectedClients={selectedClients} />
 
         {stats && (
           <>

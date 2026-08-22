@@ -53,6 +53,13 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   messages: { desc: false },
   task_assignments: { desc: true },
   notifications: { desc: true },
+  resource_templates: { desc: false },
+  resource_template_items: { desc: false },
+  client_resource_instances: { desc: true },
+  client_resource_item_statuses: { desc: false },
+  useful_links: { desc: false },
+  deadline_templates: { desc: false },
+  client_deadline_instances: { desc: false },
 };
 
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
@@ -68,6 +75,13 @@ const TABLE_FOR: Record<string, string> = {
   messages: 'messages',
   taskAssignments: 'task_assignments',
   notifications: 'notifications',
+  resourceTemplates: 'resource_templates',
+  resourceTemplateItems: 'resource_template_items',
+  clientResourceInstances: 'client_resource_instances',
+  clientResourceItemStatuses: 'client_resource_item_statuses',
+  usefulLinks: 'useful_links',
+  deadlineTemplates: 'deadline_templates',
+  clientDeadlineInstances: 'client_deadline_instances',
 };
 
 function makePool(connectionString: string) {
@@ -115,6 +129,11 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`CREATE INDEX IF NOT EXISTS messages_to_idx         ON messages ((data->>'toUserId'))`);
   await q(`CREATE INDEX IF NOT EXISTS task_assignments_to_idx ON task_assignments ((data->>'assignedToUserId'))`);
   await q(`CREATE INDEX IF NOT EXISTS notifications_user_idx  ON notifications ((data->>'userId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS resource_template_items_template_idx ON resource_template_items ((data->>'templateId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS client_resource_instances_client_idx ON client_resource_instances ((data->>'clientId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS client_resource_item_statuses_instance_idx ON client_resource_item_statuses ((data->>'instanceId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS client_deadline_instances_client_idx ON client_deadline_instances ((data->>'clientId'))`);
+  await q(`CREATE INDEX IF NOT EXISTS client_deadline_instances_template_idx ON client_deadline_instances ((data->>'templateId'))`);
 }
 
 export async function initPostgres(connectionString: string): Promise<Database> {
@@ -169,6 +188,13 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const messages = collection('messages');
   const taskAssignments = collection('task_assignments');
   const notifications = collection('notifications');
+  const resourceTemplates = collection('resource_templates');
+  const resourceTemplateItems = collection('resource_template_items');
+  const clientResourceInstances = collection('client_resource_instances');
+  const clientResourceItemStatuses = collection('client_resource_item_statuses');
+  const usefulLinks = collection('useful_links');
+  const deadlineTemplates = collection('deadline_templates');
+  const clientDeadlineInstances = collection('client_deadline_instances');
 
   const db: Database = {
     get: async (sql: string, param: any) => {
@@ -315,6 +341,70 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAllNotifications: notifications.all,
     createNotification: notifications.create,
     updateNotification: notifications.update,
+
+    getAllResourceTemplates: resourceTemplates.all,
+    getResourceTemplateById: resourceTemplates.byId,
+    createResourceTemplate: resourceTemplates.create,
+    updateResourceTemplate: resourceTemplates.update,
+    deleteResourceTemplate: async (id: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const res = await client.query('DELETE FROM resource_templates WHERE id = $1', [String(id)]);
+        await client.query(`DELETE FROM resource_template_items WHERE data->>'templateId' = $1`, [String(id)]);
+        await client.query('COMMIT');
+        return (res.rowCount ?? 0) > 0;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+
+    getAllResourceTemplateItems: resourceTemplateItems.all,
+    createResourceTemplateItem: resourceTemplateItems.create,
+    updateResourceTemplateItem: resourceTemplateItems.update,
+    deleteResourceTemplateItem: resourceTemplateItems.remove,
+
+    getAllClientResourceInstances: clientResourceInstances.all,
+    getClientResourceInstanceById: clientResourceInstances.byId,
+    createClientResourceInstance: clientResourceInstances.create,
+    updateClientResourceInstance: clientResourceInstances.update,
+    deleteClientResourceInstance: async (id: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const res = await client.query('DELETE FROM client_resource_instances WHERE id = $1', [String(id)]);
+        await client.query(`DELETE FROM client_resource_item_statuses WHERE data->>'instanceId' = $1`, [String(id)]);
+        await client.query('COMMIT');
+        return (res.rowCount ?? 0) > 0;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+
+    getAllClientResourceItemStatuses: clientResourceItemStatuses.all,
+    createClientResourceItemStatus: clientResourceItemStatuses.create,
+    updateClientResourceItemStatus: clientResourceItemStatuses.update,
+
+    getAllUsefulLinks: usefulLinks.all,
+    createUsefulLink: usefulLinks.create,
+    updateUsefulLink: usefulLinks.update,
+    deleteUsefulLink: usefulLinks.remove,
+
+    getAllDeadlineTemplates: deadlineTemplates.all,
+    getDeadlineTemplateById: deadlineTemplates.byId,
+    createDeadlineTemplate: deadlineTemplates.create,
+    updateDeadlineTemplate: deadlineTemplates.update,
+    deleteDeadlineTemplate: deadlineTemplates.remove,
+
+    getAllClientDeadlineInstances: clientDeadlineInstances.all,
+    createClientDeadlineInstance: clientDeadlineInstances.create,
+    updateClientDeadlineInstance: clientDeadlineInstances.update,
 
     getSettings: async () => {
       const rows = await q('SELECT data, invoice_counter FROM settings WHERE only_row');
