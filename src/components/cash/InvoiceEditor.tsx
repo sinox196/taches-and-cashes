@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { amountToFrenchWords } from '../../utils/amountToWords';
+import { friendlyError } from '../../utils/errors';
 
 /** Choices from the cahier des charges. */
 const DOCUMENT_KINDS = [
@@ -77,7 +78,16 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   /** The next sequence value, kept so switching back from "Autre" restores it. */
   const [sequenceNumber, setSequenceNumber] = useState('…');
   const [lastIssueDate, setLastIssueDate] = useState<string | null>(null);
+  /** Read-only here — the logo is configured once in Informations de facturation. */
   const [logo, setLogo] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/cash/company', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(body => { if (!cancelled && body?.logo) setLogo(body.logo); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token]);
 
   // --- client --------------------------------------------------------------
   const [clientSearch, setClientSearch] = useState(invoice?.clientName ?? '');
@@ -263,7 +273,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
       }
       onSaved();
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setIsSaving(false);
     }
@@ -320,28 +330,13 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           {/* ---- 2. En-tête ---- */}
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <div className="w-24 h-16 border border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden bg-gray-50">
-                  {logo
-                    ? <img src={logo} alt="Logo" className="max-w-full max-h-full object-contain" />
-                    : <Upload className="w-5 h-5 text-gray-400" />}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = () => setLogo(String(reader.result));
-                    reader.readAsDataURL(file);
-                  }}
-                />
-                <span className="text-[12px] text-blue-600 hover:text-blue-800 font-medium">Télécharger le logo</span>
-              </label>
+              <div className="w-24 h-16 border border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden bg-gray-50">
+                {logo
+                  ? <img src={logo} alt="Logo" className="max-w-full max-h-full object-contain" />
+                  : <Upload className="w-5 h-5 text-gray-300" />}
+              </div>
               <p className="text-[10.5px] text-gray-400 mt-1 max-w-[240px]">
-                Le logo est normalement repris du compte de la société.
+                Le logo est repris des Informations de facturation.
               </p>
             </div>
 
@@ -543,11 +538,12 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                   {lines.map((l, i) => (
                     <tr key={i}>
                       <td className="px-3 py-2">
-                        <input
+                        <textarea
                           value={l.designation}
                           onChange={e => setLine(i, { designation: e.target.value })}
                           placeholder="Ex: Mission de conseil"
-                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-[12.5px]"
+                          rows={2}
+                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-[12.5px] resize-y"
                         />
                       </td>
                       {detailed && (
@@ -653,8 +649,8 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
 
             <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 text-[12.5px]">
               {[
-                ['Total HT (1)', money(totals.ht)],
-                ['Total TVA (2)', money(totals.tva)],
+                ['Total HT', money(totals.ht)],
+                ['Total TVA', money(totals.tva)],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between px-4 py-2">
                   <span className="text-gray-600">{label}</span>
@@ -662,12 +658,12 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 </div>
               ))}
               <div className="flex justify-between px-4 py-2 bg-gray-50">
-                <span className="font-semibold text-gray-800">Total TTC (3)</span>
+                <span className="font-semibold text-gray-800">Total TTC</span>
                 <span className="font-mono font-bold text-gray-900">{money(totals.ttc)}</span>
               </div>
 
               <div className="flex justify-between items-center px-4 py-2">
-                <span className="text-gray-600">Taux de la retenue à la source (4)</span>
+                <span className="text-gray-600">Taux de la retenue à la source</span>
                 <select
                   value={withholdingRate}
                   onChange={e => setWithholdingRate(parseFloat(e.target.value))}
@@ -679,11 +675,11 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 </select>
               </div>
               <div className="flex justify-between px-4 py-2">
-                <span className="text-gray-600">Montant de la retenue à la source (5)</span>
+                <span className="text-gray-600">Montant de la retenue à la source</span>
                 <span className="font-mono text-gray-900">− {money(totals.rsAmount)}</span>
               </div>
               <div className="flex justify-between items-center px-4 py-2">
-                <span className="text-gray-600">Timbre fiscal (6)</span>
+                <span className="text-gray-600">Timbre fiscal</span>
                 <input
                   type="number" min="0" step="0.001"
                   value={stampDuty}
@@ -692,7 +688,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 />
               </div>
               <div className="flex justify-between px-4 py-2 bg-gray-50">
-                <span className="font-semibold text-gray-800">Net à payer (7)</span>
+                <span className="font-semibold text-gray-800">Net à payer</span>
                 <span className="font-mono font-bold text-gray-900">{money(totals.net)}</span>
               </div>
 
@@ -700,7 +696,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer">
                     <input type="checkbox" checked={showDisbursements} onChange={e => setShowDisbursements(e.target.checked)} className="rounded border-gray-300" />
-                    Remboursement de débours (8)
+                    Remboursement de débours
                   </label>
                   {showDisbursements && (
                     <input
@@ -714,7 +710,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer">
                     <input type="checkbox" checked={showAdvances} onChange={e => setShowAdvances(e.target.checked)} className="rounded border-gray-300" />
-                    Moins avances perçues (9)
+                    Moins avances perçues
                   </label>
                   {showAdvances && (
                     <input
@@ -728,7 +724,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               </div>
 
               <div className="flex justify-between px-4 py-3 bg-navy text-white rounded-b-xl">
-                <span className="font-bold">Total net à payer (10)</span>
+                <span className="font-bold">Total net à payer</span>
                 <span className="font-mono font-bold">{money(totals.totalNet)} DT</span>
               </div>
             </div>

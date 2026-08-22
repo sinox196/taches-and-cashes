@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ClipboardCheck, Play, Loader } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { friendlyError } from '../../utils/errors';
 
 /**
  * Pending "mission + type de tâche" assignments for the logged-in viewer.
@@ -45,7 +46,7 @@ export const AssignedTasksCard: React.FC = () => {
       // moment that page is opened (it always fetches fresh on mount).
       setItems((prev) => prev.filter((a) => a.id !== id));
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setStartingId(null);
     }

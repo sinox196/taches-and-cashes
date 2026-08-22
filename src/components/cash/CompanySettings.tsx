@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Building2, Check, Loader, Trash2, Upload, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { CompanyBlock } from './invoicePdf';
+import { friendlyError } from '../../utils/errors';
 
 /**
  * The issuer identity printed at the foot of every document: company details,
@@ -12,14 +13,15 @@ import { CompanyBlock } from './invoicePdf';
  * MANAGE_CASH for the same reason.
  */
 
-const MAX_SIGNATURE_BYTES = 400_000;
+const MAX_IMAGE_BYTES = 400_000;
 
 /**
- * Downscales the picked image before it is stored. A phone photo of a signature
- * is several megabytes; the settings row is rewritten on every save and shipped
- * with every document, so it is resized to something a footer can actually use.
+ * Downscales a picked image before it is stored. A phone photo is several
+ * megabytes; the settings row is rewritten on every save and shipped with
+ * every document, so it is resized to something a footer/header can actually
+ * use. Shared by the logo and the signature — only the target box differs.
  */
-const prepareSignature = (file: File): Promise<string> =>
+const prepareImage = (file: File, maxW: number, maxH: number, tooLargeMessage: string): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Image illisible.'));
@@ -27,7 +29,6 @@ const prepareSignature = (file: File): Promise<string> =>
       const img = new Image();
       img.onerror = () => reject(new Error('Image illisible.'));
       img.onload = () => {
-        const maxW = 600, maxH = 300;
         const scale = Math.min(1, maxW / img.width, maxH / img.height);
         const canvas = document.createElement('canvas');
         canvas.width = Math.round(img.width * scale);
@@ -36,8 +37,8 @@ const prepareSignature = (file: File): Promise<string> =>
         if (!ctx) return reject(new Error('Traitement impossible.'));
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const out = canvas.toDataURL('image/png');
-        if (out.length > MAX_SIGNATURE_BYTES) {
-          return reject(new Error('Signature trop lourde même après réduction. Utilisez une image plus simple.'));
+        if (out.length > MAX_IMAGE_BYTES) {
+          return reject(new Error(tooLargeMessage));
         }
         resolve(out);
       };
@@ -49,6 +50,7 @@ const prepareSignature = (file: File): Promise<string> =>
 const EMPTY: CompanyBlock = {
   company: { name: '', address: '', taxId: '', email: '', phone: '' },
   bank: { name: '', iban: '' },
+  logo: '',
   signature: '',
 };
 
@@ -59,6 +61,7 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const logoFileRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -74,14 +77,25 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const setBank = (k: keyof CompanyBlock['bank'], v: string) =>
     setForm(f => ({ ...f, bank: { ...f.bank, [k]: v } }));
 
+  const pickLogo = async (file: File | undefined) => {
+    if (!file) return;
+    setError('');
+    try {
+      const logo = await prepareImage(file, 400, 200, 'Logo trop lourd même après réduction. Utilisez une image plus simple.');
+      setForm(f => ({ ...f, logo }));
+    } catch (e: any) {
+      setError(friendlyError(e));
+    }
+  };
+
   const pickSignature = async (file: File | undefined) => {
     if (!file) return;
     setError('');
     try {
-      const signature = await prepareSignature(file);
+      const signature = await prepareImage(file, 600, 300, 'Signature trop lourde même après réduction. Utilisez une image plus simple.');
       setForm(f => ({ ...f, signature }));
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     }
   };
 
@@ -99,7 +113,7 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setSaving(false);
     }
@@ -161,6 +175,45 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
                 {field('Banque', form.bank.name, v => setBank('name', v), 'Banque')}
                 {field('IBAN', form.bank.iban, v => setBank('iban', v), 'TN59 XXXX XXXX XXXX XXXX XXXX', true)}
               </div>
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-[11px] font-extrabold text-gray-800 uppercase tracking-[0.05em]">
+                Logo
+              </h3>
+              <div className="flex items-center gap-4">
+                <div className="w-40 h-20 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 shrink-0">
+                  {form.logo
+                    ? <img src={form.logo} alt="Logo" className="max-h-16 max-w-36 object-contain" />
+                    : <span className="text-[11px] text-gray-300">Aucun</span>}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={logoFileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={e => { pickLogo(e.target.files?.[0]); e.target.value = ''; }}
+                  />
+                  <button
+                    onClick={() => logoFileRef.current?.click()}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                  >
+                    <Upload className="w-3.5 h-3.5" /> Choisir une image
+                  </button>
+                  {form.logo && (
+                    <button
+                      onClick={() => setForm(f => ({ ...f, logo: '' }))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-red-600 hover:bg-red-50 flex items-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Retirer
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                PNG, JPEG ou WEBP. Affiché en en-tête de chaque document, à l'écran comme dans le PDF.
+              </p>
             </section>
 
             <section className="space-y-3">

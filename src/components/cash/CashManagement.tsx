@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
 import { CompanySettings } from './CompanySettings';
+import { friendlyError } from '../../utils/errors';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -51,7 +52,7 @@ export const CashManagement: React.FC = () => {
       setInvoices(body.data ?? []);
       setTotal(body.total ?? 0);
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setIsLoading(false);
     }

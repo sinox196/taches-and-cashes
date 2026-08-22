@@ -127,8 +127,8 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
               <th className="px-3 py-3 text-center">Intervenants</th>
               <th className="px-4 py-3">Durée</th>
               {isAdmin && <th className="px-4 py-3 text-right bg-emerald-50/40">Coût employeur</th>}
-              {isAdmin && <th className="px-4 py-3 text-right">Net à payer</th>}
               {isAdmin && <th className="px-4 py-3 text-right">Montant encaissé</th>}
+              {isAdmin && <th className="px-4 py-3 text-right">Net à payer</th>}
             </tr>
           </thead>
           <tbody className="text-[12.5px] divide-y divide-gray-100">
@@ -200,10 +200,17 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                         ) : (
                           <>
                             <span className="font-semibold text-gray-900">
-                              {formatCostTND(client.netToPay ?? 0)}
+                              {formatCostTND(client.totalPaid ?? 0)}
                             </span>
-                            <span className="block text-[10px] text-gray-400 font-normal">
-                              {client.invoiceCount} doc.
+                            {/* The remainder is what an admin actually chases. */}
+                            <span className={`block text-[10px] font-normal ${
+                              Math.abs(client.remainingToPay ?? 0) < 0.001
+                                ? 'text-emerald-600'
+                                : (client.remainingToPay ?? 0) < 0 ? 'text-amber-600' : 'text-gray-400'
+                            }`}>
+                              {Math.abs(client.remainingToPay ?? 0) < 0.001
+                                ? 'soldé'
+                                : `reste ${formatCostTND(client.remainingToPay ?? 0)}`}
                             </span>
                           </>
                         )}
@@ -216,17 +223,10 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                         ) : (
                           <>
                             <span className="font-semibold text-gray-900">
-                              {formatCostTND(client.totalPaid ?? 0)}
+                              {formatCostTND(client.netToPay ?? 0)}
                             </span>
-                            {/* The remainder is what an admin actually chases. */}
-                            <span className={`block text-[10px] font-normal ${
-                              Math.abs(client.remainingToPay ?? 0) < 0.001
-                                ? 'text-emerald-600'
-                                : (client.remainingToPay ?? 0) < 0 ? 'text-amber-600' : 'text-gray-400'
-                            }`}>
-                              {Math.abs(client.remainingToPay ?? 0) < 0.001
-                                ? 'soldé'
-                                : `reste ${formatCostTND(client.remainingToPay ?? 0)}`}
+                            <span className="block text-[10px] text-gray-400 font-normal">
+                              {client.invoiceCount} doc.
                             </span>
                           </>
                         )}

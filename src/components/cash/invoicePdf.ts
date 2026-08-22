@@ -18,6 +18,7 @@ import { amountToFrenchWords } from '../../utils/amountToWords';
 export interface CompanyBlock {
   company: { name: string; address: string; taxId: string; email: string; phone: string };
   bank: { name: string; iban: string };
+  logo: string;
   signature: string;
 }
 
@@ -78,16 +79,29 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); setInk(MUTED);
   text(`N° ${invoice.number || ''}`, RIGHT, y + 12, { align: 'right' });
 
+  // Logo, top-left, beside the issuer text rather than above it — that keeps
+  // the header's total height unchanged whether or not a logo is configured.
+  const companyX = block?.logo ? M + 28 : M;
+  if (block?.logo) {
+    try {
+      const fmt = /^data:image\/png/.test(block.logo) ? 'PNG'
+        : /^data:image\/webp/.test(block.logo) ? 'WEBP' : 'JPEG';
+      doc.addImage(block.logo, fmt, M, y, 24, 16, undefined, 'FAST');
+    } catch {
+      /* a corrupt data URL must not take the whole document down */
+    }
+  }
+
   // Issuer, top-left, from the settings block.
   if (block?.company?.name) {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); setInk(INK);
-    text(block.company.name, M, y + 5);
+    text(block.company.name, companyX, y + 5);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setInk(MUTED);
     let cy = y + 10;
-    for (const line of wrap(block.company.address, 80)) { text(line, M, cy); cy += 4; }
-    if (block.company.taxId) { text(`MF : ${block.company.taxId}`, M, cy); cy += 4; }
+    for (const line of wrap(block.company.address, 80 - (companyX - M))) { text(line, companyX, cy); cy += 4; }
+    if (block.company.taxId) { text(`MF : ${block.company.taxId}`, companyX, cy); cy += 4; }
     const contact = [block.company.email, block.company.phone].filter(Boolean).join('  ·  ');
-    if (contact) text(contact, M, cy);
+    if (contact) text(contact, companyX, cy);
   }
 
   y += 24;
@@ -173,29 +187,61 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
 
   // ---- totals ------------------------------------------------------------
   const tx = 120;
+  const totalsTop = y;
+
+  // Détail des taux de TVA — the same breakdown already shown in the invoice
+  // template, printed here too so the screen and the file can't disagree.
+  let breakdownBottom = totalsTop;
+  if (!suspended && (invoice.vatBreakdown || []).length > 0) {
+    const bx = M, bw = tx - 8 - M;
+    const c1 = bx + bw * 0.42, c2 = bx + bw;
+    let by = totalsTop;
+    doc.setFillColor(HEAD[0], HEAD[1], HEAD[2]);
+    doc.rect(bx, by, bw, 6, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setInk(MUTED);
+    text('TVA', bx + 2, by + 4.2);
+    text('BASE', c1, by + 4.2, { align: 'right' });
+    text('MONTANT', c2 - 2, by + 4.2, { align: 'right' });
+    by += 6;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setInk(INK);
+    for (const b of invoice.vatBreakdown) {
+      by += 5;
+      text(`${Math.round((b.rate || 0) * 100)} %`, bx + 2, by);
+      text(money(b.base), c1, by, { align: 'right' });
+      text(money(b.amount), c2 - 2, by, { align: 'right' });
+    }
+    doc.setDrawColor(LINE[0], LINE[1], LINE[2]); doc.setLineWidth(0.2);
+    doc.rect(bx, totalsTop, bw, by - totalsTop + 2);
+    breakdownBottom = by + 2;
+  } else if (suspended) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setInk(MUTED);
+    text('Suspension de TVA', M, totalsTop + 4);
+  }
+
   const row = (lbl: string, value: string, bold = false) => {
     doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(9);
     setInk(bold ? INK : MUTED); text(lbl, tx, y);
     setInk(INK); text(value, RIGHT, y, { align: 'right' });
     y += 5;
   };
-  row('Total HT (1)', money(invoice.totalHT));
-  row('Total TVA (2)', money(invoice.totalVAT));
-  row('Total TTC (3)', money(invoice.totalTTC), true);
+  row('Total HT', money(invoice.totalHT));
+  row('Total TVA', money(invoice.totalVAT));
+  row('Total TTC', money(invoice.totalTTC), true);
   if (invoice.withholdingAmount) {
-    row(`Retenue à la source (5) — ${((invoice.withholdingRate || 0) * 100).toLocaleString('fr-FR')} %`,
+    row(`Retenue à la source — ${((invoice.withholdingRate || 0) * 100).toLocaleString('fr-FR')} %`,
       `- ${money(invoice.withholdingAmount)}`);
   }
-  row('Timbre fiscal (6)', money(invoice.stampDuty));
-  row('Net à payer (7)', money(invoice.netToPay), true);
-  if (invoice.disbursements > 0) row('Remboursement de débours (8)', `+ ${money(invoice.disbursements)}`);
-  if (invoice.advances > 0) row('Moins avances perçues (9)', `- ${money(invoice.advances)}`);
+  row('Timbre fiscal', money(invoice.stampDuty));
+  row('Net à payer', money(invoice.netToPay), true);
+  if (invoice.disbursements > 0) row('Remboursement de débours', `+ ${money(invoice.disbursements)}`);
+  if (invoice.advances > 0) row('Moins avances perçues', `- ${money(invoice.advances)}`);
 
+  y = Math.max(y, breakdownBottom);
   y += 1;
   doc.setFillColor(INK[0], INK[1], INK[2]);
   doc.rect(tx - 4, y, RIGHT - tx + 4, 9, 'F');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(255, 255, 255);
-  text('Total net à payer (10)', tx, y + 6);
+  text('Total net à payer', tx, y + 6);
   text(`${money(invoice.totalNetToPay)} DT`, RIGHT - 2, y + 6, { align: 'right' });
   y += 15;
 

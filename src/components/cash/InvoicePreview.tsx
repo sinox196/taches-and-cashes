@@ -89,8 +89,11 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
         <div className="p-8 space-y-6">
           <div className="flex items-start justify-between gap-6">
             <div className="text-[11px] text-gray-400">
-              {/* Logo placeholder — the company logo comes from the account. */}
-              <div className="w-24 h-16 border border-dashed border-gray-200 rounded flex items-center justify-center">Logo</div>
+              {block?.logo ? (
+                <img src={block.logo} alt="Logo" className="max-h-16 max-w-40 object-contain" />
+              ) : (
+                <div className="w-24 h-16 border border-dashed border-gray-200 rounded flex items-center justify-center">Logo</div>
+              )}
             </div>
             <div className="text-right">
               <div className="text-[24px] font-bold text-gray-900 tracking-tight">{invoice.title}</div>
@@ -133,7 +136,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               <tbody className="divide-y divide-gray-100">
                 {(invoice.lines || []).map((l: any, i: number) => (
                   <tr key={i}>
-                    <td className="px-3 py-2 text-gray-900">{l.designation}</td>
+                    <td className="px-3 py-2 text-gray-900 whitespace-pre-wrap break-words">{l.designation}</td>
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{l.quantity}</td>}
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{money(l.unitPrice)}</td>}
                     {!suspended && <td className="px-3 py-2 text-right text-gray-600">{(l.vatRate * 100).toFixed(0)} %</td>}
@@ -176,16 +179,16 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
             </div>
 
             <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 text-[12.5px]">
-              <Row label="Total HT (1)" value={money(invoice.totalHT)} />
-              <Row label="Total TVA (2)" value={money(invoice.totalVAT)} />
-              <Row label="Total TTC (3)" value={money(invoice.totalTTC)} strong />
-              <Row label={`Retenue à la source (5) — ${(invoice.withholdingRate * 100).toLocaleString('fr-FR')} %`} value={`− ${money(invoice.withholdingAmount)}`} />
-              <Row label="Timbre fiscal (6)" value={money(invoice.stampDuty)} />
-              <Row label="Net à payer (7)" value={money(invoice.netToPay)} strong />
-              {invoice.disbursements > 0 && <Row label="Remboursement de débours (8)" value={`+ ${money(invoice.disbursements)}`} />}
-              {invoice.advances > 0 && <Row label="Moins avances perçues (9)" value={`− ${money(invoice.advances)}`} />}
+              <Row label="Total HT" value={money(invoice.totalHT)} />
+              <Row label="Total TVA" value={money(invoice.totalVAT)} />
+              <Row label="Total TTC" value={money(invoice.totalTTC)} strong />
+              <Row label={`Retenue à la source — ${(invoice.withholdingRate * 100).toLocaleString('fr-FR')} %`} value={`− ${money(invoice.withholdingAmount)}`} />
+              <Row label="Timbre fiscal" value={money(invoice.stampDuty)} />
+              <Row label="Net à payer" value={money(invoice.netToPay)} strong />
+              {invoice.disbursements > 0 && <Row label="Remboursement de débours" value={`+ ${money(invoice.disbursements)}`} />}
+              {invoice.advances > 0 && <Row label="Moins avances perçues" value={`− ${money(invoice.advances)}`} />}
               <div className="flex justify-between px-4 py-3 bg-navy text-white">
-                <span className="font-bold">Total net à payer (10)</span>
+                <span className="font-bold">Total net à payer</span>
                 <span className="font-mono font-bold">{money(invoice.totalNetToPay)} DT</span>
               </div>
             </div>

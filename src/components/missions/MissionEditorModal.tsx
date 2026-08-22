@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Trash2, X, Loader, ListChecks } from 'lucide-react';
+import { friendlyError } from '../../utils/errors';
 
 export interface Mission {
   id: number;
@@ -123,7 +124,7 @@ export const MissionEditorModal: React.FC<MissionEditorModalProps> = ({
       }
       onSaved(saved);
     } catch (e: any) {
-      setError(e.message || 'Une erreur est survenue');
+      setError(friendlyError(e, 'Une erreur est survenue'));
     } finally {
       setIsSaving(false);
     }
@@ -138,7 +139,7 @@ export const MissionEditorModal: React.FC<MissionEditorModalProps> = ({
       await request(`/api/services/${mission.id}`, 'DELETE');
       onDeleted?.(mission);
     } catch (e: any) {
-      setError(e.message || 'Suppression impossible');
+      setError(friendlyError(e, 'Suppression impossible'));
       setConfirmingDelete(false);
     } finally {
       setIsSaving(false);

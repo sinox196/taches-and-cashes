@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Clock, Check, Loader } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { usePresence } from '../context/PresenceContext';
+import { friendlyError } from '../utils/errors';
 import {
   DEFAULT_AWAY_AFTER_MINUTES,
   MIN_AWAY_AFTER_MINUTES,
@@ -55,7 +56,7 @@ export const PresenceSettingsCard: React.FC = () => {
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setSaving(false);
     }

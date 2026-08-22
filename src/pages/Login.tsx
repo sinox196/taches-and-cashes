@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Lock, User, Loader2, Globe } from 'lucide-react';
 import { Logo } from '../components/Logo';
+import { friendlyError } from '../utils/errors';
 
 export const Login: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -32,7 +33,7 @@ export const Login: React.FC = () => {
         setError(data.error || t('login.error'));
       }
     } catch (err) {
-      setError('An error occurred while connecting to the server.');
+      setError(friendlyError(err));
     } finally {
       setIsLoading(false);
     }

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, ChevronDown, Search, Loader, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { friendlyError } from '../utils/errors';
 
 /**
  * An admin hands a mission + type de tâche to a staff member. It shows up
@@ -123,7 +124,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
       setDone(true);
       onAssigned();
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setSaving(false);
     }

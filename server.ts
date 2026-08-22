@@ -271,8 +271,21 @@ async function startServer() {
       name: String(settings?.bank?.name || ''),
       iban: String(settings?.bank?.iban || ''),
     },
+    logo: typeof settings?.logo === 'string' ? settings.logo : '',
     signature: typeof settings?.signature === 'string' ? settings.signature : '',
   });
+
+  /** A logo/signature is a small inline image — anything else is refused rather than stored and later rendered. */
+  const validateInlineImage = (value: string, label: string) => {
+    if (value === '') return null; // explicit removal
+    if (!/^data:image\/(png|jpeg|webp);base64,/.test(value)) {
+      return `${label} doit être une image PNG, JPEG ou WEBP.`;
+    }
+    if (value.length > 400_000) {
+      return `${label} trop lourd(e) (400 Ko maximum).`;
+    }
+    return null;
+  };
 
   /** Readable by anyone who may see documents — they all carry this footer. */
   app.get('/api/cash/company', authenticate, requirePermission('VIEW_CASH'), async (_req: any, res: any) => {
@@ -289,17 +302,17 @@ async function startServer() {
       const body = req.body || {};
       const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
 
-      // A signature is a small inline image. Anything else — a remote URL, a
-      // script-bearing SVG — is refused rather than stored and later rendered.
+      // A signature/logo is a small inline image. Anything else — a remote
+      // URL, a script-bearing SVG — is refused rather than stored and later rendered.
       let signature = typeof body.signature === 'string' ? body.signature : undefined;
       if (signature !== undefined) {
-        if (signature === '') {
-          // explicit removal
-        } else if (!/^data:image\/(png|jpeg|webp);base64,/.test(signature)) {
-          return res.status(400).json({ error: 'La signature doit être une image PNG, JPEG ou WEBP.' });
-        } else if (signature.length > 400_000) {
-          return res.status(400).json({ error: 'Signature trop lourde (400 Ko maximum).' });
-        }
+        const err = validateInlineImage(signature, 'La signature');
+        if (err) return res.status(400).json({ error: err });
+      }
+      let logo = typeof body.logo === 'string' ? body.logo : undefined;
+      if (logo !== undefined) {
+        const err = validateInlineImage(logo, 'Le logo');
+        if (err) return res.status(400).json({ error: err });
       }
 
       const current = await db.getSettings();
@@ -315,6 +328,7 @@ async function startServer() {
           name: text(body.bank?.name, 120),
           iban: text(body.bank?.iban, 60),
         },
+        logo: logo !== undefined ? logo : (current?.logo ?? ''),
         signature: signature !== undefined ? signature : (current?.signature ?? ''),
       });
       res.json(companyBlock(updated));

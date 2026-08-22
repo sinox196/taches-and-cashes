@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Upload, FileSpreadsheet, Loader, Check, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { friendlyError } from '../../utils/errors';
 import {
   parseClientsWorkbook,
   guessMapping,
@@ -62,7 +63,7 @@ export const ImportClientsModal: React.FC<{ onClose: () => void; onImported: () 
       setMapping(guessMapping(parsed.headers));
       setStep('mapping');
     } catch (e: any) {
-      setError(e.message || 'Fichier illisible. Vérifiez que c’est bien un fichier Excel (.xlsx, .xls) ou CSV.');
+      setError(friendlyError(e, 'Fichier illisible. Vérifiez que c’est bien un fichier Excel (.xlsx, .xls) ou CSV.'));
     } finally {
       setParsing(false);
     }
@@ -115,7 +116,7 @@ export const ImportClientsModal: React.FC<{ onClose: () => void; onImported: () 
       setStep('result');
       onImported();
     } catch (e: any) {
-      setError(e.message);
+      setError(friendlyError(e));
     } finally {
       setImporting(false);
     }
@@ -250,7 +251,7 @@ export const ImportClientsModal: React.FC<{ onClose: () => void; onImported: () 
                 onChange={(e) => setSkipDuplicates(e.target.checked)}
                 className="rounded border-gray-300"
               />
-              Ignorer les doublons (même matricule fiscal, ou même nom si non renseigné)
+              Ne pas réimporter les clients déjà existants (selon le matricule fiscal ou le nom)
             </label>
 
             {error && (
