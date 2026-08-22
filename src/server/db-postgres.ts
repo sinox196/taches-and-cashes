@@ -60,6 +60,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   useful_links: { desc: false },
   echeance_columns: { desc: false },
   echeance_statuses: { desc: false },
+  echeance_status_options: { desc: false },
 };
 
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
@@ -82,6 +83,7 @@ const TABLE_FOR: Record<string, string> = {
   usefulLinks: 'useful_links',
   echeanceColumns: 'echeance_columns',
   echeanceStatuses: 'echeance_statuses',
+  echeanceStatusOptions: 'echeance_status_options',
 };
 
 function makePool(connectionString: string) {
@@ -195,6 +197,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const usefulLinks = collection('useful_links');
   const echeanceColumns = collection('echeance_columns');
   const echeanceStatuses = collection('echeance_statuses');
+  const echeanceStatusOptions = collection('echeance_status_options');
 
   const db: Database = {
     get: async (sql: string, param: any) => {
@@ -418,6 +421,11 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAllEcheanceStatuses: echeanceStatuses.all,
     createEcheanceStatus: echeanceStatuses.create,
     updateEcheanceStatus: echeanceStatuses.update,
+
+    getAllEcheanceStatusOptions: echeanceStatusOptions.all,
+    createEcheanceStatusOption: echeanceStatusOptions.create,
+    updateEcheanceStatusOption: echeanceStatusOptions.update,
+    deleteEcheanceStatusOption: echeanceStatusOptions.remove,
 
     getSettings: async () => {
       const rows = await q('SELECT data, invoice_counter FROM settings WHERE only_row');

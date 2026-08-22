@@ -71,6 +71,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.usefulLinks) db.usefulLinks = [];
     if (!db.echeanceColumns) db.echeanceColumns = [];
     if (!db.echeanceStatuses) db.echeanceStatuses = [];
+    if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
@@ -545,6 +546,28 @@ async function initJsonDb(): Promise<Database> {
       db.echeanceStatuses[index] = { ...db.echeanceStatuses[index], ...updates };
       await saveDb();
       return db.echeanceStatuses[index];
+    },
+
+    // The fixed-vocabulary status options — admin-editable, not hardcoded.
+    getAllEcheanceStatusOptions: async () => db.echeanceStatusOptions,
+    createEcheanceStatusOption: async (option: any) => {
+      db.echeanceStatusOptions.push(option);
+      await saveDb();
+      return option;
+    },
+    updateEcheanceStatusOption: async (id: string, updates: any) => {
+      const index = db.echeanceStatusOptions.findIndex((o: any) => o.id === id);
+      if (index === -1) return null;
+      db.echeanceStatusOptions[index] = { ...db.echeanceStatusOptions[index], ...updates };
+      await saveDb();
+      return db.echeanceStatusOptions[index];
+    },
+    deleteEcheanceStatusOption: async (id: string) => {
+      const index = db.echeanceStatusOptions.findIndex((o: any) => o.id === id);
+      if (index === -1) return false;
+      db.echeanceStatusOptions.splice(index, 1);
+      await saveDb();
+      return true;
     },
 
     // Settings CRUD

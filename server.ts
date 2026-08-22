@@ -257,6 +257,29 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
     const [month, label] = E2025[i];
     await seedColumn(`ec-seed-2025-${i}`, 2025, month, label, i);
   }
+
+  // The status vocabulary a cell can be set to — admin-editable from here on,
+  // this only seeds the starting set (and its colors) on first boot.
+  const existingStatusOptions = await db.getAllEcheanceStatusOptions();
+  const seedStatusOption = async (id: string, label: string, sortOrder: number, color: string) => {
+    if (existingStatusOptions.some((o: any) => o.id === id)) return;
+    await db.createEcheanceStatusOption({ id, label, sortOrder, color });
+  };
+  await seedStatusOption('ecs-opt-seed-0', 'Oui', 0, 'done');
+  await seedStatusOption('ecs-opt-seed-1', "Client non concerné par l'échéance", 1, 'gray');
+  await seedStatusOption('ecs-opt-seed-2', 'DEFAUT', 2, 'late');
+  await seedStatusOption('ecs-opt-seed-3', 'Préparée (en attente de confirmation client)', 3, 'run');
+
+  // Backfills a color on options created before this field existed (any
+  // database that already ran this seed once) — same idea as
+  // normalizeBalance() recovering a legacy shape, just for this collection.
+  const colorKeys = ['done', 'late', 'run', 'pause', 'admin', 'collab', 'gray'];
+  const allStatusOptions = await db.getAllEcheanceStatusOptions();
+  for (let i = 0; i < allStatusOptions.length; i++) {
+    if (!allStatusOptions[i].color) {
+      await db.updateEcheanceStatusOption(allStatusOptions[i].id, { color: colorKeys[i % colorKeys.length] });
+    }
+  }
 }
 
 async function startServer() {
@@ -3304,8 +3327,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // (client, column). No recurrence engine, no generated instances — every
   // cell is set directly, the same shape as the cabinet's own spreadsheet.
 
-  const ECHEANCE_STATUSES = ['Oui', 'Client non concerné par l\'échéance', 'DEFAUT', 'Préparée (en attente de confirmation client)', 'CHEZ BC'];
-
   app.get('/api/echeance-columns', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
       let columns = await db.getAllEcheanceColumns();
@@ -3381,8 +3402,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const { clientId, columnId, status } = req.body;
       if (clientId == null || !columnId) return res.status(400).json({ error: 'Client et colonne requis' });
-      if (status !== null && status !== '' && !ECHEANCE_STATUSES.includes(status)) {
-        return res.status(400).json({ error: 'Statut invalide' });
+      if (status !== null && status !== '') {
+        const validLabels = (await db.getAllEcheanceStatusOptions()).map((o: any) => o.label);
+        if (!validLabels.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
       }
       const normalizedStatus = status === '' ? null : status;
       const existing = (await db.getAllEcheanceStatuses())
@@ -3395,6 +3417,75 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         id: genId('ecs'), clientId: Number(clientId), columnId, status: normalizedStatus,
       });
       res.status(201).json(created);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // The status vocabulary itself — admin-editable rather than a hardcoded
+  // list, so the cabinet can rename, recolor, or drop a value without a code
+  // change. Removing an option never touches cells already set to it; they
+  // just no longer match a known option (rendered muted) until re-set from
+  // the grid. Colors are a fixed set of keys into the app's own reserved
+  // status-pill tokens (run/done/pause/late/admin/collab), never a raw hex —
+  // the whole point of those tokens is that no screen invents its own color.
+  const ECHEANCE_STATUS_COLORS = ['done', 'late', 'run', 'pause', 'admin', 'collab', 'gray'];
+
+  app.get('/api/echeance-status-options', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const options = await db.getAllEcheanceStatusOptions();
+      res.json(options.sort((a: any, b: any) => a.sortOrder - b.sortOrder));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/echeance-status-options', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const label = String(req.body?.label || '').trim();
+      if (!label) return res.status(400).json({ error: 'Le libellé est requis' });
+      const existing = await db.getAllEcheanceStatusOptions();
+      if (existing.some((o: any) => o.label === label)) return res.status(400).json({ error: 'Cette valeur existe déjà' });
+      const color = ECHEANCE_STATUS_COLORS.includes(req.body?.color)
+        ? req.body.color
+        : ECHEANCE_STATUS_COLORS[existing.length % ECHEANCE_STATUS_COLORS.length];
+      const option = await db.createEcheanceStatusOption({ id: genId('ecso'), label, color, sortOrder: existing.length });
+      res.status(201).json(option);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/echeance-status-options/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const updates: any = {};
+      if (req.body?.label !== undefined) {
+        const label = String(req.body.label).trim();
+        if (!label) return res.status(400).json({ error: 'Le libellé est requis' });
+        const existing = await db.getAllEcheanceStatusOptions();
+        if (existing.some((o: any) => o.label === label && o.id !== req.params.id)) {
+          return res.status(400).json({ error: 'Cette valeur existe déjà' });
+        }
+        updates.label = label;
+      }
+      if (req.body?.color !== undefined) {
+        if (!ECHEANCE_STATUS_COLORS.includes(req.body.color)) return res.status(400).json({ error: 'Couleur invalide' });
+        updates.color = req.body.color;
+      }
+      if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Rien à modifier' });
+      const updated = await db.updateEcheanceStatusOption(req.params.id, updates);
+      if (!updated) return res.status(404).json({ error: 'Not found' });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/echeance-status-options/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteEcheanceStatusOption(req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

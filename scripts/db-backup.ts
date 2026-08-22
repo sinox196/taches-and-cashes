@@ -52,6 +52,7 @@ try {
     usefulLinks: await db.getAllUsefulLinks(),
     echeanceColumns: await db.getAllEcheanceColumns(),
     echeanceStatuses: await db.getAllEcheanceStatuses(),
+    echeanceStatusOptions: await db.getAllEcheanceStatusOptions(),
     settings: await db.getSettings(),
   };
 

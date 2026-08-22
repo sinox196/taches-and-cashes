@@ -220,7 +220,7 @@ export const DocumentTemplatesManager: React.FC<DocumentTemplatesManagerProps> =
                         selectedId === t.id ? 'bg-navy/[0.06]' : 'hover:bg-gray-50'
                       }`}
                     >
-                      <div className={`text-[13px] font-medium truncate ${selectedId === t.id ? 'text-navy' : 'text-gray-800'}`}>
+                      <div className={`text-[13px] font-medium leading-snug break-words ${selectedId === t.id ? 'text-navy' : 'text-gray-800'}`}>
                         {t.name}
                       </div>
                       <div className="text-[11px] text-gray-400 mt-0.5">

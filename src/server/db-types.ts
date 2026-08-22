@@ -125,6 +125,12 @@ export interface Database {
   createEcheanceStatus(status: any): Promise<any>;
   updateEcheanceStatus(id: string, updates: any): Promise<any | null>;
 
+  /** The fixed-vocabulary options a status cell can be set to — admin-editable, not hardcoded. */
+  getAllEcheanceStatusOptions(): Promise<any[]>;
+  createEcheanceStatusOption(option: any): Promise<any>;
+  updateEcheanceStatusOption(id: string, updates: any): Promise<any | null>;
+  deleteEcheanceStatusOption(id: string): Promise<boolean>;
+
   getSettings(): Promise<any>;
   updateSettings(updates: any): Promise<any>;
 
@@ -174,6 +180,7 @@ export const emptyDb = () => ({
   usefulLinks: [],
   echeanceColumns: [],
   echeanceStatuses: [],
+  echeanceStatusOptions: [],
   settings: defaultSettings(),
 });
 
