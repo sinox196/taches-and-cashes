@@ -19,6 +19,7 @@ import { ResourcesManagement } from './components/resources/ResourcesManagement'
 import { useAuth } from './context/AuthContext';
 import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
+import { Landing } from './pages/Landing';
 import { Loader2, ClipboardCheck } from 'lucide-react';
 
 import {
@@ -34,7 +35,12 @@ import {
 
 export default function App() {
   const { user, token, isLoading, hasPermission } = useAuth();
-  
+
+  // Shown only while logged out — the public marketing/pricing page, or the
+  // login form reached from it via "Se connecter". Distinct from
+  // activeSidebarItem, which only ever applies to the authenticated shell.
+  const [publicScreen, setPublicScreen] = useState<'landing' | 'login'>('landing');
+
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
   const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users'];
@@ -398,7 +404,9 @@ export default function App() {
   }
 
   if (!user || !token) {
-    return <Login />;
+    return publicScreen === 'login'
+      ? <Login onBack={() => setPublicScreen('landing')} />
+      : <Landing onLogin={() => setPublicScreen('login')} />;
   }
 
   return (

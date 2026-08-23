@@ -61,6 +61,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   echeance_columns: { desc: false },
   echeance_statuses: { desc: false },
   echeance_status_options: { desc: false },
+  orders: { desc: true },
 };
 
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
@@ -84,6 +85,7 @@ const TABLE_FOR: Record<string, string> = {
   echeanceColumns: 'echeance_columns',
   echeanceStatuses: 'echeance_statuses',
   echeanceStatusOptions: 'echeance_status_options',
+  orders: 'orders',
 };
 
 function makePool(connectionString: string) {
@@ -198,6 +200,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const echeanceColumns = collection('echeance_columns');
   const echeanceStatuses = collection('echeance_statuses');
   const echeanceStatusOptions = collection('echeance_status_options');
+  const orders = collection('orders');
 
   const db: Database = {
     get: async (sql: string, param: any) => {
@@ -426,6 +429,9 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     createEcheanceStatusOption: echeanceStatusOptions.create,
     updateEcheanceStatusOption: echeanceStatusOptions.update,
     deleteEcheanceStatusOption: echeanceStatusOptions.remove,
+
+    getAllOrders: orders.all,
+    createOrder: orders.create,
 
     getSettings: async () => {
       const rows = await q('SELECT data, invoice_counter FROM settings WHERE only_row');

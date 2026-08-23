@@ -53,6 +53,7 @@ try {
     echeanceColumns: await db.getAllEcheanceColumns(),
     echeanceStatuses: await db.getAllEcheanceStatuses(),
     echeanceStatusOptions: await db.getAllEcheanceStatusOptions(),
+    orders: await db.getAllOrders(),
     settings: await db.getSettings(),
   };
 

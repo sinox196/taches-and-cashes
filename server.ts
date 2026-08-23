@@ -8,6 +8,7 @@ import {
 } from './src/constants/presence.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { sendMail } from './src/server/email.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-local-dev';
 
@@ -3487,6 +3488,63 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // --- Public landing page: "Créer un compte" / "Essai gratuit" requests.
+  // No account or company is provisioned here — that needs the multi-tenant
+  // model this app doesn't have yet. This just records the request and
+  // notifies contact@taches-and-cash.com; a human follows up manually once
+  // payment is confirmed, the same "sales-assisted for now" reality the
+  // landing page's confirmation copy is upfront about.
+  const escapeHtml = (v: string) => v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+
+  app.post('/api/orders', async (req: any, res: any) => {
+    try {
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      // Honeypot: a field real visitors never see or fill. A bot that fills
+      // every input on the form fills this too — accept silently, do nothing.
+      if (text(req.body?.website, 200)) return res.status(201).json({ reference: null, emailSent: false });
+
+      const contactName = text(req.body?.name, 120);
+      const contactEmail = text(req.body?.email, 160);
+      const companyName = text(req.body?.company, 160);
+      const plan = text(req.body?.plan, 40);
+      const message = text(req.body?.message, 1000);
+
+      if (!contactName || !contactEmail || !companyName || !plan) {
+        return res.status(400).json({ error: 'Nom, email, entreprise et offre sont requis' });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+        return res.status(400).json({ error: 'Adresse email invalide' });
+      }
+
+      const existing = await db.getAllOrders();
+      const reference = `TC-${new Date().getFullYear()}-${String(existing.length + 1).padStart(4, '0')}`;
+
+      await db.createOrder({
+        id: genId('order'),
+        plan, contactName, contactEmail, companyName, message,
+        reference, status: 'PENDING', createdAt: new Date().toISOString(),
+      });
+
+      const { sent } = await sendMail({
+        to: 'contact@taches-and-cash.com',
+        subject: `Nouvelle demande — ${plan} (${reference})`,
+        html: `
+          <p><strong>Référence :</strong> ${escapeHtml(reference)}</p>
+          <p><strong>Offre :</strong> ${escapeHtml(plan)}</p>
+          <p><strong>Nom :</strong> ${escapeHtml(contactName)}</p>
+          <p><strong>Email :</strong> ${escapeHtml(contactEmail)}</p>
+          <p><strong>Entreprise :</strong> ${escapeHtml(companyName)}</p>
+          ${message ? `<p><strong>Message :</strong> ${escapeHtml(message)}</p>` : ''}
+        `,
+      });
+
+      res.status(201).json({ reference, emailSent: sent });
+    } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

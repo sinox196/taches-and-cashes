@@ -72,6 +72,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.echeanceColumns) db.echeanceColumns = [];
     if (!db.echeanceStatuses) db.echeanceStatuses = [];
     if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
+    if (!db.orders) db.orders = [];
     if (!db.settings) db.settings = defaultSettings();
     if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
   } catch (error: any) {
@@ -568,6 +569,13 @@ async function initJsonDb(): Promise<Database> {
       db.echeanceStatusOptions.splice(index, 1);
       await saveDb();
       return true;
+    },
+
+    getAllOrders: async () => db.orders,
+    createOrder: async (order: any) => {
+      db.orders.push(order);
+      await saveDb();
+      return order;
     },
 
     // Settings CRUD

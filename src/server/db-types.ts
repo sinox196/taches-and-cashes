@@ -131,6 +131,10 @@ export interface Database {
   updateEcheanceStatusOption(id: string, updates: any): Promise<any | null>;
   deleteEcheanceStatusOption(id: string): Promise<boolean>;
 
+  /** A "Créer un compte" / "Essai gratuit" request from the public landing page. */
+  getAllOrders(): Promise<any[]>;
+  createOrder(order: any): Promise<any>;
+
   getSettings(): Promise<any>;
   updateSettings(updates: any): Promise<any>;
 
@@ -181,6 +185,7 @@ export const emptyDb = () => ({
   echeanceColumns: [],
   echeanceStatuses: [],
   echeanceStatusOptions: [],
+  orders: [],
   settings: defaultSettings(),
 });
 

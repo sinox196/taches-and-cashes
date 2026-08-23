@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Lock, User, Loader2, Globe } from 'lucide-react';
+import { Lock, User, Loader2, Globe, ArrowLeft } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { friendlyError } from '../utils/errors';
 
-export const Login: React.FC = () => {
+interface LoginProps {
+  onBack?: () => void;
+}
+
+export const Login: React.FC<LoginProps> = ({ onBack }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -41,6 +45,14 @@ export const Login: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-canvas flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans antialiased relative">
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="absolute top-4 left-4 flex items-center gap-1.5 text-[13px] font-medium text-gray-500 hover:text-navy transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> Retour à l'accueil
+        </button>
+      )}
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <Globe className="w-5 h-5 text-gray-500" />
         <select 
