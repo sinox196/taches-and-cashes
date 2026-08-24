@@ -3795,7 +3795,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       const { sent } = await sendMail({
         to: company.contactEmail,
-        from: 'support@taches-and-cash.com',
         subject: `Coordonnées de paiement — ${plan}`,
         html: `
           <p>Bonjour ${escapeHtml(company.contactName || '')},</p>
@@ -3847,7 +3846,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       const { sent } = await sendMail({
         to: company.contactEmail,
-        from: 'support@taches-and-cash.com',
         subject: 'Votre abonnement Tâches & Cash est activé',
         html: `
           <p>Bonjour ${escapeHtml(company.contactName || '')},</p>

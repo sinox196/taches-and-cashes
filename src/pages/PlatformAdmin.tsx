@@ -77,6 +77,7 @@ export const PlatformAdmin: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Envoi impossible.');
+      if (!data.emailSent) throw new Error("L'email n'a pas pu être envoyé (SMTP indisponible ou refusé) — vérifiez la configuration ou envoyez le RIB manuellement.");
       await load();
     } catch (e) {
       setError(friendlyError(e, "Impossible d'envoyer le RIB."));
