@@ -111,7 +111,12 @@ function makePool(connectionString: string) {
     // Node bundle does not chain to. Verification is relaxed only for those
     // hosted URLs, never for a local one.
     ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
-    max: 10,
+    // Raised from 10 after a load test showed requests queuing behind the
+    // pool (tail latency into the tens of seconds past ~25 concurrent
+    // requests) well before CPU/RAM were remotely stressed on the current
+    // Railway plan. Managed Postgres here defaults to 100 max_connections,
+    // so 50 from this single app instance still leaves headroom.
+    max: 50,
   });
 }
 
