@@ -12,7 +12,8 @@ import {
   Layers,
   Globe,
   MessageCircle,
-  FileCheck2
+  FileCheck2,
+  Building2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -30,7 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectItem,
   unreadMessages = 0,
 }) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const { t, language, setLanguage } = useLanguage();
 
   // Every authenticated user gets a "Dashboard" entry: DASHBOARD_ROLES see the
@@ -49,6 +50,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   if (hasPermission('MANAGE_USERS')) {
     mainNavItems.push({ id: 'Users', label: t('nav.users'), icon: ShieldAlert, hasChevron: false });
+  }
+
+  // Orthogonal to any company-scoped permission: runs the platform itself
+  // (confirms other companies' payments), not this user's own company.
+  if (user?.isPlatformAdmin) {
+    mainNavItems.push({ id: 'Plateforme', label: 'Plateforme', icon: Building2, hasChevron: false });
   }
 
   return (

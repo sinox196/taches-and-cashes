@@ -19,6 +19,10 @@ export interface User {
   soldeConge?: number;
   congesUtilises?: number;
   congesRestants?: number;
+  /** Runs the platform itself (confirms other companies' payments) — orthogonal to `role`, which is scoped to this user's own company. */
+  isPlatformAdmin?: boolean;
+  /** This user's own company — trial status, plan, deadline. Absent for a pre-migration /api/login response shape. */
+  company?: { id: string; name: string; status: string; plan: string; trialEndsAt: string | null } | null;
 }
 
 interface AuthContextType {
@@ -58,10 +62,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userData = await response.json();
           setUser(userData);
         } else {
-          // Invalid token
+          // Invalid token, or a company that expired mid-session (authenticate
+          // rejects before /api/me's own handler runs either way) — surface
+          // the server's own message (e.g. the trial-expired notice) when
+          // there is one, rather than a generic "session expired" for both.
+          const data = await response.json().catch(() => ({}));
           setToken(null);
           setUser(null);
-          setAuthMessage('Votre session a expiré. Veuillez vous reconnecter.');
+          setAuthMessage(data.error || 'Votre session a expiré. Veuillez vous reconnecter.');
           localStorage.removeItem('auth_token');
         }
       } catch (error) {

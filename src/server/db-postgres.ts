@@ -4,8 +4,10 @@ import {
   Database,
   DEFAULT_LEAVE_ENTITLEMENT,
   defaultSettings,
+  defaultPlatformSettings,
   normalizeBalance,
   seedDefaults,
+  LEGACY_COMPANY_ID,
 } from './db-types.js';
 
 /**
@@ -36,12 +38,22 @@ import {
  * The JSON store appended with `push` but used `unshift` for time entries and
  * invoices, so those two read back newest-first and the rest oldest-first.
  * `seq` reproduces that exactly — see ORDER in `collection()` below.
+ *
+ * ## Multi-tenant
+ *
+ * Every per-tenant table carries `companyId` inside its own `data` JSONB
+ * blob — no schema change beyond an expression index — and every read/write
+ * goes through `tenantCollection()`, which filters/stamps it the same way
+ * `database.ts`'s JSON backend's `scoped()`/`findScoped()` do. `companies`
+ * and `orders` are the only genuinely cross-tenant tables, using the plain
+ * `collection()` helper with no companyId at all.
  */
 
 const { Pool } = pg;
 
 /** Collections stored as (id, seq, data). `desc` mirrors the old `unshift`. */
 const COLLECTIONS: Record<string, { desc: boolean }> = {
+  companies: { desc: false },
   users: { desc: false },
   clients: { desc: false },
   services: { desc: false },
@@ -64,8 +76,12 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   orders: { desc: true },
 };
 
+/** Tables scoped by companyId (everything except `companies` and `orders`). */
+const TENANT_TABLES = new Set(Object.keys(COLLECTIONS).filter(t => t !== 'companies' && t !== 'orders'));
+
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
 const TABLE_FOR: Record<string, string> = {
+  companies: 'companies',
   users: 'users',
   clients: 'clients',
   services: 'services',
@@ -112,19 +128,79 @@ async function ensureSchema(pool: pg.Pool) {
       data JSONB NOT NULL
     )`);
   }
+
+  // leave_balances: composite key (company_id, user_id) — two different
+  // companies' independently-minted numeric user ids can otherwise collide.
   await q(`CREATE TABLE IF NOT EXISTS leave_balances (
-    user_id     BIGINT PRIMARY KEY,
+    company_id  TEXT NOT NULL DEFAULT '${LEGACY_COMPANY_ID}',
+    user_id     BIGINT NOT NULL,
     entitlement DOUBLE PRECISION NOT NULL,
-    used        DOUBLE PRECISION NOT NULL DEFAULT 0
+    used        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    PRIMARY KEY (company_id, user_id)
   )`);
-  // Settings is a singleton; the CHECK makes a second row impossible.
+  // Migrates a pre-multi-tenant table (old PK was bare user_id) — a no-op once already migrated.
+  await q(`DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name = 'leave_balances' AND constraint_type = 'PRIMARY KEY' AND constraint_name = 'leave_balances_pkey'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.key_column_usage
+        WHERE table_name = 'leave_balances' AND constraint_name = 'leave_balances_pkey' AND column_name = 'company_id'
+      ) THEN
+        ALTER TABLE leave_balances DROP CONSTRAINT leave_balances_pkey;
+        UPDATE leave_balances SET company_id = '${LEGACY_COMPANY_ID}' WHERE company_id IS NULL;
+        ALTER TABLE leave_balances ADD PRIMARY KEY (company_id, user_id);
+      END IF;
+    END $$;`);
+
+  // settings: one row per company, keyed by company_id. Was a global
+  // singleton (only_row BOOLEAN PRIMARY KEY CHECK(only_row)) — migrated in
+  // place rather than dropped, so the legacy cabinet's own charges/company/
+  // bank/logo/signature survive under company-1.
   await q(`CREATE TABLE IF NOT EXISTS settings (
-    only_row        BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (only_row),
+    company_id      TEXT PRIMARY KEY,
     data            JSONB   NOT NULL,
     invoice_counter BIGINT  NOT NULL DEFAULT 0
   )`);
-  await q(`INSERT INTO settings (only_row, data) VALUES (TRUE, $1)
-           ON CONFLICT (only_row) DO NOTHING`, [JSON.stringify(defaultSettings())]);
+  await q(`DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'settings' AND column_name = 'only_row') THEN
+        ALTER TABLE settings ADD COLUMN IF NOT EXISTS company_id TEXT;
+        UPDATE settings SET company_id = '${LEGACY_COMPANY_ID}' WHERE company_id IS NULL;
+        ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_pkey;
+        ALTER TABLE settings ALTER COLUMN company_id SET NOT NULL;
+        ALTER TABLE settings ADD PRIMARY KEY (company_id);
+        ALTER TABLE settings DROP COLUMN IF EXISTS only_row;
+      END IF;
+    END $$;`);
+  await q(`INSERT INTO settings (company_id, data) VALUES ($1, $2)
+           ON CONFLICT (company_id) DO NOTHING`, [LEGACY_COMPANY_ID, JSON.stringify(defaultSettings())]);
+
+  // The platform's own receiving bank details — a genuine global singleton,
+  // distinct from any one company's Cash issuer settings above.
+  await q(`CREATE TABLE IF NOT EXISTS platform_settings (
+    only_row BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (only_row),
+    data     JSONB   NOT NULL
+  )`);
+  await q(`INSERT INTO platform_settings (only_row, data) VALUES (TRUE, $1)
+           ON CONFLICT (only_row) DO NOTHING`, [JSON.stringify(defaultPlatformSettings())]);
+
+  // The legacy cabinet's own company row.
+  await q(
+    `INSERT INTO companies (id, data) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+    [LEGACY_COMPANY_ID, JSON.stringify({
+      id: LEGACY_COMPANY_ID, name: 'Cabinet', status: 'ACTIVE', plan: 'LEGACY',
+      seatLimit: 999, createdAt: new Date().toISOString(), trialEndsAt: null,
+    })],
+  );
+
+  // One-time (idempotent) backfill: every pre-migration row in a tenant table
+  // gets stamped with the legacy cabinet's companyId — a no-op once every row
+  // already has one, so re-running it on every boot is always safe.
+  for (const table of TENANT_TABLES) {
+    await q(`UPDATE ${table} SET data = data || jsonb_build_object('companyId', $1) WHERE data->>'companyId' IS NULL`, [LEGACY_COMPANY_ID]);
+  }
 
   // Indexes for the lookups that run on every request.
   await q(`CREATE UNIQUE INDEX IF NOT EXISTS users_username_idx ON users ((data->>'username'))`);
@@ -138,6 +214,9 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`CREATE INDEX IF NOT EXISTS client_resource_item_statuses_instance_idx ON client_resource_item_statuses ((data->>'instanceId'))`);
   await q(`CREATE INDEX IF NOT EXISTS echeance_statuses_client_idx ON echeance_statuses ((data->>'clientId'))`);
   await q(`CREATE INDEX IF NOT EXISTS echeance_statuses_column_idx ON echeance_statuses ((data->>'columnId'))`);
+  for (const table of TENANT_TABLES) {
+    await q(`CREATE INDEX IF NOT EXISTS ${table}_company_idx ON ${table} ((data->>'companyId'))`);
+  }
 }
 
 export async function initPostgres(connectionString: string): Promise<Database> {
@@ -146,10 +225,11 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   await ensureSchema(pool);
 
   /**
-   * Generic CRUD over one collection. The `id` column is TEXT so numeric and
-   * string ids share one code path, but the id *inside* `data` keeps its
-   * original JSON type — which is what lets `server.ts` keep comparing client
-   * ids with `===` against numbers.
+   * Generic CRUD over one *cross-tenant* collection (companies, orders) — no
+   * companyId anywhere. The `id` column is TEXT so numeric and string ids
+   * share one code path, but the id *inside* `data` keeps its original JSON
+   * type — which is what lets `server.ts` keep comparing client ids with
+   * `===` against numbers.
    */
   const collection = (table: string) => {
     const order = `ORDER BY seq ${COLLECTIONS[table].desc ? 'DESC' : 'ASC'}`;
@@ -165,9 +245,6 @@ export async function initPostgres(connectionString: string): Promise<Database> 
         return record;
       },
       update: async (id: any, updates: any) => {
-        // `||` is a shallow JSONB merge — the same semantics as { ...old, ...updates }.
-        // Doing it in one statement makes read-modify-write atomic, so two
-        // concurrent edits can no longer lose one another.
         const rows = await q(
           `UPDATE ${table} SET data = data || $2::jsonb WHERE id = $1 RETURNING data`,
           [String(id), JSON.stringify(updates)],
@@ -181,36 +258,76 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     };
   };
 
-  const users = collection('users');
-  const clients = collection('clients');
-  const services = collection('services');
-  const taskTypes = collection('task_types');
-  const invoices = collection('invoices');
-  const leaveRequests = collection('leave_requests');
-  const absences = collection('absence_authorizations');
-  const timeEntries = collection('time_entries');
-  const messages = collection('messages');
-  const taskAssignments = collection('task_assignments');
-  const notifications = collection('notifications');
-  const resourceTemplates = collection('resource_templates');
-  const resourceTemplateItems = collection('resource_template_items');
-  const clientResourceInstances = collection('client_resource_instances');
-  const clientResourceItemStatuses = collection('client_resource_item_statuses');
-  const usefulLinks = collection('useful_links');
-  const echeanceColumns = collection('echeance_columns');
-  const echeanceStatuses = collection('echeance_statuses');
-  const echeanceStatusOptions = collection('echeance_status_options');
+  /**
+   * Generic CRUD over one *tenant-scoped* collection — every method takes
+   * companyId and every query filters/stamps by it, mirroring
+   * `database.ts`'s `scoped()`/`findScoped()`/`indexScoped()` for the JSON
+   * backend. `byId`/`update`/`remove` filter by companyId in the same
+   * statement as the id match, not as a separate check — a token from
+   * company A can never touch a row from company B, full stop.
+   */
+  const tenantCollection = (table: string) => {
+    const order = `ORDER BY seq ${COLLECTIONS[table].desc ? 'DESC' : 'ASC'}`;
+    return {
+      all: async (companyId: string) =>
+        (await q(`SELECT data FROM ${table} WHERE data->>'companyId' = $1 ${order}`, [companyId])).map(r => r.data),
+      byId: async (companyId: string, id: any) => {
+        const rows = await q(`SELECT data FROM ${table} WHERE id = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
+        return rows.length ? rows[0].data : undefined;
+      },
+      create: async (companyId: string, record: any) => {
+        const row = { ...record, companyId };
+        await q(`INSERT INTO ${table} (id, data) VALUES ($1, $2)`, [String(row.id), JSON.stringify(row)]);
+        return row;
+      },
+      update: async (companyId: string, id: any, updates: any) => {
+        const rows = await q(
+          `UPDATE ${table} SET data = data || $3::jsonb WHERE id = $1 AND data->>'companyId' = $2 RETURNING data`,
+          [String(id), companyId, JSON.stringify(updates)],
+        );
+        return rows.length ? rows[0].data : null;
+      },
+      remove: async (companyId: string, id: any) => {
+        const res = await pool.query(`DELETE FROM ${table} WHERE id = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
+        return (res.rowCount ?? 0) > 0;
+      },
+    };
+  };
+
+  const companies = collection('companies');
   const orders = collection('orders');
 
+  const users = tenantCollection('users');
+  const clients = tenantCollection('clients');
+  const services = tenantCollection('services');
+  const taskTypes = tenantCollection('task_types');
+  const invoices = tenantCollection('invoices');
+  const leaveRequests = tenantCollection('leave_requests');
+  const absences = tenantCollection('absence_authorizations');
+  const timeEntries = tenantCollection('time_entries');
+  const messages = tenantCollection('messages');
+  const taskAssignments = tenantCollection('task_assignments');
+  const notifications = tenantCollection('notifications');
+  const resourceTemplates = tenantCollection('resource_templates');
+  const resourceTemplateItems = tenantCollection('resource_template_items');
+  const clientResourceInstances = tenantCollection('client_resource_instances');
+  const clientResourceItemStatuses = tenantCollection('client_resource_item_statuses');
+  const usefulLinks = tenantCollection('useful_links');
+  const echeanceColumns = tenantCollection('echeance_columns');
+  const echeanceStatuses = tenantCollection('echeance_statuses');
+  const echeanceStatusOptions = tenantCollection('echeance_status_options');
+
   const db: Database = {
-    get: async (sql: string, param: any) => {
-      if (sql.includes('WHERE username = ?')) {
-        const rows = await q(`SELECT data FROM users WHERE data->>'username' = $1`, [String(param)]);
-        return rows.length ? rows[0].data : undefined;
-      }
-      if (sql.includes('WHERE id = ?')) return users.byId(param);
-      return null;
+    getUserByUsername: async (username: string) => {
+      const rows = await q(`SELECT data FROM users WHERE data->>'username' = $1`, [String(username)]);
+      return rows.length ? rows[0].data : undefined;
     },
+    getUserById: users.byId,
+
+    getAllCompanies: companies.all,
+    getCompanyById: companies.byId,
+    createCompany: companies.create,
+    updateCompany: companies.update,
 
     getAllUsers: users.all,
     createUser: users.create,
@@ -227,14 +344,14 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getServiceById: services.byId,
     createService: services.create,
     updateService: services.update,
-    deleteService: async (id: number) => {
+    deleteService: async (companyId: string, id: number) => {
       // Cascade: a type de tâche has no meaning without its mission. One
       // transaction, so a crash can't leave orphaned types behind.
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const res = await client.query('DELETE FROM services WHERE id = $1', [String(id)]);
-        await client.query(`DELETE FROM task_types WHERE data->>'serviceId' = $1`, [String(id)]);
+        const res = await client.query(`DELETE FROM services WHERE id = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
+        await client.query(`DELETE FROM task_types WHERE data->>'serviceId' = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
         await client.query('COMMIT');
         return (res.rowCount ?? 0) > 0;
       } catch (e) {
@@ -257,14 +374,20 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     updateInvoice: invoices.update,
     deleteInvoice: invoices.remove,
     /**
-     * A single atomic increment. The JSON version read, added one and wrote
-     * back, so two documents created at the same moment could take the same
-     * legal number — the one thing a facture légale must never do.
+     * A single atomic increment, per company. The JSON version read, added
+     * one and wrote back, so two documents created at the same moment could
+     * take the same legal number — the one thing a facture légale must
+     * never do. The upsert ensures a settings row exists even for a company
+     * created after boot, before its first Cash document.
      */
-    nextInvoiceNumber: async () => {
+    nextInvoiceNumber: async (companyId: string) => {
+      await q(
+        `INSERT INTO settings (company_id, data, invoice_counter) VALUES ($1, $2, 0) ON CONFLICT (company_id) DO NOTHING`,
+        [companyId, JSON.stringify(defaultSettings())],
+      );
       const rows = await q(
-        `UPDATE settings SET invoice_counter = invoice_counter + 1
-         WHERE only_row RETURNING invoice_counter`,
+        `UPDATE settings SET invoice_counter = invoice_counter + 1 WHERE company_id = $1 RETURNING invoice_counter`,
+        [companyId],
       );
       return String(rows[0].invoice_counter).padStart(4, '0');
     },
@@ -280,20 +403,20 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     updateAbsenceAuthorization: absences.update,
 
     // `available` stays derived — it is never a column.
-    getAllLeaveBalances: async () =>
-      (await q('SELECT user_id, entitlement, used FROM leave_balances ORDER BY user_id'))
+    getAllLeaveBalances: async (companyId: string) =>
+      (await q('SELECT user_id, entitlement, used FROM leave_balances WHERE company_id = $1 ORDER BY user_id', [companyId]))
         .map(r => normalizeBalance({ userId: Number(r.user_id), entitlement: r.entitlement, used: r.used })),
-    getLeaveBalanceByUserId: async (userId: number) => {
+    getLeaveBalanceByUserId: async (companyId: string, userId: number) => {
       const rows = await q(
-        `INSERT INTO leave_balances (user_id, entitlement, used) VALUES ($1, $2, 0)
-         ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+        `INSERT INTO leave_balances (company_id, user_id, entitlement, used) VALUES ($1, $2, $3, 0)
+         ON CONFLICT (company_id, user_id) DO UPDATE SET user_id = EXCLUDED.user_id
          RETURNING user_id, entitlement, used`,
-        [userId, DEFAULT_LEAVE_ENTITLEMENT],
+        [companyId, userId, DEFAULT_LEAVE_ENTITLEMENT],
       );
       const r = rows[0];
       return normalizeBalance({ userId: Number(r.user_id), entitlement: r.entitlement, used: r.used });
     },
-    updateLeaveBalance: async (userId: number, updates: any) => {
+    updateLeaveBalance: async (companyId: string, userId: number, updates: any) => {
       // Both fields are nullable *parameters* so that an update touching only
       // `used` leaves `entitlement` alone. Passing the default instead of null
       // here would silently reset an admin-set allowance back to 20 every time
@@ -301,13 +424,14 @@ export async function initPostgres(connectionString: string): Promise<Database> 
       const rows = await q(
         // The ::float8 casts are required, not decorative: an untyped NULL
         // parameter is assumed to be text, and the insert fails outright.
-        `INSERT INTO leave_balances (user_id, entitlement, used)
-         VALUES ($1, COALESCE($2::float8, $4::float8), COALESCE($3::float8, 0))
-         ON CONFLICT (user_id) DO UPDATE SET
-           entitlement = COALESCE($2::float8, leave_balances.entitlement),
-           used        = COALESCE($3::float8, leave_balances.used)
+        `INSERT INTO leave_balances (company_id, user_id, entitlement, used)
+         VALUES ($1, $2, COALESCE($3::float8, $5::float8), COALESCE($4::float8, 0))
+         ON CONFLICT (company_id, user_id) DO UPDATE SET
+           entitlement = COALESCE($3::float8, leave_balances.entitlement),
+           used        = COALESCE($4::float8, leave_balances.used)
          RETURNING user_id, entitlement, used`,
         [
+          companyId,
           userId,
           typeof updates.entitlement === 'number' ? updates.entitlement : null,
           typeof updates.used === 'number' ? updates.used : null,
@@ -326,14 +450,15 @@ export async function initPostgres(connectionString: string): Promise<Database> 
 
     getAllMessages: messages.all,
     createMessage: messages.create,
-    markMessagesRead: async (readerId: number, fromUserId: number) => {
+    markMessagesRead: async (companyId: string, readerId: number, fromUserId: number) => {
       const res = await pool.query(
         `UPDATE messages
-            SET data = data || jsonb_build_object('readAt', $3::text)
-          WHERE data->>'toUserId'   = $1
-            AND data->>'fromUserId' = $2
+            SET data = data || jsonb_build_object('readAt', $4::text)
+          WHERE data->>'companyId'  = $1
+            AND data->>'toUserId'   = $2
+            AND data->>'fromUserId' = $3
             AND data->>'readAt' IS NULL`,
-        [String(readerId), String(fromUserId), new Date().toISOString()],
+        [companyId, String(readerId), String(fromUserId), new Date().toISOString()],
       );
       return res.rowCount ?? 0;
     },
@@ -352,12 +477,12 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getResourceTemplateById: resourceTemplates.byId,
     createResourceTemplate: resourceTemplates.create,
     updateResourceTemplate: resourceTemplates.update,
-    deleteResourceTemplate: async (id: string) => {
+    deleteResourceTemplate: async (companyId: string, id: string) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const res = await client.query('DELETE FROM resource_templates WHERE id = $1', [String(id)]);
-        await client.query(`DELETE FROM resource_template_items WHERE data->>'templateId' = $1`, [String(id)]);
+        const res = await client.query(`DELETE FROM resource_templates WHERE id = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
+        await client.query(`DELETE FROM resource_template_items WHERE data->>'templateId' = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
         await client.query('COMMIT');
         return (res.rowCount ?? 0) > 0;
       } catch (e) {
@@ -377,12 +502,12 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getClientResourceInstanceById: clientResourceInstances.byId,
     createClientResourceInstance: clientResourceInstances.create,
     updateClientResourceInstance: clientResourceInstances.update,
-    deleteClientResourceInstance: async (id: string) => {
+    deleteClientResourceInstance: async (companyId: string, id: string) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const res = await client.query('DELETE FROM client_resource_instances WHERE id = $1', [String(id)]);
-        await client.query(`DELETE FROM client_resource_item_statuses WHERE data->>'instanceId' = $1`, [String(id)]);
+        const res = await client.query(`DELETE FROM client_resource_instances WHERE id = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
+        await client.query(`DELETE FROM client_resource_item_statuses WHERE data->>'instanceId' = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
         await client.query('COMMIT');
         return (res.rowCount ?? 0) > 0;
       } catch (e) {
@@ -405,12 +530,12 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAllEcheanceColumns: echeanceColumns.all,
     createEcheanceColumn: echeanceColumns.create,
     updateEcheanceColumn: echeanceColumns.update,
-    deleteEcheanceColumn: async (id: string) => {
+    deleteEcheanceColumn: async (companyId: string, id: string) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const res = await client.query('DELETE FROM echeance_columns WHERE id = $1', [String(id)]);
-        await client.query(`DELETE FROM echeance_statuses WHERE data->>'columnId' = $1`, [String(id)]);
+        const res = await client.query(`DELETE FROM echeance_columns WHERE id = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
+        await client.query(`DELETE FROM echeance_statuses WHERE data->>'columnId' = $1 AND data->>'companyId' = $2`, [String(id), companyId]);
         await client.query('COMMIT');
         return (res.rowCount ?? 0) > 0;
       } catch (e) {
@@ -433,22 +558,39 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAllOrders: orders.all,
     createOrder: orders.create,
 
-    getSettings: async () => {
-      const rows = await q('SELECT data, invoice_counter FROM settings WHERE only_row');
-      // invoiceCounter lives in its own column so it can be incremented
-      // atomically, but callers still see it on the settings object.
-      return { ...rows[0].data, invoiceCounter: Number(rows[0].invoice_counter) };
-    },
-    updateSettings: async (updates: any) => {
-      const { invoiceCounter, ...rest } = updates ?? {};
+    getSettings: async (companyId: string) => {
       const rows = await q(
-        `UPDATE settings
-            SET data = data || $1::jsonb,
-                invoice_counter = COALESCE($2::bigint, invoice_counter)
-          WHERE only_row RETURNING data, invoice_counter`,
-        [JSON.stringify(rest), typeof invoiceCounter === 'number' ? invoiceCounter : null],
+        `INSERT INTO settings (company_id, data, invoice_counter) VALUES ($1, $2::jsonb, 0)
+         ON CONFLICT (company_id) DO UPDATE SET company_id = EXCLUDED.company_id
+         RETURNING data, invoice_counter`,
+        [companyId, JSON.stringify(defaultSettings())],
       );
       return { ...rows[0].data, invoiceCounter: Number(rows[0].invoice_counter) };
+    },
+    updateSettings: async (companyId: string, updates: any) => {
+      const { invoiceCounter, ...rest } = updates ?? {};
+      const initialData = JSON.stringify({ ...defaultSettings(), ...rest });
+      const rows = await q(
+        `INSERT INTO settings (company_id, data, invoice_counter) VALUES ($1, $2::jsonb, COALESCE($3::bigint, 0))
+         ON CONFLICT (company_id) DO UPDATE SET
+           data = settings.data || $4::jsonb,
+           invoice_counter = COALESCE($3::bigint, settings.invoice_counter)
+         RETURNING data, invoice_counter`,
+        [companyId, initialData, typeof invoiceCounter === 'number' ? invoiceCounter : null, JSON.stringify(rest)],
+      );
+      return { ...rows[0].data, invoiceCounter: Number(rows[0].invoice_counter) };
+    },
+
+    getPlatformSettings: async () => {
+      const rows = await q('SELECT data FROM platform_settings WHERE only_row');
+      return rows[0].data;
+    },
+    updatePlatformSettings: async (updates: any) => {
+      const rows = await q(
+        `UPDATE platform_settings SET data = data || $1::jsonb WHERE only_row RETURNING data`,
+        [JSON.stringify(updates)],
+      );
+      return rows[0].data;
     },
 
     close: async () => { await pool.end(); },
@@ -504,18 +646,29 @@ export async function importSnapshot(connectionString: string, snapshot: any) {
       }
       for (const b of snapshot.leaveBalances ?? []) {
         const n = normalizeBalance(b);
+        const companyId = b.companyId || LEGACY_COMPANY_ID;
         await client.query(
-          `INSERT INTO leave_balances (user_id, entitlement, used) VALUES ($1, $2, $3)
-           ON CONFLICT (user_id) DO UPDATE SET entitlement = EXCLUDED.entitlement, used = EXCLUDED.used`,
-          [n.userId, n.entitlement, n.used],
+          `INSERT INTO leave_balances (company_id, user_id, entitlement, used) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (company_id, user_id) DO UPDATE SET entitlement = EXCLUDED.entitlement, used = EXCLUDED.used`,
+          [companyId, n.userId, n.entitlement, n.used],
         );
       }
       counts['leave_balances'] = (snapshot.leaveBalances ?? []).length;
-      if (snapshot.settings) {
-        const { invoiceCounter, ...rest } = snapshot.settings;
+      // Legacy single-settings snapshots land under company-1; newer
+      // snapshots already carry `settingsByCompany`.
+      const settingsRows = snapshot.settingsByCompany ?? (snapshot.settings ? [{ id: LEGACY_COMPANY_ID, ...snapshot.settings }] : []);
+      for (const s of settingsRows) {
+        const { id: companyId, invoiceCounter, ...rest } = s;
         await client.query(
-          `UPDATE settings SET data = $1::jsonb, invoice_counter = $2 WHERE only_row`,
-          [JSON.stringify(rest), typeof invoiceCounter === 'number' ? invoiceCounter : 0],
+          `INSERT INTO settings (company_id, data, invoice_counter) VALUES ($1, $2::jsonb, $3)
+           ON CONFLICT (company_id) DO UPDATE SET data = $2::jsonb, invoice_counter = $3`,
+          [companyId, JSON.stringify(rest), typeof invoiceCounter === 'number' ? invoiceCounter : 0],
+        );
+      }
+      if (snapshot.platformSettings) {
+        await client.query(
+          `UPDATE platform_settings SET data = $1::jsonb WHERE only_row`,
+          [JSON.stringify(snapshot.platformSettings)],
         );
       }
       await client.query('COMMIT');

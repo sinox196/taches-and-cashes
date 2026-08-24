@@ -20,6 +20,7 @@ import { useAuth } from './context/AuthContext';
 import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
+import { PlatformAdmin } from './pages/PlatformAdmin';
 import { Loader2, ClipboardCheck } from 'lucide-react';
 
 import {
@@ -43,7 +44,7 @@ export default function App() {
 
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users'];
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Plateforme'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     const saved = localStorage.getItem('active_nav');
     return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';
@@ -421,7 +422,9 @@ export default function App() {
         <Header userCode="ABA01" userName="Alexandre Dupont" onNavigate={setActiveSidebarItem} />
         
         
-        {activeSidebarItem === 'Dashboard' ? (
+        {activeSidebarItem === 'Plateforme' && user?.isPlatformAdmin ? (
+          <PlatformAdmin />
+        ) : activeSidebarItem === 'Dashboard' ? (
           // ADMIN/SUPERVISEUR get the team-wide dashboard; everyone else
           // (COLLABORATOR, STAGIAIRE) gets their own personal KPIs.
           (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? <AdminDashboard /> : <MyDashboard />

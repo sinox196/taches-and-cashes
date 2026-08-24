@@ -14,3 +14,4 @@ local.db.json
 backups/
 local.db.json.bak
 local.db.json.tmp
+local.db.json.*

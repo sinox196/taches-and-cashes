@@ -5,9 +5,11 @@ import {
   Database,
   DEFAULT_LEAVE_ENTITLEMENT,
   defaultSettings,
+  defaultPlatformSettings,
   emptyDb,
   normalizeBalance,
   seedDefaults,
+  LEGACY_COMPANY_ID,
 } from './db-types.js';
 import { initPostgres } from './db-postgres.js';
 
@@ -49,10 +51,25 @@ export async function initDb(): Promise<Database> {
   return initJsonDb();
 }
 
+/**
+ * Per-tenant collections that need a `companyId` backfilled on every row
+ * that predates the multi-tenant migration — the exact same "recover a
+ * legacy shape" idea as `normalizeBalance()`, just run once per collection
+ * on every boot (a no-op once every row already has one).
+ */
+const TENANT_COLLECTIONS = [
+  'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
+  'absenceAuthorizations', 'leaveBalances', 'timeEntries', 'messages',
+  'taskAssignments', 'notifications', 'resourceTemplates', 'resourceTemplateItems',
+  'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
+  'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
+];
+
 async function initJsonDb(): Promise<Database> {
   try {
     const data = await fs.readFile(DB_PATH, 'utf-8');
     db = JSON.parse(data);
+    if (!db.companies) db.companies = [];
     if (!db.clients) db.clients = [];
     if (!db.services) db.services = [];
     if (!db.taskTypes) db.taskTypes = [];
@@ -73,8 +90,40 @@ async function initJsonDb(): Promise<Database> {
     if (!db.echeanceStatuses) db.echeanceStatuses = [];
     if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
     if (!db.orders) db.orders = [];
-    if (!db.settings) db.settings = defaultSettings();
-    if (!db.settings.employerCharges) db.settings.employerCharges = defaultSettings().employerCharges;
+    if (!db.platformSettings) db.platformSettings = defaultPlatformSettings();
+
+    // Legacy single-row settings -> one row per company, keyed like every
+    // other collection. Wrap it as company-1's row rather than discard it.
+    if (!db.settingsByCompany) {
+      db.settingsByCompany = [];
+      if (db.settings) {
+        db.settingsByCompany.push({ id: LEGACY_COMPANY_ID, ...db.settings });
+        delete db.settings;
+      }
+    }
+    const legacySettings = db.settingsByCompany.find((s: any) => s.id === LEGACY_COMPANY_ID);
+    if (legacySettings && !legacySettings.employerCharges) {
+      legacySettings.employerCharges = defaultSettings().employerCharges;
+    }
+
+    // Ensure the legacy cabinet's own company row exists before backfilling —
+    // seedDefaults() also does this, but the backfill below needs it first.
+    if (!db.companies.some((c: any) => c.id === LEGACY_COMPANY_ID)) {
+      db.companies.push({
+        id: LEGACY_COMPANY_ID, name: 'Cabinet', status: 'ACTIVE', plan: 'LEGACY',
+        seatLimit: 999, createdAt: new Date().toISOString(), trialEndsAt: null,
+      });
+    }
+
+    // One-time (idempotent) backfill: every pre-migration row gets stamped
+    // with the legacy cabinet's companyId. Runs unconditionally on every
+    // boot, same as the `if (!db.echeanceColumns) ...` lines above — a no-op
+    // once every row already has one, so re-running it is always safe.
+    for (const key of TENANT_COLLECTIONS) {
+      for (const row of db[key] || []) {
+        if (!row.companyId) row.companyId = LEGACY_COMPANY_ID;
+      }
+    }
   } catch (error: any) {
     if (error.code === 'ENOENT') {
       // No file yet: genuinely a first run.
@@ -93,214 +142,217 @@ async function initJsonDb(): Promise<Database> {
     }
   }
 
+  const scoped = <T extends { id: any; companyId?: string }>(collection: T[], companyId: string) =>
+    collection.filter(r => r.companyId === companyId);
+
+  const findScoped = <T extends { id: any; companyId?: string }>(collection: T[], companyId: string, id: any) =>
+    collection.find(r => r.id === id && r.companyId === companyId);
+
+  const indexScoped = <T extends { id: any; companyId?: string }>(collection: T[], companyId: string, id: any) =>
+    collection.findIndex(r => r.id === id && r.companyId === companyId);
+
+  const ensureCompanySettings = (companyId: string) => {
+    let row = db.settingsByCompany.find((s: any) => s.id === companyId);
+    if (!row) {
+      row = { id: companyId, ...defaultSettings(), invoiceCounter: 0 };
+      db.settingsByCompany.push(row);
+    }
+    return row;
+  };
+
   const impl: Database = {
-    get: async (sql: string, param: any) => {
-      if (sql.includes('WHERE username = ?')) {
-        return db.users.find((u: any) => u.username === param);
-      }
-      if (sql.includes('WHERE id = ?')) {
-        return db.users.find((u: any) => u.id === param);
-      }
-      return null;
-    },
-    getAllUsers: async () => {
-      return db.users;
-    },
-    createUser: async (user: any) => {
-      db.users.push(user);
+    getUserByUsername: async (username: string) => db.users.find((u: any) => u.username === username),
+    getUserById: async (companyId: string, id: number) => findScoped(db.users, companyId, id),
+
+    getAllCompanies: async () => db.companies,
+    getCompanyById: async (id: string) => db.companies.find((c: any) => c.id === id),
+    createCompany: async (company: any) => {
+      db.companies.push(company);
       await saveDb();
-      return user;
+      return company;
     },
-    updateUser: async (id: number, updates: any) => {
-      const index = db.users.findIndex((u: any) => u.id === id);
-      if (index !== -1) {
-        db.users[index] = { ...db.users[index], ...updates };
-        await saveDb();
-        return db.users[index];
-      }
-      return null;
-    },
-    deleteUser: async (id: number) => {
-      const index = db.users.findIndex((u: any) => u.id === id);
-      if (index !== -1) {
-        db.users.splice(index, 1);
-        await saveDb();
-        return true;
-      }
-      return false;
-    },
-    // Client CRUD
-    getAllClients: async () => {
-      return db.clients;
-    },
-    getClientById: async (id: number) => {
-      return db.clients.find((c: any) => c.id === id);
-    },
-    createClient: async (client: any) => {
-      db.clients.push(client);
+    updateCompany: async (id: string, updates: any) => {
+      const index = db.companies.findIndex((c: any) => c.id === id);
+      if (index === -1) return null;
+      db.companies[index] = { ...db.companies[index], ...updates };
       await saveDb();
-      return client;
+      return db.companies[index];
     },
-    updateClient: async (id: number, updates: any) => {
-      const index = db.clients.findIndex((c: any) => c.id === id);
-      if (index !== -1) {
-        db.clients[index] = { ...db.clients[index], ...updates };
-        await saveDb();
-        return db.clients[index];
-      }
-      return null;
-    },
-    deleteClient: async (id: number) => {
-      const index = db.clients.findIndex((c: any) => c.id === id);
-      if (index !== -1) {
-        // Soft delete logic can be handled at API level, but we provide this just in case
-        db.clients.splice(index, 1);
-        await saveDb();
-        return true;
-      }
-      return false;
-    },
-    // Service CRUD
-    getAllServices: async () => {
-      return db.services;
-    },
-    getServiceById: async (id: number) => {
-      return db.services.find((s: any) => s.id === id);
-    },
-    createService: async (service: any) => {
-      db.services.push(service);
+
+    getAllUsers: async (companyId: string) => scoped(db.users, companyId),
+    createUser: async (companyId: string, user: any) => {
+      const row = { ...user, companyId };
+      db.users.push(row);
       await saveDb();
-      return service;
+      return row;
     },
-    updateService: async (id: number, updates: any) => {
-      const index = db.services.findIndex((s: any) => s.id === id);
-      if (index !== -1) {
-        db.services[index] = { ...db.services[index], ...updates };
-        await saveDb();
-        return db.services[index];
-      }
-      return null;
+    updateUser: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.users, companyId, id);
+      if (index === -1) return null;
+      db.users[index] = { ...db.users[index], ...updates };
+      await saveDb();
+      return db.users[index];
     },
-    deleteService: async (id: number) => {
-      const index = db.services.findIndex((s: any) => s.id === id);
+    deleteUser: async (companyId: string, id: number) => {
+      const index = indexScoped(db.users, companyId, id);
       if (index === -1) return false;
-      db.services.splice(index, 1);
-      // Cascade: a type de tâche has no meaning without its mission.
-      db.taskTypes = db.taskTypes.filter((t: any) => t.serviceId !== id);
+      db.users.splice(index, 1);
       await saveDb();
       return true;
     },
-    // Task type CRUD (types de tâches, scoped to a mission)
-    getAllTaskTypes: async () => db.taskTypes,
-    getTaskTypeById: async (id: number) => db.taskTypes.find((t: any) => t.id === id),
-    createTaskType: async (taskType: any) => {
-      db.taskTypes.push(taskType);
+
+    getAllClients: async (companyId: string) => scoped(db.clients, companyId),
+    getClientById: async (companyId: string, id: number) => findScoped(db.clients, companyId, id),
+    createClient: async (companyId: string, client: any) => {
+      const row = { ...client, companyId };
+      db.clients.push(row);
       await saveDb();
-      return taskType;
+      return row;
     },
-    updateTaskType: async (id: number, updates: any) => {
-      const index = db.taskTypes.findIndex((t: any) => t.id === id);
+    updateClient: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.clients, companyId, id);
+      if (index === -1) return null;
+      db.clients[index] = { ...db.clients[index], ...updates };
+      await saveDb();
+      return db.clients[index];
+    },
+    deleteClient: async (companyId: string, id: number) => {
+      const index = indexScoped(db.clients, companyId, id);
+      if (index === -1) return false;
+      db.clients.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllServices: async (companyId: string) => scoped(db.services, companyId),
+    getServiceById: async (companyId: string, id: number) => findScoped(db.services, companyId, id),
+    createService: async (companyId: string, service: any) => {
+      const row = { ...service, companyId };
+      db.services.push(row);
+      await saveDb();
+      return row;
+    },
+    updateService: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.services, companyId, id);
+      if (index === -1) return null;
+      db.services[index] = { ...db.services[index], ...updates };
+      await saveDb();
+      return db.services[index];
+    },
+    deleteService: async (companyId: string, id: number) => {
+      const index = indexScoped(db.services, companyId, id);
+      if (index === -1) return false;
+      db.services.splice(index, 1);
+      db.taskTypes = db.taskTypes.filter((t: any) => !(t.serviceId === id && t.companyId === companyId));
+      await saveDb();
+      return true;
+    },
+
+    getAllTaskTypes: async (companyId: string) => scoped(db.taskTypes, companyId),
+    getTaskTypeById: async (companyId: string, id: number) => findScoped(db.taskTypes, companyId, id),
+    createTaskType: async (companyId: string, taskType: any) => {
+      const row = { ...taskType, companyId };
+      db.taskTypes.push(row);
+      await saveDb();
+      return row;
+    },
+    updateTaskType: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.taskTypes, companyId, id);
       if (index === -1) return null;
       db.taskTypes[index] = { ...db.taskTypes[index], ...updates };
       await saveDb();
       return db.taskTypes[index];
     },
-    deleteTaskType: async (id: number) => {
-      const index = db.taskTypes.findIndex((t: any) => t.id === id);
+    deleteTaskType: async (companyId: string, id: number) => {
+      const index = indexScoped(db.taskTypes, companyId, id);
       if (index === -1) return false;
       db.taskTypes.splice(index, 1);
       await saveDb();
       return true;
     },
-    // Cash / facturation CRUD
-    getAllInvoices: async () => db.invoices,
-    getInvoiceById: async (id: string) => db.invoices.find((i: any) => i.id === id),
-    createInvoice: async (invoice: any) => {
-      db.invoices.unshift(invoice); // newest first, like time entries
+
+    getAllInvoices: async (companyId: string) => scoped(db.invoices, companyId),
+    getInvoiceById: async (companyId: string, id: string) => findScoped(db.invoices, companyId, id),
+    createInvoice: async (companyId: string, invoice: any) => {
+      const row = { ...invoice, companyId };
+      db.invoices.unshift(row); // newest first, like time entries
       await saveDb();
-      return invoice;
+      return row;
     },
-    updateInvoice: async (id: string, updates: any) => {
-      const index = db.invoices.findIndex((i: any) => i.id === id);
+    updateInvoice: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.invoices, companyId, id);
       if (index === -1) return null;
       db.invoices[index] = { ...db.invoices[index], ...updates };
       await saveDb();
       return db.invoices[index];
     },
-    deleteInvoice: async (id: string) => {
-      const index = db.invoices.findIndex((i: any) => i.id === id);
+    deleteInvoice: async (companyId: string, id: string) => {
+      const index = indexScoped(db.invoices, companyId, id);
       if (index === -1) return false;
       db.invoices.splice(index, 1);
       await saveDb();
       return true;
     },
     /**
-     * Next document number in the sequence, zero-padded to 4 digits.
-     * Reserved atomically here so two concurrent creations can't collide.
+     * Next document number in this company's own sequence, zero-padded to 4
+     * digits. Reserved here so two concurrent creations can't collide.
      */
-    nextInvoiceNumber: async () => {
-      const current = typeof db.settings.invoiceCounter === 'number' ? db.settings.invoiceCounter : 0;
+    nextInvoiceNumber: async (companyId: string) => {
+      const settingsRow = ensureCompanySettings(companyId);
+      const current = typeof settingsRow.invoiceCounter === 'number' ? settingsRow.invoiceCounter : 0;
       const next = current + 1;
-      db.settings.invoiceCounter = next;
+      settingsRow.invoiceCounter = next;
       await saveDb();
       return String(next).padStart(4, '0');
     },
-    // HR CRUD
-    getAllLeaveRequests: async () => {
-      return db.leaveRequests;
-    },
-    getLeaveRequestById: async (id: number) => {
-      return db.leaveRequests.find((l: any) => l.id === id);
-    },
-    createLeaveRequest: async (leave: any) => {
-      db.leaveRequests.push(leave);
+
+    getAllLeaveRequests: async (companyId: string) => scoped(db.leaveRequests, companyId),
+    getLeaveRequestById: async (companyId: string, id: number) => findScoped(db.leaveRequests, companyId, id),
+    createLeaveRequest: async (companyId: string, leave: any) => {
+      const row = { ...leave, companyId };
+      db.leaveRequests.push(row);
       await saveDb();
-      return leave;
+      return row;
     },
-    updateLeaveRequest: async (id: number, updates: any) => {
-      const index = db.leaveRequests.findIndex((l: any) => l.id === id);
-      if (index !== -1) {
-        db.leaveRequests[index] = { ...db.leaveRequests[index], ...updates };
-        await saveDb();
-        return db.leaveRequests[index];
-      }
-      return null;
-    },
-    getAllAbsenceAuthorizations: async () => {
-      return db.absenceAuthorizations;
-    },
-    getAbsenceAuthorizationById: async (id: number) => {
-      return db.absenceAuthorizations.find((a: any) => a.id === id);
-    },
-    createAbsenceAuthorization: async (auth: any) => {
-      db.absenceAuthorizations.push(auth);
+    updateLeaveRequest: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.leaveRequests, companyId, id);
+      if (index === -1) return null;
+      db.leaveRequests[index] = { ...db.leaveRequests[index], ...updates };
       await saveDb();
-      return auth;
+      return db.leaveRequests[index];
     },
-    updateAbsenceAuthorization: async (id: number, updates: any) => {
-      const index = db.absenceAuthorizations.findIndex((a: any) => a.id === id);
-      if (index !== -1) {
-        db.absenceAuthorizations[index] = { ...db.absenceAuthorizations[index], ...updates };
-        await saveDb();
-        return db.absenceAuthorizations[index];
-      }
-      return null;
+
+    getAllAbsenceAuthorizations: async (companyId: string) => scoped(db.absenceAuthorizations, companyId),
+    getAbsenceAuthorizationById: async (companyId: string, id: number) => findScoped(db.absenceAuthorizations, companyId, id),
+    createAbsenceAuthorization: async (companyId: string, auth: any) => {
+      const row = { ...auth, companyId };
+      db.absenceAuthorizations.push(row);
+      await saveDb();
+      return row;
     },
-    getAllLeaveBalances: async () => (db.leaveBalances || []).map(normalizeBalance),
-    getLeaveBalanceByUserId: async (userId: number) => {
-      let raw = db.leaveBalances.find((b: any) => b.userId === userId);
+    updateAbsenceAuthorization: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.absenceAuthorizations, companyId, id);
+      if (index === -1) return null;
+      db.absenceAuthorizations[index] = { ...db.absenceAuthorizations[index], ...updates };
+      await saveDb();
+      return db.absenceAuthorizations[index];
+    },
+
+    getAllLeaveBalances: async (companyId: string) => scoped(db.leaveBalances, companyId).map(normalizeBalance),
+    getLeaveBalanceByUserId: async (companyId: string, userId: number) => {
+      let raw = db.leaveBalances.find((b: any) => b.userId === userId && b.companyId === companyId);
       if (!raw) {
-        raw = { userId, entitlement: DEFAULT_LEAVE_ENTITLEMENT, used: 0 };
+        raw = { userId, companyId, entitlement: DEFAULT_LEAVE_ENTITLEMENT, used: 0 };
         db.leaveBalances.push(raw);
         await saveDb();
       }
       return normalizeBalance(raw);
     },
     /** Accepts `entitlement` (admin-set allowance) and/or `used` (consumed days). */
-    updateLeaveBalance: async (userId: number, updates: any) => {
-      let index = db.leaveBalances.findIndex((b: any) => b.userId === userId);
+    updateLeaveBalance: async (companyId: string, userId: number, updates: any) => {
+      let index = db.leaveBalances.findIndex((b: any) => b.userId === userId && b.companyId === companyId);
       if (index === -1) {
-        db.leaveBalances.push({ userId, entitlement: DEFAULT_LEAVE_ENTITLEMENT, used: 0 });
+        db.leaveBalances.push({ userId, companyId, entitlement: DEFAULT_LEAVE_ENTITLEMENT, used: 0 });
         index = db.leaveBalances.length - 1;
       }
       const current = normalizeBalance(db.leaveBalances[index]);
@@ -308,6 +360,7 @@ async function initJsonDb(): Promise<Database> {
       // is dropped rather than left behind to contradict the derived value.
       db.leaveBalances[index] = {
         userId,
+        companyId,
         entitlement: typeof updates.entitlement === 'number' ? updates.entitlement : current.entitlement,
         used: typeof updates.used === 'number' ? updates.used : current.used,
       };
@@ -315,52 +368,42 @@ async function initJsonDb(): Promise<Database> {
       return normalizeBalance(db.leaveBalances[index]);
     },
 
-    // Time Tracking CRUD
-    getAllTimeEntries: async () => {
-      return db.timeEntries;
-    },
-    getTimeEntryById: async (id: string) => {
-      return db.timeEntries.find((t: any) => t.id === id);
-    },
-    createTimeEntry: async (entry: any) => {
-      db.timeEntries.unshift(entry); // add to top
+    getAllTimeEntries: async (companyId: string) => scoped(db.timeEntries, companyId),
+    getTimeEntryById: async (companyId: string, id: string) => findScoped(db.timeEntries, companyId, id),
+    createTimeEntry: async (companyId: string, entry: any) => {
+      const row = { ...entry, companyId };
+      db.timeEntries.unshift(row); // add to top
       await saveDb();
-      return entry;
+      return row;
     },
-    updateTimeEntry: async (id: string, updates: any) => {
-      const index = db.timeEntries.findIndex((t: any) => t.id === id);
-      if (index !== -1) {
-        db.timeEntries[index] = { ...db.timeEntries[index], ...updates };
-        await saveDb();
-        return db.timeEntries[index];
-      }
-      return null;
-    },
-    deleteTimeEntry: async (id: string) => {
-      const index = db.timeEntries.findIndex((t: any) => t.id === id);
-      if (index !== -1) {
-        db.timeEntries.splice(index, 1);
-        await saveDb();
-        return true;
-      }
-      return false;
-    },
-    // Chat CRUD — flat list of DMs, filtered/grouped at the API layer the same
-    // way KPI stats are: the collection here stays a dumb array.
-    getAllMessages: async () => {
-      return db.messages;
-    },
-    createMessage: async (message: any) => {
-      db.messages.push(message);
+    updateTimeEntry: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.timeEntries, companyId, id);
+      if (index === -1) return null;
+      db.timeEntries[index] = { ...db.timeEntries[index], ...updates };
       await saveDb();
-      return message;
+      return db.timeEntries[index];
+    },
+    deleteTimeEntry: async (companyId: string, id: string) => {
+      const index = indexScoped(db.timeEntries, companyId, id);
+      if (index === -1) return false;
+      db.timeEntries.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllMessages: async (companyId: string) => scoped(db.messages, companyId),
+    createMessage: async (companyId: string, message: any) => {
+      const row = { ...message, companyId };
+      db.messages.push(row);
+      await saveDb();
+      return row;
     },
     /** Marks every message from `fromUserId` to `readerId` as read. Returns how many changed. */
-    markMessagesRead: async (readerId: number, fromUserId: number) => {
+    markMessagesRead: async (companyId: string, readerId: number, fromUserId: number) => {
       let changed = 0;
       const now = new Date().toISOString();
       db.messages.forEach((m: any) => {
-        if (m.toUserId === readerId && m.fromUserId === fromUserId && !m.readAt) {
+        if (m.companyId === companyId && m.toUserId === readerId && m.fromUserId === fromUserId && !m.readAt) {
           m.readAt = now;
           changed++;
         }
@@ -368,203 +411,206 @@ async function initJsonDb(): Promise<Database> {
       if (changed > 0) await saveDb();
       return changed;
     },
-    // Task assignments — an admin handing a mission + type de tâche to a
-    // collaborator. Newest first, like time entries and invoices.
-    getAllTaskAssignments: async () => db.taskAssignments,
-    getTaskAssignmentById: async (id: string) => db.taskAssignments.find((a: any) => a.id === id),
-    createTaskAssignment: async (assignment: any) => {
-      db.taskAssignments.unshift(assignment);
+
+    getAllTaskAssignments: async (companyId: string) => scoped(db.taskAssignments, companyId),
+    getTaskAssignmentById: async (companyId: string, id: string) => findScoped(db.taskAssignments, companyId, id),
+    createTaskAssignment: async (companyId: string, assignment: any) => {
+      const row = { ...assignment, companyId };
+      db.taskAssignments.unshift(row);
       await saveDb();
-      return assignment;
+      return row;
     },
-    updateTaskAssignment: async (id: string, updates: any) => {
-      const index = db.taskAssignments.findIndex((a: any) => a.id === id);
+    updateTaskAssignment: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.taskAssignments, companyId, id);
       if (index === -1) return null;
       db.taskAssignments[index] = { ...db.taskAssignments[index], ...updates };
       await saveDb();
       return db.taskAssignments[index];
     },
-    deleteTaskAssignment: async (id: string) => {
-      const index = db.taskAssignments.findIndex((a: any) => a.id === id);
+    deleteTaskAssignment: async (companyId: string, id: string) => {
+      const index = indexScoped(db.taskAssignments, companyId, id);
       if (index === -1) return false;
       db.taskAssignments.splice(index, 1);
       await saveDb();
       return true;
     },
 
-    // Notifications — newest first.
-    getAllNotifications: async () => db.notifications,
-    createNotification: async (notification: any) => {
-      db.notifications.unshift(notification);
+    getAllNotifications: async (companyId: string) => scoped(db.notifications, companyId),
+    createNotification: async (companyId: string, notification: any) => {
+      const row = { ...notification, companyId };
+      db.notifications.unshift(row);
       await saveDb();
-      return notification;
+      return row;
     },
-    updateNotification: async (id: string, updates: any) => {
-      const index = db.notifications.findIndex((n: any) => n.id === id);
+    updateNotification: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.notifications, companyId, id);
       if (index === -1) return null;
       db.notifications[index] = { ...db.notifications[index], ...updates };
       await saveDb();
       return db.notifications[index];
     },
 
-    // Ressources Métier — resource templates (documents & procédures)
-    getAllResourceTemplates: async () => db.resourceTemplates,
-    getResourceTemplateById: async (id: string) => db.resourceTemplates.find((t: any) => t.id === id),
-    createResourceTemplate: async (template: any) => {
-      db.resourceTemplates.push(template);
+    getAllResourceTemplates: async (companyId: string) => scoped(db.resourceTemplates, companyId),
+    getResourceTemplateById: async (companyId: string, id: string) => findScoped(db.resourceTemplates, companyId, id),
+    createResourceTemplate: async (companyId: string, template: any) => {
+      const row = { ...template, companyId };
+      db.resourceTemplates.push(row);
       await saveDb();
-      return template;
+      return row;
     },
-    updateResourceTemplate: async (id: string, updates: any) => {
-      const index = db.resourceTemplates.findIndex((t: any) => t.id === id);
+    updateResourceTemplate: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.resourceTemplates, companyId, id);
       if (index === -1) return null;
       db.resourceTemplates[index] = { ...db.resourceTemplates[index], ...updates };
       await saveDb();
       return db.resourceTemplates[index];
     },
-    deleteResourceTemplate: async (id: string) => {
-      const index = db.resourceTemplates.findIndex((t: any) => t.id === id);
+    deleteResourceTemplate: async (companyId: string, id: string) => {
+      const index = indexScoped(db.resourceTemplates, companyId, id);
       if (index === -1) return false;
       db.resourceTemplates.splice(index, 1);
-      db.resourceTemplateItems = db.resourceTemplateItems.filter((i: any) => i.templateId !== id);
+      db.resourceTemplateItems = db.resourceTemplateItems.filter((i: any) => !(i.templateId === id && i.companyId === companyId));
       await saveDb();
       return true;
     },
 
-    getAllResourceTemplateItems: async () => db.resourceTemplateItems,
-    createResourceTemplateItem: async (item: any) => {
-      db.resourceTemplateItems.push(item);
+    getAllResourceTemplateItems: async (companyId: string) => scoped(db.resourceTemplateItems, companyId),
+    createResourceTemplateItem: async (companyId: string, item: any) => {
+      const row = { ...item, companyId };
+      db.resourceTemplateItems.push(row);
       await saveDb();
-      return item;
+      return row;
     },
-    updateResourceTemplateItem: async (id: string, updates: any) => {
-      const index = db.resourceTemplateItems.findIndex((i: any) => i.id === id);
+    updateResourceTemplateItem: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.resourceTemplateItems, companyId, id);
       if (index === -1) return null;
       db.resourceTemplateItems[index] = { ...db.resourceTemplateItems[index], ...updates };
       await saveDb();
       return db.resourceTemplateItems[index];
     },
-    deleteResourceTemplateItem: async (id: string) => {
-      const index = db.resourceTemplateItems.findIndex((i: any) => i.id === id);
+    deleteResourceTemplateItem: async (companyId: string, id: string) => {
+      const index = indexScoped(db.resourceTemplateItems, companyId, id);
       if (index === -1) return false;
       db.resourceTemplateItems.splice(index, 1);
       await saveDb();
       return true;
     },
 
-    // Client resource instances — frozen copies affected to a client.
-    getAllClientResourceInstances: async () => db.clientResourceInstances,
-    getClientResourceInstanceById: async (id: string) => db.clientResourceInstances.find((i: any) => i.id === id),
-    createClientResourceInstance: async (instance: any) => {
-      db.clientResourceInstances.unshift(instance);
+    getAllClientResourceInstances: async (companyId: string) => scoped(db.clientResourceInstances, companyId),
+    getClientResourceInstanceById: async (companyId: string, id: string) => findScoped(db.clientResourceInstances, companyId, id),
+    createClientResourceInstance: async (companyId: string, instance: any) => {
+      const row = { ...instance, companyId };
+      db.clientResourceInstances.unshift(row);
       await saveDb();
-      return instance;
+      return row;
     },
-    updateClientResourceInstance: async (id: string, updates: any) => {
-      const index = db.clientResourceInstances.findIndex((i: any) => i.id === id);
+    updateClientResourceInstance: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.clientResourceInstances, companyId, id);
       if (index === -1) return null;
       db.clientResourceInstances[index] = { ...db.clientResourceInstances[index], ...updates };
       await saveDb();
       return db.clientResourceInstances[index];
     },
-    deleteClientResourceInstance: async (id: string) => {
-      const index = db.clientResourceInstances.findIndex((i: any) => i.id === id);
+    deleteClientResourceInstance: async (companyId: string, id: string) => {
+      const index = indexScoped(db.clientResourceInstances, companyId, id);
       if (index === -1) return false;
       db.clientResourceInstances.splice(index, 1);
-      db.clientResourceItemStatuses = db.clientResourceItemStatuses.filter((s: any) => s.instanceId !== id);
+      db.clientResourceItemStatuses = db.clientResourceItemStatuses.filter((s: any) => !(s.instanceId === id && s.companyId === companyId));
       await saveDb();
       return true;
     },
 
-    getAllClientResourceItemStatuses: async () => db.clientResourceItemStatuses,
-    createClientResourceItemStatus: async (status: any) => {
-      db.clientResourceItemStatuses.push(status);
+    getAllClientResourceItemStatuses: async (companyId: string) => scoped(db.clientResourceItemStatuses, companyId),
+    createClientResourceItemStatus: async (companyId: string, status: any) => {
+      const row = { ...status, companyId };
+      db.clientResourceItemStatuses.push(row);
       await saveDb();
-      return status;
+      return row;
     },
-    updateClientResourceItemStatus: async (id: string, updates: any) => {
-      const index = db.clientResourceItemStatuses.findIndex((s: any) => s.id === id);
+    updateClientResourceItemStatus: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.clientResourceItemStatuses, companyId, id);
       if (index === -1) return null;
       db.clientResourceItemStatuses[index] = { ...db.clientResourceItemStatuses[index], ...updates };
       await saveDb();
       return db.clientResourceItemStatuses[index];
     },
 
-    // Liens utiles
-    getAllUsefulLinks: async () => db.usefulLinks,
-    createUsefulLink: async (link: any) => {
-      db.usefulLinks.push(link);
+    getAllUsefulLinks: async (companyId: string) => scoped(db.usefulLinks, companyId),
+    createUsefulLink: async (companyId: string, link: any) => {
+      const row = { ...link, companyId };
+      db.usefulLinks.push(row);
       await saveDb();
-      return link;
+      return row;
     },
-    updateUsefulLink: async (id: string, updates: any) => {
-      const index = db.usefulLinks.findIndex((l: any) => l.id === id);
+    updateUsefulLink: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.usefulLinks, companyId, id);
       if (index === -1) return null;
       db.usefulLinks[index] = { ...db.usefulLinks[index], ...updates };
       await saveDb();
       return db.usefulLinks[index];
     },
-    deleteUsefulLink: async (id: string) => {
-      const index = db.usefulLinks.findIndex((l: any) => l.id === id);
+    deleteUsefulLink: async (companyId: string, id: string) => {
+      const index = indexScoped(db.usefulLinks, companyId, id);
       if (index === -1) return false;
       db.usefulLinks.splice(index, 1);
       await saveDb();
       return true;
     },
 
-    // Échéances — suivi mensuel grid: named columns + one status cell per (client, column)
-    getAllEcheanceColumns: async () => db.echeanceColumns,
-    createEcheanceColumn: async (column: any) => {
-      db.echeanceColumns.push(column);
+    getAllEcheanceColumns: async (companyId: string) => scoped(db.echeanceColumns, companyId),
+    createEcheanceColumn: async (companyId: string, column: any) => {
+      const row = { ...column, companyId };
+      db.echeanceColumns.push(row);
       await saveDb();
-      return column;
+      return row;
     },
-    updateEcheanceColumn: async (id: string, updates: any) => {
-      const index = db.echeanceColumns.findIndex((c: any) => c.id === id);
+    updateEcheanceColumn: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.echeanceColumns, companyId, id);
       if (index === -1) return null;
       db.echeanceColumns[index] = { ...db.echeanceColumns[index], ...updates };
       await saveDb();
       return db.echeanceColumns[index];
     },
-    deleteEcheanceColumn: async (id: string) => {
-      const index = db.echeanceColumns.findIndex((c: any) => c.id === id);
+    deleteEcheanceColumn: async (companyId: string, id: string) => {
+      const index = indexScoped(db.echeanceColumns, companyId, id);
       if (index === -1) return false;
       db.echeanceColumns.splice(index, 1);
-      db.echeanceStatuses = db.echeanceStatuses.filter((s: any) => s.columnId !== id);
+      db.echeanceStatuses = db.echeanceStatuses.filter((s: any) => !(s.columnId === id && s.companyId === companyId));
       await saveDb();
       return true;
     },
 
-    getAllEcheanceStatuses: async () => db.echeanceStatuses,
-    createEcheanceStatus: async (status: any) => {
-      db.echeanceStatuses.push(status);
+    getAllEcheanceStatuses: async (companyId: string) => scoped(db.echeanceStatuses, companyId),
+    createEcheanceStatus: async (companyId: string, status: any) => {
+      const row = { ...status, companyId };
+      db.echeanceStatuses.push(row);
       await saveDb();
-      return status;
+      return row;
     },
-    updateEcheanceStatus: async (id: string, updates: any) => {
-      const index = db.echeanceStatuses.findIndex((s: any) => s.id === id);
+    updateEcheanceStatus: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.echeanceStatuses, companyId, id);
       if (index === -1) return null;
       db.echeanceStatuses[index] = { ...db.echeanceStatuses[index], ...updates };
       await saveDb();
       return db.echeanceStatuses[index];
     },
 
-    // The fixed-vocabulary status options — admin-editable, not hardcoded.
-    getAllEcheanceStatusOptions: async () => db.echeanceStatusOptions,
-    createEcheanceStatusOption: async (option: any) => {
-      db.echeanceStatusOptions.push(option);
+    getAllEcheanceStatusOptions: async (companyId: string) => scoped(db.echeanceStatusOptions, companyId),
+    createEcheanceStatusOption: async (companyId: string, option: any) => {
+      const row = { ...option, companyId };
+      db.echeanceStatusOptions.push(row);
       await saveDb();
-      return option;
+      return row;
     },
-    updateEcheanceStatusOption: async (id: string, updates: any) => {
-      const index = db.echeanceStatusOptions.findIndex((o: any) => o.id === id);
+    updateEcheanceStatusOption: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.echeanceStatusOptions, companyId, id);
       if (index === -1) return null;
       db.echeanceStatusOptions[index] = { ...db.echeanceStatusOptions[index], ...updates };
       await saveDb();
       return db.echeanceStatusOptions[index];
     },
-    deleteEcheanceStatusOption: async (id: string) => {
-      const index = db.echeanceStatusOptions.findIndex((o: any) => o.id === id);
+    deleteEcheanceStatusOption: async (companyId: string, id: string) => {
+      const index = indexScoped(db.echeanceStatusOptions, companyId, id);
       if (index === -1) return false;
       db.echeanceStatusOptions.splice(index, 1);
       await saveDb();
@@ -578,15 +624,21 @@ async function initJsonDb(): Promise<Database> {
       return order;
     },
 
-    // Settings CRUD
-    getSettings: async () => {
-      return db.settings;
-    },
-    updateSettings: async (updates: any) => {
-      db.settings = { ...db.settings, ...updates };
+    getSettings: async (companyId: string) => ensureCompanySettings(companyId),
+    updateSettings: async (companyId: string, updates: any) => {
+      const row = ensureCompanySettings(companyId);
+      const index = db.settingsByCompany.findIndex((s: any) => s.id === companyId);
+      db.settingsByCompany[index] = { ...row, ...updates, id: companyId };
       await saveDb();
-      return db.settings;
-    }
+      return db.settingsByCompany[index];
+    },
+
+    getPlatformSettings: async () => db.platformSettings,
+    updatePlatformSettings: async (updates: any) => {
+      db.platformSettings = { ...db.platformSettings, ...updates };
+      await saveDb();
+      return db.platformSettings;
+    },
   };
 
   await seedDefaults(impl, bcrypt);
@@ -639,4 +691,3 @@ function saveDb(): Promise<void> {
   pendingWrite = flushDb().finally(() => { pendingWrite = null; });
   return pendingWrite;
 }
-

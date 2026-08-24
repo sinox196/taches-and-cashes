@@ -74,6 +74,15 @@ body {
 a { color: oklch(58% 0.12 250); }
 a:hover { color: oklch(48% 0.14 250); }
 
+/* Decorative float animations for the public Homepage hero's floating
+   cards — scoped to that one use, not a general-purpose utility. */
+@keyframes landingFloatA { 0%, 100% { transform: rotate(-6deg) translateY(0); } 50% { transform: rotate(-6deg) translateY(-12px); } }
+@keyframes landingFloatB { 0%, 100% { transform: rotate(4deg) translateY(0); } 50% { transform: rotate(4deg) translateY(10px); } }
+@keyframes landingFloatC { 0%, 100% { transform: rotate(5deg) translateY(0); } 50% { transform: rotate(5deg) translateY(-9px); } }
+@keyframes landingFloatD { 0%, 100% { transform: rotate(-4deg) translateY(0); } 50% { transform: rotate(-4deg) translateY(11px); } }
+@keyframes landingFloatE { 0%, 100% { transform: rotate(2deg) translateY(0); } 50% { transform: rotate(2deg) translateY(-8px); } }
+@keyframes landingPulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: oklch(88% 0.005 260); border-radius: 8px; }
 

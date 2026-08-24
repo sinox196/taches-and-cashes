@@ -12,6 +12,12 @@
  *
  * It needs no `pg_dump` binary installed, which is the point on Windows.
  *
+ * Multi-tenant: every per-tenant `getAllX()` method takes a companyId, so
+ * this loops over every company and concatenates — each row already carries
+ * its own `companyId` inside `data`, so the flattened arrays are exactly the
+ * shape `db:import` already expects; nothing tenant-specific about the
+ * snapshot format itself.
+ *
  * To restore: create an empty database and
  *   DATABASE_URL="postgresql://...new..." npm run db:import -- backups/<file>.json
  */
@@ -30,31 +36,42 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const db = await initPostgres(url);
 try {
+  const companies = await db.getAllCompanies();
+  const companyIds = companies.map((c: any) => c.id);
+
+  const allOf = async (fn: (companyId: string) => Promise<any[]>) => {
+    const rows: any[] = [];
+    for (const companyId of companyIds) rows.push(...await fn(companyId));
+    return rows;
+  };
+
   // Same key names and ordering as local.db.json, so the output is a drop-in
   // snapshot that db:import accepts unchanged.
   const snapshot = {
-    users: await db.getAllUsers(),
-    clients: await db.getAllClients(),
-    services: await db.getAllServices(),
-    taskTypes: await db.getAllTaskTypes(),
-    invoices: await db.getAllInvoices(),
-    leaveRequests: await db.getAllLeaveRequests(),
-    absenceAuthorizations: await db.getAllAbsenceAuthorizations(),
-    leaveBalances: await db.getAllLeaveBalances(),
-    timeEntries: await db.getAllTimeEntries(),
-    messages: await db.getAllMessages(),
-    taskAssignments: await db.getAllTaskAssignments(),
-    notifications: await db.getAllNotifications(),
-    resourceTemplates: await db.getAllResourceTemplates(),
-    resourceTemplateItems: await db.getAllResourceTemplateItems(),
-    clientResourceInstances: await db.getAllClientResourceInstances(),
-    clientResourceItemStatuses: await db.getAllClientResourceItemStatuses(),
-    usefulLinks: await db.getAllUsefulLinks(),
-    echeanceColumns: await db.getAllEcheanceColumns(),
-    echeanceStatuses: await db.getAllEcheanceStatuses(),
-    echeanceStatusOptions: await db.getAllEcheanceStatusOptions(),
+    companies,
+    users: await allOf(cid => db.getAllUsers(cid)),
+    clients: await allOf(cid => db.getAllClients(cid)),
+    services: await allOf(cid => db.getAllServices(cid)),
+    taskTypes: await allOf(cid => db.getAllTaskTypes(cid)),
+    invoices: await allOf(cid => db.getAllInvoices(cid)),
+    leaveRequests: await allOf(cid => db.getAllLeaveRequests(cid)),
+    absenceAuthorizations: await allOf(cid => db.getAllAbsenceAuthorizations(cid)),
+    leaveBalances: await allOf(cid => db.getAllLeaveBalances(cid)),
+    timeEntries: await allOf(cid => db.getAllTimeEntries(cid)),
+    messages: await allOf(cid => db.getAllMessages(cid)),
+    taskAssignments: await allOf(cid => db.getAllTaskAssignments(cid)),
+    notifications: await allOf(cid => db.getAllNotifications(cid)),
+    resourceTemplates: await allOf(cid => db.getAllResourceTemplates(cid)),
+    resourceTemplateItems: await allOf(cid => db.getAllResourceTemplateItems(cid)),
+    clientResourceInstances: await allOf(cid => db.getAllClientResourceInstances(cid)),
+    clientResourceItemStatuses: await allOf(cid => db.getAllClientResourceItemStatuses(cid)),
+    usefulLinks: await allOf(cid => db.getAllUsefulLinks(cid)),
+    echeanceColumns: await allOf(cid => db.getAllEcheanceColumns(cid)),
+    echeanceStatuses: await allOf(cid => db.getAllEcheanceStatuses(cid)),
+    echeanceStatusOptions: await allOf(cid => db.getAllEcheanceStatusOptions(cid)),
     orders: await db.getAllOrders(),
-    settings: await db.getSettings(),
+    settingsByCompany: await Promise.all(companyIds.map(async (cid: string) => ({ id: cid, ...(await db.getSettings(cid)) }))),
+    platformSettings: await db.getPlatformSettings(),
   };
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);

@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
+import { LEGACY_COMPANY_ID, TRIAL_DAYS, PLAN_SEAT_LIMITS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
 import { STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
 import {
   DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
@@ -126,20 +127,20 @@ const accruedSeconds = (t: any) => {
  * none for it); it is attached as an informational, non-blocking item on the
  * Patente checklist rather than inventing a new structure for one table.
  */
-async function seedResourceLibrary(db: import('./src/server/db-types.js').Database) {
+async function seedResourceLibrary(db: import('./src/server/db-types.js').Database, companyId: string) {
   const SECTOR_COMPTA = 'Expertise comptable';
 
-  const existingTemplates = await db.getAllResourceTemplates();
+  const existingTemplates = await db.getAllResourceTemplates(companyId);
   const seedChecklist = async (id: string, name: string, sector: string, items: string[]) => {
     if (existingTemplates.some((t: any) => t.id === id)) return;
-    const template = await db.createResourceTemplate({
+    const template = await db.createResourceTemplate(companyId, {
       id, type: 'document_checklist', name, sector,
       isSequential: false, isActive: true, isSystem: true,
       sourceSystemTemplateId: null, createdAt: new Date().toISOString(),
     });
     let i = 0;
     for (const label of items) {
-      await db.createResourceTemplateItem({ id: `${template.id}-item-${i}`, templateId: template.id, label, sortOrder: i });
+      await db.createResourceTemplateItem(companyId, { id: `${template.id}-item-${i}`, templateId: template.id, label, sortOrder: i });
       i++;
     }
   };
@@ -206,13 +207,13 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
     ],
   );
 
-  const existingLinks = await db.getAllUsefulLinks();
+  const existingLinks = await db.getAllUsefulLinks(companyId);
   const seedLink = async (
     id: string, category: string, label: string, url: string,
     opts: { description?: string; icon?: string } = {},
   ) => {
     if (existingLinks.some((l: any) => l.id === id)) return;
-    await db.createUsefulLink({
+    await db.createUsefulLink(companyId, {
       id, category, label, url,
       description: opts.description || null,
       icon: opts.icon || null,
@@ -235,10 +236,10 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
   // The 28 échéance columns of the cabinet's own 2025 suivi mensuel sheet —
   // real column headers (month + précis label), not placeholder ones. Cell
   // values are left for the cabinet to fill in from the grid itself.
-  const existingColumns = await db.getAllEcheanceColumns();
+  const existingColumns = await db.getAllEcheanceColumns(companyId);
   const seedColumn = async (id: string, year: number, month: number, label: string, sortOrder: number) => {
     if (existingColumns.some((c: any) => c.id === id)) return;
-    await db.createEcheanceColumn({ id, year, month, label, sortOrder });
+    await db.createEcheanceColumn(companyId, { id, year, month, label, sortOrder });
   };
   const E2025: [number, string][] = [
     [1, 'DM 12/2025'], [1, 'D SUSP TVA TR04'], [1, 'CNSS TR04'],
@@ -261,10 +262,10 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
 
   // The status vocabulary a cell can be set to — admin-editable from here on,
   // this only seeds the starting set (and its colors) on first boot.
-  const existingStatusOptions = await db.getAllEcheanceStatusOptions();
+  const existingStatusOptions = await db.getAllEcheanceStatusOptions(companyId);
   const seedStatusOption = async (id: string, label: string, sortOrder: number, color: string) => {
     if (existingStatusOptions.some((o: any) => o.id === id)) return;
-    await db.createEcheanceStatusOption({ id, label, sortOrder, color });
+    await db.createEcheanceStatusOption(companyId, { id, label, sortOrder, color });
   };
   await seedStatusOption('ecs-opt-seed-0', 'Oui', 0, 'done');
   await seedStatusOption('ecs-opt-seed-1', "Client non concerné par l'échéance", 1, 'gray');
@@ -275,10 +276,10 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
   // database that already ran this seed once) — same idea as
   // normalizeBalance() recovering a legacy shape, just for this collection.
   const colorKeys = ['done', 'late', 'run', 'pause', 'admin', 'collab', 'gray'];
-  const allStatusOptions = await db.getAllEcheanceStatusOptions();
+  const allStatusOptions = await db.getAllEcheanceStatusOptions(companyId);
   for (let i = 0; i < allStatusOptions.length; i++) {
     if (!allStatusOptions[i].color) {
-      await db.updateEcheanceStatusOption(allStatusOptions[i].id, { color: colorKeys[i % colorKeys.length] });
+      await db.updateEcheanceStatusOption(companyId, allStatusOptions[i].id, { color: colorKeys[i % colorKeys.length] });
     }
   }
 }
@@ -298,31 +299,67 @@ async function startServer() {
 
   // Initialize SQLite database
   const db = await initDb();
-  await seedResourceLibrary(db);
+  await seedResourceLibrary(db, LEGACY_COMPANY_ID);
+
+  // The legacy cabinet's own admin doubles as the platform's operator (the
+  // person selling Tâches & Cash itself, confirming other companies'
+  // payments) — an orthogonal capability from any one company's ADMIN role,
+  // so it lives as its own flag rather than folding into `role`. Idempotent:
+  // only acts if the flag is missing, same "recover a legacy shape" idiom as
+  // normalizeBalance().
+  const legacyAdmin = await db.getUserById(LEGACY_COMPANY_ID, 1);
+  if (legacyAdmin && !legacyAdmin.isPlatformAdmin) {
+    await db.updateUser(LEGACY_COMPANY_ID, 1, { isPlatformAdmin: true });
+  }
 
   // ---------------------------------------------------------
   // Auth & API Routes
   // ---------------------------------------------------------
 
+  /**
+   * A TRIAL company past `trialEndsAt` is expired lazily, the first time
+   * anyone touches it, rather than on a cron — the same idiom this codebase
+   * already uses for `available` (derived, never stored) and presence
+   * (derived from missing heartbeats). Flips the row to EXPIRED so the check
+   * is a plain equality after the first hit, not a date comparison forever.
+   */
+  const expireTrialIfDue = async (company: any) => {
+    if (company && company.status === 'TRIAL' && company.trialEndsAt && new Date(company.trialEndsAt).getTime() < Date.now()) {
+      await db.updateCompany(company.id, { status: 'EXPIRED' });
+      company.status = 'EXPIRED';
+    }
+    return company;
+  };
+
   // POST /api/login
   app.post('/api/login', async (req, res) => {
     try {
       const { username, password } = req.body;
-      const user = await db.get('SELECT * FROM users WHERE username = ?', username);
-      
+      const user = await db.getUserByUsername(username);
+
       if (!user) {
         res.status(401).json({ error: 'Invalid credentials' });
         return;
       }
-      
+
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) {
         res.status(401).json({ error: 'Invalid credentials' });
         return;
       }
 
-      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
-      
+      const companyId = user.companyId || LEGACY_COMPANY_ID;
+      const company = await expireTrialIfDue(await db.getCompanyById(companyId));
+      if (company && (company.status === 'EXPIRED' || company.status === 'SUSPENDED')) {
+        res.status(403).json({ error: "Votre période d'essai est terminée. Contactez-nous pour activer un abonnement." });
+        return;
+      }
+
+      const token = jwt.sign(
+        { id: user.id, role: user.role, companyId, isPlatformAdmin: !!user.isPlatformAdmin },
+        JWT_SECRET, { expiresIn: '1d' },
+      );
+
       res.json({
         token,
         user: {
@@ -331,7 +368,8 @@ async function startServer() {
           role: user.role,
           permissions: JSON.parse(user.permissions),
           salaireBrut: user.salaireBrut,
-          regimeHoraire: user.regimeHoraire
+          regimeHoraire: user.regimeHoraire,
+          isPlatformAdmin: !!user.isPlatformAdmin,
         }
       });
     } catch (error) {
@@ -340,16 +378,29 @@ async function startServer() {
     }
   });
 
-  // Authentication Middleware
-  const authenticate = (req: any, res: any, next: any) => {
+  // Authentication Middleware. Also enforces the free-trial deadline on every
+  // request, not just at login, so an account doesn't stay usable for the
+  // rest of a still-valid JWT after its trial has run out mid-session.
+  const authenticate = async (req: any, res: any, next: any) => {
     const token = req.headers.authorization?.split(' ')[1] || req.query.token;
     if (!token) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
-    
+
     try {
-      req.user = jwt.verify(token, JWT_SECRET);
+      const payload: any = jwt.verify(token, JWT_SECRET);
+      // A JWT issued before the multi-tenant migration carries no companyId
+      // claim — defaulting it here is what lets it keep resolving to the
+      // legacy cabinet's data with zero forced re-login.
+      payload.companyId = payload.companyId || LEGACY_COMPANY_ID;
+      req.user = payload;
+
+      const company = await expireTrialIfDue(await db.getCompanyById(req.user.companyId));
+      if (company && (company.status === 'EXPIRED' || company.status === 'SUSPENDED')) {
+        res.status(403).json({ error: "Votre période d'essai est terminée. Contactez-nous pour activer un abonnement." });
+        return;
+      }
       next();
     } catch (e) {
       res.status(401).json({ error: 'Invalid token' });
@@ -359,18 +410,21 @@ async function startServer() {
   // GET /api/me
   app.get('/api/me', authenticate, async (req: any, res: any) => {
     try {
-      const user = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+      const user = await db.getUserById(req.user.companyId, req.user.id);
       if (!user) {
          res.status(404).json({ error: 'User not found' });
          return;
       }
+      const company = await db.getCompanyById(req.user.companyId);
       res.json({
         id: user.id,
         username: user.username,
         role: user.role,
         permissions: JSON.parse(user.permissions),
         salaireBrut: user.salaireBrut,
-        regimeHoraire: user.regimeHoraire
+        regimeHoraire: user.regimeHoraire,
+        isPlatformAdmin: !!user.isPlatformAdmin,
+        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt } : null,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -383,13 +437,13 @@ async function startServer() {
       if (!req.user) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
-      
+
       // We should check the database to get the freshest permissions
-      db.get('SELECT * FROM users WHERE id = ?', req.user.id).then((user: any) => {
+      db.getUserById(req.user.companyId, req.user.id).then((user: any) => {
         if (!user) {
           return res.status(401).json({ error: 'Unauthorized' });
         }
-        
+
         const hasPerm = user.role === 'ADMIN' || JSON.parse(user.permissions).includes(permission);
         if (!hasPerm) {
           return res.status(403).json({ error: 'Forbidden: Missing permission ' + permission });
@@ -401,10 +455,21 @@ async function startServer() {
     };
   };
 
+  /**
+   * Cross-tenant capability, orthogonal to `requirePermission` (which is
+   * scoped to "within my own company"): confirming another company's
+   * payment or reading the platform's own bank details has nothing to do
+   * with any permission a company's own ADMIN can grant.
+   */
+  const requirePlatformAdmin = (req: any, res: any, next: any) => {
+    if (!req.user?.isPlatformAdmin) return res.status(403).json({ error: 'Forbidden' });
+    next();
+  };
+
   // GET /api/settings
   app.get('/api/settings', authenticate, requirePermission('ADMIN'), async (req: any, res: any) => {
     try {
-      const settings = await db.getSettings();
+      const settings = await db.getSettings(req.user.companyId);
       res.json(settings || {});
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -415,7 +480,7 @@ async function startServer() {
   app.put('/api/settings', authenticate, requirePermission('ADMIN'), async (req: any, res: any) => {
     try {
       const updates = req.body;
-      const updated = await db.updateSettings(updates);
+      const updated = await db.updateSettings(req.user.companyId, updates);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -460,9 +525,9 @@ async function startServer() {
   };
 
   /** Readable by anyone who may see documents — they all carry this footer. */
-  app.get('/api/cash/company', authenticate, requirePermission('VIEW_CASH'), async (_req: any, res: any) => {
+  app.get('/api/cash/company', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
-      res.json(companyBlock(await db.getSettings()));
+      res.json(companyBlock(await db.getSettings(req.user.companyId)));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -487,8 +552,8 @@ async function startServer() {
         if (err) return res.status(400).json({ error: err });
       }
 
-      const current = await db.getSettings();
-      const updated = await db.updateSettings({
+      const current = await db.getSettings(req.user.companyId);
+      const updated = await db.updateSettings(req.user.companyId, {
         company: {
           name: text(body.company?.name, 120),
           address: text(body.company?.address, 300),
@@ -517,8 +582,8 @@ async function startServer() {
   // GET /api/users
   app.get('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const users = await db.getAllUsers();
-      const balances = await db.getAllLeaveBalances();
+      const users = await db.getAllUsers(req.user.companyId);
+      const balances = await db.getAllLeaveBalances(req.user.companyId);
       // Don't send passwords to client. Same shape as POST/PUT responses so the
       // list can be updated in place after a create/edit.
       res.json(users.map((u: any) => withLeaveBalance(publicUser(u), balances)));
@@ -532,11 +597,19 @@ async function startServer() {
     try {
       const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge } = req.body;
 
-      const existing = await db.get('SELECT * FROM users WHERE username = ?', username);
+      const existing = await db.getUserByUsername(username);
       if (existing) {
         return res.status(400).json({ error: 'Username already exists' });
       }
-      
+
+      const company = await db.getCompanyById(req.user.companyId);
+      if (company?.seatLimit) {
+        const currentSeats = (await db.getAllUsers(req.user.companyId)).length;
+        if (currentSeats >= company.seatLimit) {
+          return res.status(403).json({ error: `Limite de ${company.seatLimit} utilisateur(s) atteinte pour votre offre.` });
+        }
+      }
+
       const hashed = await bcrypt.hash(password, 10);
 
       const simSalaire = typeof salaireBrut === 'number' ? salaireBrut : 0;
@@ -551,7 +624,7 @@ async function startServer() {
       const heuresMensuelles = simRegime * 4.33;
       const coutHoraireEmployeur = heuresMensuelles > 0 ? coutTotalEmployeur / heuresMensuelles : 0;
 
-      const newUser = await db.createUser({
+      const newUser = await db.createUser(req.user.companyId, {
         id: Date.now(),
         username,
         password: hashed,
@@ -569,12 +642,12 @@ async function startServer() {
       });
       
       // The admin sets the annual leave allowance from this same form.
-      await db.updateLeaveBalance(newUser.id, {
+      await db.updateLeaveBalance(req.user.companyId, newUser.id, {
         entitlement: num(soldeConge, DEFAULT_LEAVE_ENTITLEMENT),
         used: 0,
       });
 
-      res.json(withLeaveBalance(publicUser(newUser), await db.getAllLeaveBalances()));
+      res.json(withLeaveBalance(publicUser(newUser), await db.getAllLeaveBalances(req.user.companyId)));
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -616,17 +689,17 @@ async function startServer() {
         updates.password = await bcrypt.hash(password, 10);
       }
       
-      const updatedUser = await db.updateUser(id, updates);
+      const updatedUser = await db.updateUser(req.user.companyId, id, updates);
       if (!updatedUser) {
         return res.status(404).json({ error: 'User not found' });
       }
       
       // Changing the allowance never touches days already consumed.
       if (typeof soldeConge === 'number') {
-        await db.updateLeaveBalance(id, { entitlement: soldeConge });
+        await db.updateLeaveBalance(req.user.companyId, id, { entitlement: soldeConge });
       }
 
-      res.json(withLeaveBalance(publicUser(updatedUser), await db.getAllLeaveBalances()));
+      res.json(withLeaveBalance(publicUser(updatedUser), await db.getAllLeaveBalances(req.user.companyId)));
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -636,7 +709,7 @@ async function startServer() {
   app.delete('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const success = await db.deleteUser(id);
+      const success = await db.deleteUser(req.user.companyId, id);
       if (!success) {
         return res.status(404).json({ error: 'User not found' });
       }
@@ -654,7 +727,7 @@ async function startServer() {
   // GET /api/clients
   app.get('/api/clients', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
     try {
-      let clients = await db.getAllClients();
+      let clients = await db.getAllClients(req.user.companyId);
 
       // Parse filters
       let filters: Record<string, string> = {};
@@ -752,7 +825,7 @@ async function startServer() {
   // GET /api/clients/fields
   app.get('/api/clients/fields', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
     try {
-      const clients = await db.getAllClients();
+      const clients = await db.getAllClients(req.user.companyId);
       const customFieldKeys = new Set<string>();
       clients.forEach((c: any) => {
         if (c.customFields) {
@@ -769,7 +842,7 @@ async function startServer() {
   app.get('/api/clients/:id', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const client = await db.getClientById(id);
+      const client = await db.getClientById(req.user.companyId, id);
       if (!client) {
         return res.status(404).json({ error: 'Client not found' });
       }
@@ -789,7 +862,7 @@ app.get('/api/kpi/users/search', authenticate, async (req: any, res: any) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const q = (req.query.q || '').toLowerCase();
-  let users = await db.getAllUsers();
+  let users = await db.getAllUsers(req.user.companyId);
   users = users.filter((u: any) => u.role !== 'ADMIN');
   if (q) {
     users = users.filter((u: any) => 
@@ -806,7 +879,7 @@ app.get('/api/kpi/clients/search', authenticate, async (req: any, res: any) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const q = (req.query.q || '').toLowerCase();
-  let clients = await db.getAllClients();
+  let clients = await db.getAllClients(req.user.companyId);
   if (q) {
     clients = clients.filter((c: any) => c.name.toLowerCase().includes(q));
   }
@@ -832,10 +905,10 @@ app.post('/api/kpi/client-tasks', authenticate, async (req: any, res: any) => {
     if (!key) return res.status(400).json({ error: 'A client key is required' });
 
     const isAdminViewer = req.user.role === 'ADMIN';
-    const allUsers = await db.getAllUsers();
+    const allUsers = await db.getAllUsers(req.user.companyId);
     const usersById = new Map<number, any>(allUsers.map((u: any) => [u.id, u]));
 
-    const entries = filterKpiEntries(await db.getAllTimeEntries() || [], req.body)
+    const entries = filterKpiEntries(await db.getAllTimeEntries(req.user.companyId) || [], req.body)
       .filter((t: any) => clientBucketKey(t) === String(key))
       .sort((a: any, b: any) => accruedSeconds(b) - accruedSeconds(a));
 
@@ -878,10 +951,10 @@ app.post('/api/kpi/employee-tasks', authenticate, async (req: any, res: any) => 
     if (!Number.isFinite(userId)) return res.status(400).json({ error: 'A userId is required' });
 
     const isAdminViewer = req.user.role === 'ADMIN';
-    const clients = await db.getAllClients() || [];
+    const clients = await db.getAllClients(req.user.companyId) || [];
     const clientsById = new Map<number, any>(clients.map((c: any) => [c.id, c]));
 
-    const entries = filterKpiEntries(await db.getAllTimeEntries() || [], req.body)
+    const entries = filterKpiEntries(await db.getAllTimeEntries(req.user.companyId) || [], req.body)
       .filter((t: any) => t.userId === userId)
       .sort((a: any, b: any) => accruedSeconds(b) - accruedSeconds(a));
 
@@ -948,12 +1021,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const endTs = endDate ? parseIsoDate(endDate) + 86400000 - 1 : Infinity; // Include the whole end day
 
     // Get all base data
-    const allUsers = await db.getAllUsers();
-    let timeEntries = await db.getAllTimeEntries() || [];
-    let leaveRequests = await db.getAllLeaveRequests() || [];
-    let authorizations = await db.getAllAbsenceAuthorizations() || [];
-    let clients = await db.getAllClients() || [];
-    let leaveBalances = await db.getAllLeaveBalances() || [];
+    const allUsers = await db.getAllUsers(req.user.companyId);
+    let timeEntries = await db.getAllTimeEntries(req.user.companyId) || [];
+    let leaveRequests = await db.getAllLeaveRequests(req.user.companyId) || [];
+    let authorizations = await db.getAllAbsenceAuthorizations(req.user.companyId) || [];
+    let clients = await db.getAllClients(req.user.companyId) || [];
+    let leaveBalances = await db.getAllLeaveBalances(req.user.companyId) || [];
 
     // Filter time entries (shared with the per-client drill-down endpoint)
     timeEntries = filterKpiEntries(timeEntries, req.body);
@@ -977,8 +1050,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     });
 
     const employees = allUsers.filter((u: any) => STAFF_ROLES.includes(u.role));
-    
-    const kpiSettings = await db.getSettings();
+
+    const kpiSettings = await db.getSettings(req.user.companyId);
     const isAdminViewer = req.user.role === 'ADMIN';
 
     // Index once instead of scanning allUsers/clients per task. With thousands
@@ -1171,7 +1244,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // normalised onto the identical bucket key — otherwise a client tracked by
     // name on one side and by id on the other would split into two rows.
     const invoiceBuckets = new Map<string, { netToPay: number; paid: number; count: number }>();
-    const allInvoices = await db.getAllInvoices() || [];
+    const allInvoices = await db.getAllInvoices(req.user.companyId) || [];
     for (const inv of allInvoices) {
       const ts = parseIsoDate(inv.issueDate);
       if (ts < startTs || ts > endTs) continue;
@@ -1286,7 +1359,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Client name is required' });
       }
 
-      const newClient = await db.createClient({
+      const newClient = await db.createClient(req.user.companyId, {
         id: Date.now(),
         name: name.trim(),
         type: type || 'Company',
@@ -1335,11 +1408,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         updatedAt: new Date().toISOString()
       };
       
-      const updated = await db.updateClient(id, updates);
+      const updated = await db.updateClient(req.user.companyId, id, updates);
       if (!updated) {
         return res.status(404).json({ error: 'Client not found' });
       }
-      
+
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -1371,7 +1444,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
       const skipDuplicates = req.body?.skipDuplicates !== false;
 
-      const existing = await db.getAllClients();
+      const existing = await db.getAllClients(req.user.companyId);
       // Case/whitespace-insensitive: "1399521M/A/M/000" and " 1399521m/a/m/000 "
       // are the same matricule fiscal to an accountant, not to a === check.
       const norm = (v: any) => String(v ?? '').trim().toLowerCase();
@@ -1448,7 +1521,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // Fired together rather than awaited one at a time: saveDb() coalesces
       // concurrent writes into a single trailing flush, so hundreds of rows
       // still cost roughly one file write, not hundreds.
-      const results = await Promise.allSettled(toCreate.map((c) => db.createClient(c)));
+      const results = await Promise.allSettled(toCreate.map((c) => db.createClient(req.user.companyId, c)));
       let created = 0;
       results.forEach((r, idx) => {
         if (r.status === 'fulfilled') created++;
@@ -1473,7 +1546,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
       // For now we'll do soft delete by marking as Inactive to preserve historical data
-      const updated = await db.updateClient(id, { status: 'Inactive', updatedAt: new Date().toISOString() });
+      const updated = await db.updateClient(req.user.companyId, id, { status: 'Inactive', updatedAt: new Date().toISOString() });
       if (!updated) {
         return res.status(404).json({ error: 'Client not found' });
       }
@@ -1490,7 +1563,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // GET /api/services
   app.get('/api/services', authenticate, async (req: any, res: any) => {
     try {
-      const services = await db.getAllServices();
+      const services = await db.getAllServices(req.user.companyId);
       res.json(services);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -1505,7 +1578,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Service name is required' });
       }
 
-      const newService = await db.createService({
+      const newService = await db.createService(req.user.companyId, {
         id: Date.now(),
         name: name.trim(),
         clientId: clientId || null,
@@ -1534,11 +1607,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         updatedAt: new Date().toISOString()
       };
       
-      const updated = await db.updateService(id, updates);
+      const updated = await db.updateService(req.user.companyId, id, updates);
       if (!updated) {
         return res.status(404).json({ error: 'Service not found' });
       }
-      
+
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -1549,7 +1622,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.delete('/api/services/:id', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const removed = await db.deleteService(id);
+      const removed = await db.deleteService(req.user.companyId, id);
       if (!removed) return res.status(404).json({ error: 'Service not found' });
       res.json({ success: true });
     } catch (error) {
@@ -1565,7 +1638,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // GET /api/task-types[?serviceId=]
   app.get('/api/task-types', authenticate, async (req: any, res: any) => {
     try {
-      let taskTypes = await db.getAllTaskTypes();
+      let taskTypes = await db.getAllTaskTypes(req.user.companyId);
       if (req.query.serviceId) {
         const sid = parseInt(req.query.serviceId, 10);
         taskTypes = taskTypes.filter((t: any) => t.serviceId === sid);
@@ -1583,10 +1656,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Task type name is required' });
       }
       const sid = parseInt(serviceId, 10);
-      if (!Number.isFinite(sid) || !(await db.getServiceById(sid))) {
+      if (!Number.isFinite(sid) || !(await db.getServiceById(req.user.companyId, sid))) {
         return res.status(400).json({ error: 'A valid mission is required' });
       }
-      const created = await db.createTaskType({
+      const created = await db.createTaskType(req.user.companyId, {
         id: Date.now(),
         name: name.trim(),
         serviceId: sid,
@@ -1609,12 +1682,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const updates: any = { name: name.trim(), updatedAt: new Date().toISOString() };
       if (serviceId !== undefined) {
         const sid = parseInt(serviceId, 10);
-        if (!Number.isFinite(sid) || !(await db.getServiceById(sid))) {
+        if (!Number.isFinite(sid) || !(await db.getServiceById(req.user.companyId, sid))) {
           return res.status(400).json({ error: 'A valid mission is required' });
         }
         updates.serviceId = sid;
       }
-      const updated = await db.updateTaskType(id, updates);
+      const updated = await db.updateTaskType(req.user.companyId, id, updates);
       if (!updated) return res.status(404).json({ error: 'Task type not found' });
       res.json(updated);
     } catch (error) {
@@ -1626,7 +1699,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.delete('/api/task-types/:id', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const removed = await db.deleteTaskType(id);
+      const removed = await db.deleteTaskType(req.user.companyId, id);
       if (!removed) return res.status(404).json({ error: 'Task type not found' });
       res.json({ success: true });
     } catch (error) {
@@ -1643,26 +1716,31 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * every user heartbeats every 30s, which would rewrite the whole database file
    * dozens of times a minute. Losing it on restart is correct — everyone simply
    * shows as inactive until their next heartbeat lands.
+   *
+   * Keyed by `${companyId}:${userId}`, not bare userId: numeric ids are minted
+   * independently per company, so two different companies' users can otherwise
+   * collide on the same key and leak one company's presence into another's.
    */
-  const presence = new Map<number, { lastSeenAt: number; lastActivityAt: number }>();
+  const presence = new Map<string, { lastSeenAt: number; lastActivityAt: number }>();
+  const presenceKey = (companyId: string, userId: number) => `${companyId}:${userId}`;
 
   /**
    * The server owns this decision. A client can report how long it has been
    * idle, but it cannot report that its own machine is off — that is only
    * visible here, as heartbeats that stopped arriving.
+   *
+   * The away threshold is configurable per company, and presence is evaluated
+   * on every heartbeat from every user, so each company's value is cached
+   * rather than re-read from the database each time. A few seconds of
+   * staleness after an admin changes it is irrelevant to a 30-minute threshold.
    */
-  /**
-   * The away threshold is configurable, and presence is evaluated on every
-   * heartbeat from every user, so it is cached rather than re-read from the
-   * database each time. A few seconds of staleness after an admin changes it is
-   * irrelevant to a 30-minute threshold.
-   */
-  let awayMsCache = { value: DEFAULT_AWAY_AFTER_MINUTES * 60 * 1000, at: 0 };
-  const awayAfterMs = async () => {
-    if (Date.now() - awayMsCache.at < 10_000) return awayMsCache.value;
-    const settings = await db.getSettings();
+  const awayMsCache = new Map<string, { value: number; at: number }>();
+  const awayAfterMs = async (companyId: string) => {
+    const cached = awayMsCache.get(companyId);
+    if (cached && Date.now() - cached.at < 10_000) return cached.value;
+    const settings = await db.getSettings(companyId);
     const value = clampAwayMinutes(settings?.awayAfterMinutes ?? DEFAULT_AWAY_AFTER_MINUTES) * 60 * 1000;
-    awayMsCache = { value, at: Date.now() };
+    awayMsCache.set(companyId, { value, at: Date.now() });
     return value;
   };
 
@@ -1677,8 +1755,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     return 'ACTIVE';
   };
 
-  const presenceFor = (userId: number, awayMs: number) => {
-    const rec = presence.get(userId);
+  const presenceFor = (companyId: string, userId: number, awayMs: number) => {
+    const rec = presence.get(presenceKey(companyId, userId));
     const state = presenceStateOf(rec, awayMs);
     return {
       state,
@@ -1691,11 +1769,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   /** Heartbeat. `idleMs` = time since this user last touched mouse or keyboard. */
   app.post('/api/presence', authenticate, async (req: any, res: any) => {
     const now = Date.now();
-    const awayMs = await awayAfterMs();
+    const awayMs = await awayAfterMs(req.user.companyId);
     const reported = Number(req.body?.idleMs);
     const idleMs = Number.isFinite(reported) && reported >= 0 ? Math.min(reported, awayMs * 6) : 0;
-    presence.set(req.user.id, { lastSeenAt: now, lastActivityAt: now - idleMs });
-    res.json({ userId: req.user.id, ...presenceFor(req.user.id, awayMs) });
+    presence.set(presenceKey(req.user.companyId, req.user.id), { lastSeenAt: now, lastActivityAt: now - idleMs });
+    res.json({ userId: req.user.id, ...presenceFor(req.user.companyId, req.user.id, awayMs) });
   });
 
   /**
@@ -1704,8 +1782,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * MANAGE_PRESENCE_SETTINGS. The server still decides every state — this only
    * tells the client which threshold it is being judged against.
    */
-  app.get('/api/presence/settings', authenticate, async (_req: any, res: any) => {
-    const settings = await db.getSettings();
+  app.get('/api/presence/settings', authenticate, async (req: any, res: any) => {
+    const settings = await db.getSettings(req.user.companyId);
     res.json({ awayAfterMinutes: clampAwayMinutes(settings?.awayAfterMinutes ?? DEFAULT_AWAY_AFTER_MINUTES) });
   });
 
@@ -1715,24 +1793,24 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       return res.status(400).json({ error: 'awayAfterMinutes doit être un nombre de minutes.' });
     }
     const awayAfterMinutes = clampAwayMinutes(raw);
-    await db.updateSettings({ awayAfterMinutes });
-    awayMsCache = { value: awayAfterMinutes * 60 * 1000, at: Date.now() };
+    await db.updateSettings(req.user.companyId, { awayAfterMinutes });
+    awayMsCache.set(req.user.companyId, { value: awayAfterMinutes * 60 * 1000, at: Date.now() });
     res.json({ awayAfterMinutes });
   });
 
   /** Sent on logout / tab close so the user drops to inactive immediately. */
   app.post('/api/presence/offline', authenticate, (req: any, res: any) => {
-    presence.delete(req.user.id);
+    presence.delete(presenceKey(req.user.companyId, req.user.id));
     res.json({ success: true });
   });
 
-  /** Presence of every known user, keyed by id. */
+  /** Presence of every known user in this company, keyed by id. */
   app.get('/api/presence', authenticate, async (req: any, res: any) => {
     try {
-      const users = await db.getAllUsers();
-      const awayMs = await awayAfterMs();
+      const users = await db.getAllUsers(req.user.companyId);
+      const awayMs = await awayAfterMs(req.user.companyId);
       const byUser: Record<string, any> = {};
-      for (const u of users) byUser[u.id] = presenceFor(u.id, awayMs);
+      for (const u of users) byUser[u.id] = presenceFor(req.user.companyId, u.id, awayMs);
       res.json(byUser);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -1872,7 +1950,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
-      const all = await db.getAllInvoices();
+      const all = await db.getAllInvoices(req.user.companyId);
       const q = String(req.query.q || '').toLowerCase();
       const filtered = q
         ? all.filter((i: any) =>
@@ -1891,7 +1969,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/invoices/:id', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
-      const invoice = await db.getInvoiceById(req.params.id);
+      const invoice = await db.getInvoiceById(req.user.companyId, req.params.id);
       if (!invoice) return res.status(404).json({ error: 'Document introuvable' });
       res.json(invoice);
     } catch (error) {
@@ -1902,9 +1980,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   /** Peek at the number the next document will get (display only; not reserved). */
   app.get('/api/invoices/meta/next-number', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
     try {
-      const settings = await db.getSettings();
+      const settings = await db.getSettings(req.user.companyId);
       const current = typeof settings.invoiceCounter === 'number' ? settings.invoiceCounter : 0;
-      const all = await db.getAllInvoices();
+      const all = await db.getAllInvoices(req.user.companyId);
       // Only the legal sequence carries the date rule, so only a *legal*
       // invoice can bound the next one. Returning the newest document of any
       // kind let an autre document — which is exempt — set a floor the server
@@ -1936,7 +2014,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
 
       const kind = body.documentKind === 'AUTRE' ? 'AUTRE' : 'FACTURE_LEGALE';
-      const all = await db.getAllInvoices();
+      const all = await db.getAllInvoices(req.user.companyId);
 
       // Only a legal invoice is bound to the sequence. "Autre document" carries
       // a free reference (bon de livraison, reçu…), so it neither follows the
@@ -1960,9 +2038,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       const totals = computeInvoiceTotals(body);
       const paymentState = computePaymentState(totals.totalNetToPay, body.payments);
-      if (kind !== 'AUTRE') number = await db.nextInvoiceNumber();
+      if (kind !== 'AUTRE') number = await db.nextInvoiceNumber(req.user.companyId);
 
-      const invoice = await db.createInvoice({
+      const invoice = await db.createInvoice(req.user.companyId, {
         id: `inv-${Date.now()}`,
         number,
         documentKind: kind,
@@ -1999,7 +2077,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.put('/api/invoices/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
     try {
-      const existing = await db.getInvoiceById(req.params.id);
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
       if (!existing) return res.status(404).json({ error: 'Document introuvable' });
 
       const merged = { ...existing, ...req.body };
@@ -2011,7 +2089,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         if (!wanted) {
           return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
         }
-        const all = await db.getAllInvoices();
+        const all = await db.getAllInvoices(req.user.companyId);
         if (all.some((i: any) => i.id !== existing.id && i.number === wanted)) {
           return res.status(400).json({ error: `Le numéro « ${wanted} » est déjà utilisé.` });
         }
@@ -2036,14 +2114,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // in order could be moved to any date afterwards.
       if (merged.documentKind !== 'AUTRE') {
         const dateError = legalSequenceDateError(
-          await db.getAllInvoices(), existing.id, Number(merged.number), merged.issueDate,
+          await db.getAllInvoices(req.user.companyId), existing.id, Number(merged.number), merged.issueDate,
         );
         if (dateError) return res.status(400).json({ error: dateError });
       }
       const totals = computeInvoiceTotals(merged);
       const paymentState = computePaymentState(totals.totalNetToPay, merged.payments);
 
-      const updated = await db.updateInvoice(req.params.id, {
+      const updated = await db.updateInvoice(req.user.companyId, req.params.id, {
         ...merged,
         ...totals,
         ...paymentState,
@@ -2058,7 +2136,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.delete('/api/invoices/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
     try {
-      const removed = await db.deleteInvoice(req.params.id);
+      const removed = await db.deleteInvoice(req.user.companyId, req.params.id);
       if (!removed) return res.status(404).json({ error: 'Document introuvable' });
       res.json({ success: true });
     } catch (error) {
@@ -2073,7 +2151,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // GET Approvers
   app.get('/api/hr/approvers', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
     try {
-      const users = await db.getAllUsers();
+      const users = await db.getAllUsers(req.user.companyId);
       // Allow ADMIN, MANAGER, SUPERVISOR to be approvers
       const approvers = users.filter((u: any) => HR_APPROVER_ROLES.includes(u.role));
       res.json(approvers.map((u: any) => ({ id: u.id, name: u.username, role: u.role })));
@@ -2085,14 +2163,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // GET Leave Requests
   app.get('/api/hr/leaves', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
     try {
-      const leaves = await db.getAllLeaveRequests();
+      const leaves = await db.getAllLeaveRequests(req.user.companyId);
       let result = leaves;
-      
+
       if (req.user.role !== 'ADMIN') {
         result = leaves.filter((l: any) => l.userId === req.user.id || l.approverId === req.user.id);
       }
-      
-      const users = await db.getAllUsers();
+
+      const users = await db.getAllUsers(req.user.companyId);
       result = result.map((l: any) => ({
         ...l,
         userName: users.find((u: any) => u.id === l.userId)?.username || 'Unknown',
@@ -2110,7 +2188,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.post('/api/hr/leaves', authenticate, requirePermission('CREATE_LEAVE_REQUEST'), async (req: any, res: any) => {
     try {
       const { type, startDate, endDate, duration, reason, approverId } = req.body;
-      const leave = await db.createLeaveRequest({
+      const leave = await db.createLeaveRequest(req.user.companyId, {
         id: Date.now(),
         userId: req.user.id,
         approverId: Number(approverId),
@@ -2123,8 +2201,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
-      const requester = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+      const requester = await db.getUserById(req.user.companyId, req.user.id);
       await notify(
+        req.user.companyId,
         Number(approverId),
         'LEAVE_REQUEST',
         'Demande de congé à approuver',
@@ -2140,9 +2219,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.post('/api/hr/leaves/:id/approve', authenticate, requirePermission('MANAGE_LEAVE_REQUESTS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const leave = await db.getLeaveRequestById(id);
+      const leave = await db.getLeaveRequestById(req.user.companyId, id);
       if (!leave) return res.status(404).json({ error: 'Not found' });
-      
+
       // Ensure the user is the assigned approver or an Admin
       if (leave.approverId !== req.user.id && req.user.role !== 'ADMIN') {
         return res.status(403).json({ error: 'You are not authorized to approve this request.' });
@@ -2151,22 +2230,22 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (leave.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
 
       // Deduct balance
-      const balance = await db.getLeaveBalanceByUserId(leave.userId);
+      const balance = await db.getLeaveBalanceByUserId(req.user.companyId, leave.userId);
       if (balance.available < leave.duration) {
         return res.status(400).json({ error: 'Insufficient leave balance' });
       }
 
       // Only `used` moves; `available` is derived from the admin-set entitlement.
-      await db.updateLeaveBalance(leave.userId, { used: balance.used + leave.duration });
+      await db.updateLeaveBalance(req.user.companyId, leave.userId, { used: balance.used + leave.duration });
 
-      const updated = await db.updateLeaveRequest(id, {
+      const updated = await db.updateLeaveRequest(req.user.companyId, id, {
         status: 'APPROVED',
         approvedBy: req.user.id,
         approvedAt: new Date().toISOString(),
         approverComment: req.body.comment || '',
         updatedAt: new Date().toISOString()
       });
-      await notify(leave.userId, 'LEAVE_DECISION', 'Congé approuvé', `Votre demande de congé du ${leave.startDate} au ${leave.endDate} a été approuvée.`);
+      await notify(req.user.companyId, leave.userId, 'LEAVE_DECISION', 'Congé approuvé', `Votre demande de congé du ${leave.startDate} au ${leave.endDate} a été approuvée.`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2180,9 +2259,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const { comment } = req.body;
       if (!comment) return res.status(400).json({ error: 'Rejection reason required' });
 
-      const leave = await db.getLeaveRequestById(id);
+      const leave = await db.getLeaveRequestById(req.user.companyId, id);
       if (!leave) return res.status(404).json({ error: 'Not found' });
-      
+
       // Ensure the user is the assigned approver or an Admin
       if (leave.approverId !== req.user.id && req.user.role !== 'ADMIN') {
         return res.status(403).json({ error: 'You are not authorized to reject this request.' });
@@ -2190,7 +2269,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       if (leave.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
 
-      const updated = await db.updateLeaveRequest(id, {
+      const updated = await db.updateLeaveRequest(req.user.companyId, id, {
         status: 'REJECTED',
         approvedBy: req.user.id,
         approvedAt: new Date().toISOString(),
@@ -2198,7 +2277,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         approverComment: comment,
         updatedAt: new Date().toISOString()
       });
-      await notify(leave.userId, 'LEAVE_DECISION', 'Congé refusé', `Votre demande de congé du ${leave.startDate} au ${leave.endDate} a été refusée : ${comment}`);
+      await notify(req.user.companyId, leave.userId, 'LEAVE_DECISION', 'Congé refusé', `Votre demande de congé du ${leave.startDate} au ${leave.endDate} a été refusée : ${comment}`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2209,25 +2288,25 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.post('/api/hr/leaves/:id/cancel', authenticate, async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const leave = await db.getLeaveRequestById(id);
+      const leave = await db.getLeaveRequestById(req.user.companyId, id);
       if (!leave) return res.status(404).json({ error: 'Not found' });
-      
+
       const perms = JSON.parse(req.user.permissions || '[]');
       if (leave.userId !== req.user.id && !perms.includes('MANAGE_LEAVE_REQUESTS')) {
         return res.status(403).json({ error: 'Forbidden' });
       }
 
       if (leave.status === 'CANCELLED') return res.status(400).json({ error: 'Already cancelled' });
-      
+
       // If it was approved, we must restore the balance
       if (leave.status === 'APPROVED') {
-        const balance = await db.getLeaveBalanceByUserId(leave.userId);
-        await db.updateLeaveBalance(leave.userId, {
+        const balance = await db.getLeaveBalanceByUserId(req.user.companyId, leave.userId);
+        await db.updateLeaveBalance(req.user.companyId, leave.userId, {
           used: Math.max(0, balance.used - leave.duration),
         });
       }
 
-      const updated = await db.updateLeaveRequest(id, {
+      const updated = await db.updateLeaveRequest(req.user.companyId, id, {
         status: 'CANCELLED',
         updatedAt: new Date().toISOString()
       });
@@ -2240,14 +2319,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // GET Absence Authorizations
   app.get('/api/hr/authorizations', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
     try {
-      const auths = await db.getAllAbsenceAuthorizations();
+      const auths = await db.getAllAbsenceAuthorizations(req.user.companyId);
       let result = auths;
-      
+
       if (req.user.role !== 'ADMIN') {
         result = auths.filter((a: any) => a.userId === req.user.id || a.approverId === req.user.id);
       }
-      
-      const users = await db.getAllUsers();
+
+      const users = await db.getAllUsers(req.user.companyId);
       result = result.map((a: any) => ({
         ...a,
         userName: users.find((u: any) => u.id === a.userId)?.username || 'Unknown',
@@ -2265,7 +2344,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.post('/api/hr/authorizations', authenticate, requirePermission('CREATE_ABSENCE_AUTHORIZATION'), async (req: any, res: any) => {
     try {
       const { date, startTime, endTime, duration, reason, comment, approverId } = req.body;
-      const auth = await db.createAbsenceAuthorization({
+      const auth = await db.createAbsenceAuthorization(req.user.companyId, {
         id: Date.now(),
         userId: req.user.id,
         approverId: Number(approverId),
@@ -2279,8 +2358,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
-      const requester = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+      const requester = await db.getUserById(req.user.companyId, req.user.id);
       await notify(
+        req.user.companyId,
         Number(approverId),
         'ABSENCE_REQUEST',
         "Demande d'autorisation d'absence",
@@ -2296,23 +2376,23 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.post('/api/hr/authorizations/:id/approve', authenticate, requirePermission('MANAGE_ABSENCE_AUTHORIZATIONS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const auth = await db.getAbsenceAuthorizationById(id);
+      const auth = await db.getAbsenceAuthorizationById(req.user.companyId, id);
       if (!auth) return res.status(404).json({ error: 'Not found' });
-      
+
       if (auth.approverId !== req.user.id && req.user.role !== 'ADMIN') {
         return res.status(403).json({ error: 'You are not authorized to approve this request.' });
       }
 
       if (auth.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
 
-      const updated = await db.updateAbsenceAuthorization(id, {
+      const updated = await db.updateAbsenceAuthorization(req.user.companyId, id, {
         status: 'APPROVED',
         approvedBy: req.user.id,
         approvedAt: new Date().toISOString(),
         approverComment: req.body.comment || '',
         updatedAt: new Date().toISOString()
       });
-      await notify(auth.userId, 'ABSENCE_DECISION', "Autorisation d'absence approuvée", `Votre demande d'autorisation d'absence du ${auth.date} a été approuvée.`);
+      await notify(req.user.companyId, auth.userId, 'ABSENCE_DECISION', "Autorisation d'absence approuvée", `Votre demande d'autorisation d'absence du ${auth.date} a été approuvée.`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2326,16 +2406,16 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const { comment } = req.body;
       if (!comment) return res.status(400).json({ error: 'Rejection reason required' });
 
-      const auth = await db.getAbsenceAuthorizationById(id);
+      const auth = await db.getAbsenceAuthorizationById(req.user.companyId, id);
       if (!auth) return res.status(404).json({ error: 'Not found' });
-      
+
       if (auth.approverId !== req.user.id && req.user.role !== 'ADMIN') {
         return res.status(403).json({ error: 'You are not authorized to reject this request.' });
       }
 
       if (auth.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
 
-      const updated = await db.updateAbsenceAuthorization(id, {
+      const updated = await db.updateAbsenceAuthorization(req.user.companyId, id, {
         status: 'REJECTED',
         approvedBy: req.user.id,
         approvedAt: new Date().toISOString(),
@@ -2343,7 +2423,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         approverComment: comment,
         updatedAt: new Date().toISOString()
       });
-      await notify(auth.userId, 'ABSENCE_DECISION', "Autorisation d'absence refusée", `Votre demande d'autorisation d'absence du ${auth.date} a été refusée : ${comment}`);
+      await notify(req.user.companyId, auth.userId, 'ABSENCE_DECISION', "Autorisation d'absence refusée", `Votre demande d'autorisation d'absence du ${auth.date} a été refusée : ${comment}`);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2354,9 +2434,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.post('/api/hr/authorizations/:id/cancel', authenticate, async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const auth = await db.getAbsenceAuthorizationById(id);
+      const auth = await db.getAbsenceAuthorizationById(req.user.companyId, id);
       if (!auth) return res.status(404).json({ error: 'Not found' });
-      
+
       const perms = JSON.parse(req.user.permissions || '[]');
       if (auth.userId !== req.user.id && !perms.includes('MANAGE_ABSENCE_AUTHORIZATIONS')) {
         return res.status(403).json({ error: 'Forbidden' });
@@ -2364,7 +2444,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       if (auth.status === 'CANCELLED') return res.status(400).json({ error: 'Already cancelled' });
 
-      const updated = await db.updateAbsenceAuthorization(id, {
+      const updated = await db.updateAbsenceAuthorization(req.user.companyId, id, {
         status: 'CANCELLED',
         updatedAt: new Date().toISOString()
       });
@@ -2377,7 +2457,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // GET Leave Balance
   app.get('/api/hr/balance', authenticate, async (req: any, res: any) => {
     try {
-      const balance = await db.getLeaveBalanceByUserId(req.user.id);
+      const balance = await db.getLeaveBalanceByUserId(req.user.companyId, req.user.id);
       res.json(balance);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2388,14 +2468,17 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // Chat (direct messages) API Routes & SSE
   // ---------------------------------------------------------
 
-  // Any authenticated user can message any other user — this is a small
-  // internal team tool, not a permission-gated feature like Clients or Cash.
-  // Connections are kept per-user so a new message is only pushed to the two
-  // people involved, never broadcast to everyone like the time-entries feed.
-  const chatSseClients = new Map<number, Set<any>>();
+  // Any authenticated user can message any other user in their own company —
+  // this is a small internal team tool, not a permission-gated feature like
+  // Clients or Cash. Connections are keyed by `${companyId}:${userId}` (not
+  // bare userId — two companies' independently-minted ids can collide) so a
+  // new message is only pushed to the two people involved, never broadcast
+  // to everyone like the time-entries feed.
+  const chatSseClients = new Map<string, Set<any>>();
+  const chatKey = (companyId: string, userId: number) => `${companyId}:${userId}`;
 
-  const sendToUser = (userId: number, payload: any) => {
-    const conns = chatSseClients.get(userId);
+  const sendToUser = (companyId: string, userId: number, payload: any) => {
+    const conns = chatSseClients.get(chatKey(companyId, userId));
     if (!conns || conns.size === 0) return;
     const frame = `data: ${JSON.stringify(payload)}\n\n`;
     for (const res of conns) res.write(frame);
@@ -2406,8 +2489,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // since a collaborator needs to see who they can message.
   app.get('/api/messages/contacts', authenticate, async (req: any, res: any) => {
     try {
-      const allUsers = await db.getAllUsers();
-      const messages = await db.getAllMessages();
+      const allUsers = await db.getAllUsers(req.user.companyId);
+      const messages = await db.getAllMessages(req.user.companyId);
       const contacts = allUsers
         .filter((u: any) => u.id !== req.user.id)
         .map((u: any) => {
@@ -2442,7 +2525,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // GET /api/messages/unread-count — total across every conversation, for the sidebar badge.
   app.get('/api/messages/unread-count', authenticate, async (req: any, res: any) => {
     try {
-      const messages = await db.getAllMessages();
+      const messages = await db.getAllMessages(req.user.companyId);
       const count = messages.filter((m: any) => m.toUserId === req.user.id && !m.readAt).length;
       res.json({ count });
     } catch (error) {
@@ -2458,7 +2541,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const otherId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(otherId)) return res.status(400).json({ error: 'Invalid userId' });
 
-      const messages = await db.getAllMessages();
+      const messages = await db.getAllMessages(req.user.companyId);
       const thread = messages
         .filter((m: any) =>
           (m.fromUserId === req.user.id && m.toUserId === otherId) ||
@@ -2466,9 +2549,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         )
         .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-      const changed = await db.markMessagesRead(req.user.id, otherId);
+      const changed = await db.markMessagesRead(req.user.companyId, req.user.id, otherId);
       if (changed > 0) {
-        sendToUser(otherId, { type: 'read', by: req.user.id });
+        sendToUser(req.user.companyId, otherId, { type: 'read', by: req.user.id });
       }
 
       res.json(thread);
@@ -2487,10 +2570,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (!body) return res.status(400).json({ error: 'Message body is required' });
       if (body.length > 4000) return res.status(400).json({ error: 'Message too long' });
 
-      const recipient = await db.get('SELECT * FROM users WHERE id = ?', toUserId);
+      const recipient = await db.getUserById(req.user.companyId, toUserId);
       if (!recipient) return res.status(404).json({ error: 'Recipient not found' });
 
-      const message = await db.createMessage({
+      const message = await db.createMessage(req.user.companyId, {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         fromUserId: req.user.id,
         toUserId,
@@ -2500,8 +2583,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       });
 
       res.status(201).json(message);
-      sendToUser(toUserId, { type: 'message', message });
-      sendToUser(req.user.id, { type: 'message', message });
+      sendToUser(req.user.companyId, toUserId, { type: 'message', message });
+      sendToUser(req.user.companyId, req.user.id, { type: 'message', message });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -2517,15 +2600,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    const userId = req.user.id;
-    if (!chatSseClients.has(userId)) chatSseClients.set(userId, new Set());
-    chatSseClients.get(userId)!.add(res);
+    const key = chatKey(req.user.companyId, req.user.id);
+    if (!chatSseClients.has(key)) chatSseClients.set(key, new Set());
+    chatSseClients.get(key)!.add(res);
 
     req.on('close', () => {
-      const conns = chatSseClients.get(userId);
+      const conns = chatSseClients.get(key);
       if (conns) {
         conns.delete(res);
-        if (conns.size === 0) chatSseClients.delete(userId);
+        if (conns.size === 0) chatSseClients.delete(key);
       }
     });
   });
@@ -2557,13 +2640,13 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   const visibleEntriesFor = (entries: any[], viewerIsAdmin: boolean, adminIds: Set<number>) =>
     viewerIsAdmin ? entries : entries.filter((e: any) => !adminIds.has(e.userId));
 
-  const adminUserIds = async () =>
+  const adminUserIds = async (companyId: string) =>
     new Set<number>(
-      (await db.getAllUsers()).filter((u: any) => u.role === 'ADMIN').map((u: any) => u.id),
+      (await db.getAllUsers(companyId)).filter((u: any) => u.role === 'ADMIN').map((u: any) => u.id),
     );
 
-  const enrichEntries = async (entries: any[], forAdmin: boolean) => {
-    const users = await db.getAllUsers();
+  const enrichEntries = async (companyId: string, entries: any[], forAdmin: boolean) => {
+    const users = await db.getAllUsers(companyId);
     // Indexed once: a find() in here is a linear scan per task.
     const usersById = new Map<number, any>(users.map((u: any) => [u.id, u]));
     return entries.map((e: any) => {
@@ -2593,19 +2676,27 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   const ENTRIES_PAGE_SIZE = 200;
 
   const doBroadcast = async () => {
-    const raw = await db.getAllTimeEntries();
-    const adminIds = await adminUserIds();
-    // Two payloads only: admins get the cost fields and every row, everyone
-    // else gets neither. Both axes split admin/non-admin, so one frame each.
-    const cache: Record<string, string> = {};
-    for (const client of sseClients) {
-      const key = client.isAdmin ? 'admin' : 'plain';
-      if (!cache[key]) {
-        const visible = visibleEntriesFor(raw, client.isAdmin, adminIds);
-        const data = await enrichEntries(visible.slice(0, ENTRIES_PAGE_SIZE), client.isAdmin);
-        cache[key] = `data: ${JSON.stringify({ data, total: visible.length })}\n\n`;
+    // Grouped by company so each company's data is fetched and its frames
+    // built once — not once per subscriber, and never sent across a tenant
+    // boundary. Within a company: two payloads only, admins get the cost
+    // fields and every row, everyone else gets neither.
+    const companyIds = new Set<string>();
+    for (const c of sseClients) companyIds.add(c.companyId);
+
+    for (const companyId of companyIds) {
+      const raw = await db.getAllTimeEntries(companyId);
+      const adminIds = await adminUserIds(companyId);
+      const cache: Record<string, string> = {};
+      for (const client of sseClients) {
+        if (client.companyId !== companyId) continue;
+        const key = client.isAdmin ? 'admin' : 'plain';
+        if (!cache[key]) {
+          const visible = visibleEntriesFor(raw, client.isAdmin, adminIds);
+          const data = await enrichEntries(companyId, visible.slice(0, ENTRIES_PAGE_SIZE), client.isAdmin);
+          cache[key] = `data: ${JSON.stringify({ data, total: visible.length })}\n\n`;
+        }
+        client.res.write(cache[key]);
       }
-      client.res.write(cache[key]);
     }
   };
 
@@ -2630,7 +2721,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders(); // flush the headers to establish SSE
 
-    const client = { res, isAdmin: req.user.role === 'ADMIN' };
+    const client = { res, isAdmin: req.user.role === 'ADMIN', companyId: req.user.companyId };
     sseClients.add(client);
     // Send this client its first frame immediately rather than waiting on the
     // coalescing timer.
@@ -2646,14 +2737,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * time into each one. Keeps the "at most one running task per person"
    * invariant no matter who triggered the change.
    */
-  const pauseOtherRunningEntries = async (userId: number, keepId: string) => {
-    const all = await db.getAllTimeEntries();
+  const pauseOtherRunningEntries = async (companyId: string, userId: number, keepId: string) => {
+    const all = await db.getAllTimeEntries(companyId);
     for (const other of all) {
       if (other.userId !== userId || other.id === keepId || other.statut !== 'RUNNING') continue;
       const elapsed = other.lastStartedAt
         ? Math.floor((Date.now() - other.lastStartedAt) / 1000)
         : 0;
-      await db.updateTimeEntry(other.id, {
+      await db.updateTimeEntry(companyId, other.id, {
         statut: 'PAUSED',
         dureeSeconds: (other.dureeSeconds || 0) + elapsed,
         lastStartedAt: null,
@@ -2665,10 +2756,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.get('/api/time-entries', authenticate, async (req: any, res: any) => {
     try {
       const isAdmin = req.user.role === 'ADMIN';
-      const all = visibleEntriesFor(await db.getAllTimeEntries(), isAdmin, await adminUserIds());
+      const all = visibleEntriesFor(await db.getAllTimeEntries(req.user.companyId), isAdmin, await adminUserIds(req.user.companyId));
       const limit = Math.min(parseInt(req.query.limit, 10) || ENTRIES_PAGE_SIZE, 1000);
       const offset = parseInt(req.query.offset, 10) || 0;
-      const data = await enrichEntries(all.slice(offset, offset + limit), isAdmin);
+      const data = await enrichEntries(req.user.companyId, all.slice(offset, offset + limit), isAdmin);
       res.json({ data, total: all.length, limit, offset });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2686,9 +2777,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * `id: undefined`, which no route could then update or delete and which
    * broke React's keys in the table.
    */
-  const createRunningEntryForUser = async (userId: number, fields: any) => {
-    const userFull = await db.get('SELECT * FROM users WHERE id = ?', userId);
-    const settings = await db.getSettings() || {};
+  const createRunningEntryForUser = async (companyId: string, userId: number, fields: any) => {
+    const userFull = await db.getUserById(companyId, userId);
+    const settings = await db.getSettings(companyId) || {};
     // Snapshot the author's employer cost. Reads resolve it live as well, so
     // this is only a record of the rate in force when the task was created.
     const hourlyRate = employerHourlyRate(userFull, settings);
@@ -2700,9 +2791,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const id = fields.id || `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const statut = fields.statut ?? 'RUNNING';
     if (statut === 'RUNNING') {
-      await pauseOtherRunningEntries(userId, id);
+      await pauseOtherRunningEntries(companyId, userId, id);
     }
-    return db.createTimeEntry({
+    return db.createTimeEntry(companyId, {
       ...fields,
       id,
       statut,
@@ -2717,7 +2808,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.post('/api/time-entries', authenticate, async (req: any, res: any) => {
     try {
-      const entry = await createRunningEntryForUser(req.user.id, req.body);
+      const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, req.body);
       res.json(entry);
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
@@ -2728,9 +2819,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.put('/api/time-entries/:id', authenticate, async (req: any, res: any) => {
     try {
       const entryId = req.params.id;
-      const existing = await db.getTimeEntryById(entryId);
+      const existing = await db.getTimeEntryById(req.user.companyId, entryId);
       if (!existing) return res.status(404).json({ error: 'Not found' });
-      
+
       const perms = JSON.parse(req.user.permissions || '[]');
       if (existing.userId !== req.user.id && req.user.role !== 'ADMIN' && !perms.includes('MODIFY')) {
         return res.status(403).json({ error: 'Forbidden' });
@@ -2761,10 +2852,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // One running task per person. Resuming a task (including an admin
       // resuming someone else's) pauses whatever else that person had running.
       if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
-        await pauseOtherRunningEntries(existing.userId, entryId);
+        await pauseOtherRunningEntries(req.user.companyId, existing.userId, entryId);
       }
 
-      const updated = await db.updateTimeEntry(entryId, updates);
+      const updated = await db.updateTimeEntry(req.user.companyId, entryId, updates);
       res.json(updated);
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
@@ -2776,15 +2867,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.delete('/api/time-entries/:id', authenticate, async (req: any, res: any) => {
     try {
       const entryId = req.params.id;
-      const existing = await db.getTimeEntryById(entryId);
+      const existing = await db.getTimeEntryById(req.user.companyId, entryId);
       if (!existing) return res.status(404).json({ error: 'Not found' });
-      
+
       const perms = JSON.parse(req.user.permissions || '[]');
       if (existing.userId !== req.user.id && req.user.role !== 'ADMIN' && !perms.includes('DELETE')) {
         return res.status(403).json({ error: 'Forbidden' });
       }
 
-      await db.deleteTimeEntry(entryId);
+      await db.deleteTimeEntry(req.user.companyId, entryId);
       res.json({ success: true });
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
@@ -2805,8 +2896,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * function body but registered before this point runs. Declarations are
    * hoisted through the whole scope; a `const` would not be.
    */
-  async function notify(userId: number, type: string, title: string, body: string) {
-    await db.createNotification({
+  async function notify(companyId: string, userId: number, type: string, title: string, body: string) {
+    await db.createNotification(companyId, {
       id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       userId,
       type,
@@ -2821,7 +2912,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/notifications', authenticate, async (req: any, res: any) => {
     try {
-      const mine = (await db.getAllNotifications()).filter((n: any) => n.userId === req.user.id);
+      const mine = (await db.getAllNotifications(req.user.companyId)).filter((n: any) => n.userId === req.user.id);
       const unreadCount = mine.filter((n: any) => !n.readAt).length;
       res.json({ items: mine.slice(0, NOTIFICATIONS_PAGE_SIZE), unreadCount });
     } catch (error) {
@@ -2831,12 +2922,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.put('/api/notifications/:id/read', authenticate, async (req: any, res: any) => {
     try {
-      const existing = await db.getAllNotifications();
+      const existing = await db.getAllNotifications(req.user.companyId);
       const n = existing.find((x: any) => x.id === req.params.id);
       // Not found *or belongs to someone else* both read as 404 — a
       // notification id must never let one user probe another's inbox.
       if (!n || n.userId !== req.user.id) return res.status(404).json({ error: 'Not found' });
-      const updated = await db.updateNotification(req.params.id, { readAt: n.readAt || new Date().toISOString() });
+      const updated = await db.updateNotification(req.user.companyId, req.params.id, { readAt: n.readAt || new Date().toISOString() });
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2845,9 +2936,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.put('/api/notifications/read-all', authenticate, async (req: any, res: any) => {
     try {
-      const mine = (await db.getAllNotifications()).filter((n: any) => n.userId === req.user.id && !n.readAt);
+      const mine = (await db.getAllNotifications(req.user.companyId)).filter((n: any) => n.userId === req.user.id && !n.readAt);
       const now = new Date().toISOString();
-      await Promise.allSettled(mine.map((n: any) => db.updateNotification(n.id, { readAt: now })));
+      await Promise.allSettled(mine.map((n: any) => db.updateNotification(req.user.companyId, n.id, { readAt: now })));
       res.json({ updated: mine.length });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -2863,7 +2954,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   /** Staff an assignment can target — the picker in the assign-task dialog. */
   app.get('/api/users/assignable', authenticate, requirePermission('ASSIGN_TASKS'), async (req: any, res: any) => {
     try {
-      const users = await db.getAllUsers();
+      const users = await db.getAllUsers(req.user.companyId);
       res.json(
         users
           .filter((u: any) => STAFF_ROLES.includes(u.role))
@@ -2882,11 +2973,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (!Number.isFinite(targetId)) return res.status(400).json({ error: 'assignedToUserId requis' });
       if (!String(pole || '').trim()) return res.status(400).json({ error: 'La mission est requise' });
 
-      const target = await db.get('SELECT * FROM users WHERE id = ?', targetId);
+      const target = await db.getUserById(req.user.companyId, targetId);
       if (!target) return res.status(404).json({ error: 'Collaborateur introuvable' });
 
-      const assigner = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
-      const assignment = await db.createTaskAssignment({
+      const assigner = await db.getUserById(req.user.companyId, req.user.id);
+      const assignment = await db.createTaskAssignment(req.user.companyId, {
         id: `assign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         assignedToUserId: targetId,
         assignedByUserId: req.user.id,
@@ -2905,6 +2996,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       });
 
       await notify(
+        req.user.companyId,
         targetId,
         'TASK_ASSIGNED',
         'Nouvelle tâche assignée',
@@ -2922,7 +3014,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   /** Pending assignments for the logged-in user — the dashboard widget. */
   app.get('/api/task-assignments/mine', authenticate, async (req: any, res: any) => {
     try {
-      const mine = (await db.getAllTaskAssignments())
+      const mine = (await db.getAllTaskAssignments(req.user.companyId))
         .filter((a: any) => a.assignedToUserId === req.user.id && a.status === 'PENDING');
       res.json(mine);
     } catch (error) {
@@ -2938,7 +3030,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    */
   app.put('/api/task-assignments/:id/start', authenticate, async (req: any, res: any) => {
     try {
-      const assignment = await db.getTaskAssignmentById(req.params.id);
+      const assignment = await db.getTaskAssignmentById(req.user.companyId, req.params.id);
       if (!assignment) return res.status(404).json({ error: 'Not found' });
       if (assignment.assignedToUserId !== req.user.id) {
         return res.status(403).json({ error: 'Cette tâche ne vous est pas assignée' });
@@ -2947,7 +3039,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(409).json({ error: 'Cette tâche a déjà été démarrée ou annulée' });
       }
 
-      const entry = await createRunningEntryForUser(req.user.id, {
+      const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, {
         client: assignment.client,
         clientId: assignment.clientId,
         pole: assignment.pole,
@@ -2958,7 +3050,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         statut: 'RUNNING',
       });
 
-      const updated = await db.updateTaskAssignment(assignment.id, {
+      const updated = await db.updateTaskAssignment(req.user.companyId, assignment.id, {
         status: 'STARTED',
         timeEntryId: entry.id,
         startedAt: new Date().toISOString(),
@@ -2975,12 +3067,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   /** Cancels a pending assignment. A started one is real history — left alone. */
   app.delete('/api/task-assignments/:id', authenticate, requirePermission('ASSIGN_TASKS'), async (req: any, res: any) => {
     try {
-      const assignment = await db.getTaskAssignmentById(req.params.id);
+      const assignment = await db.getTaskAssignmentById(req.user.companyId, req.params.id);
       if (!assignment) return res.status(404).json({ error: 'Not found' });
       if (assignment.status !== 'PENDING') {
         return res.status(400).json({ error: 'Seule une tâche en attente peut être annulée' });
       }
-      await db.deleteTaskAssignment(req.params.id);
+      await db.deleteTaskAssignment(req.user.companyId, req.params.id);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -3000,7 +3092,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/resource-templates', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
-      let templates = await db.getAllResourceTemplates();
+      let templates = await db.getAllResourceTemplates(req.user.companyId);
       if (req.query.type) templates = templates.filter((t: any) => t.type === req.query.type);
       res.json(templates);
     } catch (error) {
@@ -3010,7 +3102,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/resource-template-items', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
-      res.json(await db.getAllResourceTemplateItems());
+      res.json(await db.getAllResourceTemplateItems(req.user.companyId));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -3023,7 +3115,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Type de ressource invalide' });
       }
       if (!String(name || '').trim()) return res.status(400).json({ error: 'Le titre est requis' });
-      const template = await db.createResourceTemplate({
+      const template = await db.createResourceTemplate(req.user.companyId, {
         id: genId('tpl'),
         type,
         name: String(name).trim(),
@@ -3042,7 +3134,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.put('/api/resource-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const template = await db.getResourceTemplateById(req.params.id);
+      const template = await db.getResourceTemplateById(req.user.companyId, req.params.id);
       if (!template) return res.status(404).json({ error: 'Not found' });
       const { name, sector, isSequential, isActive } = req.body;
       const updates: any = {};
@@ -3050,7 +3142,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (sector !== undefined) updates.sector = sector ? String(sector).trim() : null;
       if (isSequential !== undefined) updates.isSequential = !!isSequential;
       if (isActive !== undefined) updates.isActive = !!isActive;
-      const updated = await db.updateResourceTemplate(req.params.id, updates);
+      const updated = await db.updateResourceTemplate(req.user.companyId, req.params.id, updates);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -3059,9 +3151,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.delete('/api/resource-templates/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const template = await db.getResourceTemplateById(req.params.id);
+      const template = await db.getResourceTemplateById(req.user.companyId, req.params.id);
       if (!template) return res.status(404).json({ error: 'Not found' });
-      await db.deleteResourceTemplate(req.params.id);
+      await db.deleteResourceTemplate(req.user.companyId, req.params.id);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -3071,11 +3163,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.post('/api/resource-template-items', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
       const { templateId, label } = req.body;
-      const template = await db.getResourceTemplateById(templateId);
+      const template = await db.getResourceTemplateById(req.user.companyId, templateId);
       if (!template) return res.status(404).json({ error: 'Modèle introuvable' });
       if (!String(label || '').trim()) return res.status(400).json({ error: 'Le libellé est requis' });
-      const existing = (await db.getAllResourceTemplateItems()).filter((i: any) => i.templateId === templateId);
-      const item = await db.createResourceTemplateItem({
+      const existing = (await db.getAllResourceTemplateItems(req.user.companyId)).filter((i: any) => i.templateId === templateId);
+      const item = await db.createResourceTemplateItem(req.user.companyId, {
         id: genId('tplitem'),
         templateId,
         label: String(label).trim(),
@@ -3093,7 +3185,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const updates: any = {};
       if (label !== undefined) updates.label = String(label).trim();
       if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
-      const updated = await db.updateResourceTemplateItem(req.params.id, updates);
+      const updated = await db.updateResourceTemplateItem(req.user.companyId, req.params.id, updates);
       if (!updated) return res.status(404).json({ error: 'Not found' });
       res.json(updated);
     } catch (error) {
@@ -3103,7 +3195,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.delete('/api/resource-template-items/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const ok = await db.deleteResourceTemplateItem(req.params.id);
+      const ok = await db.deleteResourceTemplateItem(req.user.companyId, req.params.id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
@@ -3118,12 +3210,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const { clientId, templateId, assignedTo } = req.body;
       if (clientId == null) return res.status(400).json({ error: 'Client requis' });
-      const template = await db.getResourceTemplateById(templateId);
+      const template = await db.getResourceTemplateById(req.user.companyId, templateId);
       if (!template) return res.status(404).json({ error: 'Modèle introuvable' });
-      const client = await db.getClientById(Number(clientId));
+      const client = await db.getClientById(req.user.companyId, Number(clientId));
       if (!client) return res.status(404).json({ error: 'Client introuvable' });
 
-      const instance = await db.createClientResourceInstance({
+      const instance = await db.createClientResourceInstance(req.user.companyId, {
         id: genId('inst'),
         clientId: Number(clientId),
         sourceTemplateId: template.id,
@@ -3136,11 +3228,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         createdBy: req.user.id,
       });
 
-      const items = (await db.getAllResourceTemplateItems())
+      const items = (await db.getAllResourceTemplateItems(req.user.companyId))
         .filter((i: any) => i.templateId === template.id)
         .sort((a: any, b: any) => a.sortOrder - b.sortOrder);
       for (const item of items) {
-        await db.createClientResourceItemStatus({
+        await db.createClientResourceItemStatus(req.user.companyId, {
           id: genId('itemstatus'),
           instanceId: instance.id,
           sourceItemId: item.id,
@@ -3164,8 +3256,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const clientId = req.query.clientId != null ? Number(req.query.clientId) : null;
       if (clientId == null) return res.status(400).json({ error: 'clientId requis' });
-      const instances = (await db.getAllClientResourceInstances()).filter((i: any) => i.clientId === clientId);
-      const allStatuses = await db.getAllClientResourceItemStatuses();
+      const instances = (await db.getAllClientResourceInstances(req.user.companyId)).filter((i: any) => i.clientId === clientId);
+      const allStatuses = await db.getAllClientResourceItemStatuses(req.user.companyId);
       res.json(instances.map((instance: any) => ({
         ...instance,
         items: allStatuses
@@ -3179,7 +3271,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.delete('/api/client-resources/:id', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
-      const ok = await db.deleteClientResourceInstance(req.params.id);
+      const ok = await db.deleteClientResourceInstance(req.user.companyId, req.params.id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
@@ -3196,12 +3288,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const { done } = req.body;
       if (typeof done !== 'boolean') return res.status(400).json({ error: 'Statut invalide' });
-      const allStatuses = await db.getAllClientResourceItemStatuses();
+      const allStatuses = await db.getAllClientResourceItemStatuses(req.user.companyId);
       const item = allStatuses.find((s: any) => s.id === req.params.id);
       if (!item) return res.status(404).json({ error: 'Not found' });
 
       if (done) {
-        const instance = await db.getClientResourceInstanceById(item.instanceId);
+        const instance = await db.getClientResourceInstanceById(req.user.companyId, item.instanceId);
         if (instance?.isSequential) {
           const blocked = allStatuses.some((s: any) =>
             s.instanceId === item.instanceId && s.sortOrder < item.sortOrder && !s.done,
@@ -3210,7 +3302,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         }
       }
 
-      const updated = await db.updateClientResourceItemStatus(req.params.id, {
+      const updated = await db.updateClientResourceItemStatus(req.user.companyId, req.params.id, {
         done,
         completedAt: done ? new Date().toISOString() : null,
         completedBy: done ? req.user.id : null,
@@ -3234,7 +3326,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(403).json({ error: 'Forbidden' });
       }
       const [instances, statuses, clients] = await Promise.all([
-        db.getAllClientResourceInstances(), db.getAllClientResourceItemStatuses(), db.getAllClients(),
+        db.getAllClientResourceInstances(req.user.companyId), db.getAllClientResourceItemStatuses(req.user.companyId), db.getAllClients(req.user.companyId),
       ]);
       const clientsById = new Map(clients.map((c: any) => [c.id, c]));
       const statusesByInstance = new Map<string, any[]>();
@@ -3262,9 +3354,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   // --- Liens utiles ---
 
-  app.get('/api/useful-links', authenticate, requirePermission('VIEW_RESOURCES'), async (_req: any, res: any) => {
+  app.get('/api/useful-links', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
-      res.json(await db.getAllUsefulLinks());
+      res.json(await db.getAllUsefulLinks(req.user.companyId));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -3276,8 +3368,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (!String(category || '').trim() || !String(label || '').trim() || !String(url || '').trim()) {
         return res.status(400).json({ error: 'Catégorie, libellé et URL sont requis' });
       }
-      const existing = await db.getAllUsefulLinks();
-      const link = await db.createUsefulLink({
+      const existing = await db.getAllUsefulLinks(req.user.companyId);
+      const link = await db.createUsefulLink(req.user.companyId, {
         id: genId('link'),
         category: String(category).trim(),
         label: String(label).trim(),
@@ -3305,7 +3397,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (description !== undefined) updates.description = description ? String(description).trim() : null;
       if (isActive !== undefined) updates.isActive = !!isActive;
       if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
-      const updated = await db.updateUsefulLink(req.params.id, updates);
+      const updated = await db.updateUsefulLink(req.user.companyId, req.params.id, updates);
       if (!updated) return res.status(404).json({ error: 'Not found' });
       res.json(updated);
     } catch (error) {
@@ -3315,7 +3407,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.delete('/api/useful-links/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const ok = await db.deleteUsefulLink(req.params.id);
+      const ok = await db.deleteUsefulLink(req.user.companyId, req.params.id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
@@ -3330,7 +3422,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/echeance-columns', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      let columns = await db.getAllEcheanceColumns();
+      let columns = await db.getAllEcheanceColumns(req.user.companyId);
       if (req.query.year) columns = columns.filter((c: any) => c.year === Number(req.query.year));
       res.json(columns.sort((a: any, b: any) => a.sortOrder - b.sortOrder));
     } catch (error) {
@@ -3345,8 +3437,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (!Number.isFinite(y)) return res.status(400).json({ error: 'Année invalide' });
       if (!Number.isFinite(m) || m < 1 || m > 12) return res.status(400).json({ error: 'Mois invalide (1-12)' });
       if (!String(label || '').trim()) return res.status(400).json({ error: 'Le libellé est requis' });
-      const existing = (await db.getAllEcheanceColumns()).filter((c: any) => c.year === y);
-      const column = await db.createEcheanceColumn({
+      const existing = (await db.getAllEcheanceColumns(req.user.companyId)).filter((c: any) => c.year === y);
+      const column = await db.createEcheanceColumn(req.user.companyId, {
         id: genId('ec'), year: y, month: m, label: String(label).trim(), sortOrder: existing.length,
       });
       res.status(201).json(column);
@@ -3366,7 +3458,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
       if (label !== undefined) updates.label = String(label).trim();
       if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
-      const updated = await db.updateEcheanceColumn(req.params.id, updates);
+      const updated = await db.updateEcheanceColumn(req.user.companyId, req.params.id, updates);
       if (!updated) return res.status(404).json({ error: 'Not found' });
       res.json(updated);
     } catch (error) {
@@ -3377,7 +3469,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   /** Cascades to every client's status cell for this column. */
   app.delete('/api/echeance-columns/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const ok = await db.deleteEcheanceColumn(req.params.id);
+      const ok = await db.deleteEcheanceColumn(req.user.companyId, req.params.id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
@@ -3387,9 +3479,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/echeance-statuses', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      let statuses = await db.getAllEcheanceStatuses();
+      let statuses = await db.getAllEcheanceStatuses(req.user.companyId);
       if (req.query.year) {
-        const columnIds = new Set((await db.getAllEcheanceColumns()).filter((c: any) => c.year === Number(req.query.year)).map((c: any) => c.id));
+        const columnIds = new Set((await db.getAllEcheanceColumns(req.user.companyId)).filter((c: any) => c.year === Number(req.query.year)).map((c: any) => c.id));
         statuses = statuses.filter((s: any) => columnIds.has(s.columnId));
       }
       res.json(statuses);
@@ -3404,17 +3496,17 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const { clientId, columnId, status } = req.body;
       if (clientId == null || !columnId) return res.status(400).json({ error: 'Client et colonne requis' });
       if (status !== null && status !== '') {
-        const validLabels = (await db.getAllEcheanceStatusOptions()).map((o: any) => o.label);
+        const validLabels = (await db.getAllEcheanceStatusOptions(req.user.companyId)).map((o: any) => o.label);
         if (!validLabels.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
       }
       const normalizedStatus = status === '' ? null : status;
-      const existing = (await db.getAllEcheanceStatuses())
+      const existing = (await db.getAllEcheanceStatuses(req.user.companyId))
         .find((s: any) => s.clientId === Number(clientId) && s.columnId === columnId);
       if (existing) {
-        const updated = await db.updateEcheanceStatus(existing.id, { status: normalizedStatus });
+        const updated = await db.updateEcheanceStatus(req.user.companyId, existing.id, { status: normalizedStatus });
         return res.json(updated);
       }
-      const created = await db.createEcheanceStatus({
+      const created = await db.createEcheanceStatus(req.user.companyId, {
         id: genId('ecs'), clientId: Number(clientId), columnId, status: normalizedStatus,
       });
       res.status(201).json(created);
@@ -3434,7 +3526,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/echeance-status-options', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const options = await db.getAllEcheanceStatusOptions();
+      const options = await db.getAllEcheanceStatusOptions(req.user.companyId);
       res.json(options.sort((a: any, b: any) => a.sortOrder - b.sortOrder));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -3445,12 +3537,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       const label = String(req.body?.label || '').trim();
       if (!label) return res.status(400).json({ error: 'Le libellé est requis' });
-      const existing = await db.getAllEcheanceStatusOptions();
+      const existing = await db.getAllEcheanceStatusOptions(req.user.companyId);
       if (existing.some((o: any) => o.label === label)) return res.status(400).json({ error: 'Cette valeur existe déjà' });
       const color = ECHEANCE_STATUS_COLORS.includes(req.body?.color)
         ? req.body.color
         : ECHEANCE_STATUS_COLORS[existing.length % ECHEANCE_STATUS_COLORS.length];
-      const option = await db.createEcheanceStatusOption({ id: genId('ecso'), label, color, sortOrder: existing.length });
+      const option = await db.createEcheanceStatusOption(req.user.companyId, { id: genId('ecso'), label, color, sortOrder: existing.length });
       res.status(201).json(option);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -3463,7 +3555,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (req.body?.label !== undefined) {
         const label = String(req.body.label).trim();
         if (!label) return res.status(400).json({ error: 'Le libellé est requis' });
-        const existing = await db.getAllEcheanceStatusOptions();
+        const existing = await db.getAllEcheanceStatusOptions(req.user.companyId);
         if (existing.some((o: any) => o.label === label && o.id !== req.params.id)) {
           return res.status(400).json({ error: 'Cette valeur existe déjà' });
         }
@@ -3474,7 +3566,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         updates.color = req.body.color;
       }
       if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Rien à modifier' });
-      const updated = await db.updateEcheanceStatusOption(req.params.id, updates);
+      const updated = await db.updateEcheanceStatusOption(req.user.companyId, req.params.id, updates);
       if (!updated) return res.status(404).json({ error: 'Not found' });
       res.json(updated);
     } catch (error) {
@@ -3484,7 +3576,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.delete('/api/echeance-status-options/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const ok = await db.deleteEcheanceStatusOption(req.params.id);
+      const ok = await db.deleteEcheanceStatusOption(req.user.companyId, req.params.id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
@@ -3492,12 +3584,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
-  // --- Public landing page: "Créer un compte" / "Essai gratuit" requests.
-  // No account or company is provisioned here — that needs the multi-tenant
-  // model this app doesn't have yet. This just records the request and
-  // notifies contact@taches-and-cash.com; a human follows up manually once
-  // payment is confirmed, the same "sales-assisted for now" reality the
-  // landing page's confirmation copy is upfront about.
+  // --- Public landing page.
+  // "Sur mesure" (>10 seats) stays a lead-capture request — a custom deal is
+  // inherently a conversation, not a self-serve signup. The three standard
+  // packs go through /api/signup below instead, which provisions a real
+  // isolated company immediately.
   const escapeHtml = (v: string) => v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
   app.post('/api/orders', async (req: any, res: any) => {
@@ -3543,6 +3634,231 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       });
 
       res.status(201).json({ reference, emailSent: sent });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Real self-serve signup for the three standard packs: creates an isolated
+   * company immediately (status TRIAL, full feature access, `TRIAL_DAYS`
+   * free) and its first ADMIN user, then logs them straight in — the same
+   * response shape as /api/login, so the client can call the same
+   * `login(token, user)` either way.
+   *
+   * No payment happens here. The conversion flow is entirely a platform-admin
+   * action later: `POST /api/platform/companies/:id/confirm` once a human has
+   * called the client and payment is manually confirmed. If nobody confirms
+   * before `trialEndsAt`, `expireTrialIfDue` (in `authenticate`/login) locks
+   * the account out on its own — no cron job, the same lazy-expiry idiom the
+   * rest of this codebase already uses for presence and leave balances.
+   */
+  app.post('/api/signup', async (req: any, res: any) => {
+    try {
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      // Honeypot: a bot that fills every field on the form fills this too.
+      if (text(req.body?.website, 200)) return res.status(400).json({ error: 'Invalid submission' });
+
+      const companyName = text(req.body?.companyName, 160);
+      const contactName = text(req.body?.contactName, 120);
+      const contactEmail = text(req.body?.contactEmail, 160);
+      const phone = text(req.body?.phone, 40);
+      const username = text(req.body?.username, 60);
+      const password = String(req.body?.password ?? '');
+      const confirmPassword = String(req.body?.confirmPassword ?? '');
+      const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : 'FREELANCE';
+
+      if (!companyName || !contactName || !contactEmail || !phone || !username) {
+        return res.status(400).json({ error: 'Tous les champs sont requis' });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+        return res.status(400).json({ error: 'Adresse email invalide' });
+      }
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+      }
+      if (password !== confirmPassword) {
+        return res.status(400).json({ error: 'Les mots de passe ne correspondent pas' });
+      }
+      if (await db.getUserByUsername(username)) {
+        return res.status(400).json({ error: "Ce nom d'utilisateur est déjà pris" });
+      }
+
+      const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const company = await db.createCompany({
+        id: genId('company'),
+        name: companyName,
+        status: 'TRIAL',
+        plan,
+        seatLimit: PLAN_SEAT_LIMITS[plan] || 1,
+        createdAt: new Date().toISOString(),
+        trialEndsAt,
+        contactName, contactEmail, phone,
+      });
+
+      const hashed = await bcrypt.hash(password, 10);
+      const user = await db.createUser(company.id, {
+        id: Date.now(),
+        username,
+        password: hashed,
+        role: 'ADMIN',
+        permissions: JSON.stringify(ADMIN_PERMISSIONS),
+        fullName: contactName,
+        phone,
+      });
+
+      const token = jwt.sign(
+        { id: user.id, role: user.role, companyId: company.id, isPlatformAdmin: false },
+        JWT_SECRET, { expiresIn: '1d' },
+      );
+
+      // Best-effort — a lost signup notification never blocks account
+      // creation; the platform admin panel remains the source of truth.
+      sendMail({
+        to: 'contact@taches-and-cash.com',
+        subject: `Nouvel essai gratuit — ${companyName}`,
+        html: `
+          <p><strong>Entreprise :</strong> ${escapeHtml(companyName)}</p>
+          <p><strong>Contact :</strong> ${escapeHtml(contactName)}</p>
+          <p><strong>Email :</strong> ${escapeHtml(contactEmail)}</p>
+          <p><strong>Téléphone :</strong> ${escapeHtml(phone)}</p>
+          <p><strong>Offre visée :</strong> ${escapeHtml(plan)}</p>
+          <p><strong>Fin de la période d'essai :</strong> ${trialEndsAt.slice(0, 10)}</p>
+        `,
+      }).catch(() => {});
+
+      res.status(201).json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          permissions: JSON.parse(user.permissions),
+          isPlatformAdmin: false,
+        },
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Platform admin — cross-tenant. Confirming a company's payment, sending
+  // the platform's own RIB, and editing that RIB are the only actions here;
+  // everything else about a company's own data stays reachable only through
+  // its own scoped routes above.
+  // ---------------------------------------------------------
+
+  /** Every real customer company (the legacy cabinet itself is excluded — it isn't one). */
+  app.get('/api/platform/companies', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const companies = await db.getAllCompanies();
+      res.json(companies.filter((c: any) => c.id !== LEGACY_COMPANY_ID));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/platform/settings', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      res.json(await db.getPlatformSettings());
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/platform/settings', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      const updated = await db.updatePlatformSettings({
+        bankName: text(req.body?.bankName, 120),
+        iban: text(req.body?.iban, 60),
+        rib: text(req.body?.rib, 60),
+        swift: text(req.body?.swift, 30),
+        instructions: text(req.body?.instructions, 1000),
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** The "j'envoie un mail avec le RIB" step — after the sales call, before payment. */
+  app.post('/api/platform/companies/:id/send-rib', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.params.id);
+      if (!company) return res.status(404).json({ error: 'Not found' });
+      const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : company.plan;
+      const bank = await db.getPlatformSettings();
+
+      const { sent } = await sendMail({
+        to: company.contactEmail,
+        from: 'support@taches-and-cash.com',
+        subject: `Coordonnées de paiement — ${plan}`,
+        html: `
+          <p>Bonjour ${escapeHtml(company.contactName || '')},</p>
+          <p>Voici les coordonnées bancaires pour activer votre abonnement <strong>${escapeHtml(plan)}</strong> :</p>
+          <p>
+            <strong>Banque :</strong> ${escapeHtml(bank.bankName || '')}<br/>
+            <strong>RIB :</strong> ${escapeHtml(bank.rib || '')}<br/>
+            <strong>IBAN :</strong> ${escapeHtml(bank.iban || '')}<br/>
+            ${bank.swift ? `<strong>SWIFT :</strong> ${escapeHtml(bank.swift)}<br/>` : ''}
+          </p>
+          ${bank.instructions ? `<p>${escapeHtml(bank.instructions)}</p>` : ''}
+          <p>Dès réception de votre paiement, nous confirmerons l'activation de votre abonnement.</p>
+        `,
+      });
+
+      await db.updateCompany(company.id, { ribSentAt: new Date().toISOString(), pendingPlan: plan });
+      res.json({ emailSent: sent });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * "Si paiement reçu (manuellement), je confirme le pack choisi." Flips the
+   * company from TRIAL to ACTIVE on the chosen plan and clears the trial
+   * deadline, so `expireTrialIfDue` never touches it again. No new
+   * credentials are issued — the admin already chose their own username and
+   * password at signup, and a password is never stored anywhere in a form
+   * this route could re-send even if it wanted to. The confirmation email
+   * only reminds them of their username and that the account is now active.
+   */
+  app.post('/api/platform/companies/:id/confirm', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.params.id);
+      if (!company) return res.status(404).json({ error: 'Not found' });
+      const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : company.plan;
+
+      const updated = await db.updateCompany(company.id, {
+        status: 'ACTIVE',
+        plan,
+        seatLimit: PLAN_SEAT_LIMITS[plan] || company.seatLimit,
+        trialEndsAt: null,
+        confirmedAt: new Date().toISOString(),
+      });
+
+      const users = await db.getAllUsers(company.id);
+      const admin = users.find((u: any) => u.role === 'ADMIN');
+
+      const { sent } = await sendMail({
+        to: company.contactEmail,
+        from: 'support@taches-and-cash.com',
+        subject: 'Votre abonnement Tâches & Cash est activé',
+        html: `
+          <p>Bonjour ${escapeHtml(company.contactName || '')},</p>
+          <p>Votre paiement a bien été reçu — votre abonnement <strong>${escapeHtml(plan)}</strong> est maintenant actif.</p>
+          <p>Connectez-vous avec votre identifiant habituel : <strong>${escapeHtml(admin?.username || '')}</strong> sur
+             <a href="https://taches-and-cash.com">taches-and-cash.com</a>.</p>
+          <p>Merci de votre confiance.</p>
+        `,
+      });
+
+      res.json({ company: updated, emailSent: sent });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });

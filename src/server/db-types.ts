@@ -6,137 +6,151 @@
  * Both implementations are declared to return this type, which is what stops
  * them drifting — a method added to one and forgotten in the other fails
  * `npm run lint` instead of failing in production.
+ *
+ * Multi-tenant: every per-tenant method takes `companyId` as its first
+ * argument — a required positional parameter rather than an options bag,
+ * deliberately, so a forgotten companyId at a call site is a `tsc --noEmit`
+ * error instead of a silent cross-tenant leak. `companies`, and the two named
+ * user lookups below, are the only genuinely cross-tenant surfaces.
  */
 export interface Database {
-  /**
-   * Fake SQL shim kept for the two login/auth call sites. Only recognises
-   * `WHERE username = ?` and `WHERE id = ?` over users; anything else is null.
-   */
-  get(sql: string, param: any): Promise<any>;
+  /** Global — needed pre-auth at login, before any companyId is known. Username uniqueness is global by design (see CLAUDE.md). */
+  getUserByUsername(username: string): Promise<any | undefined>;
+  /** Company-scoped — the single most important tenant-isolation guarantee: a token from company A can never resolve a user row from company B, even if ids collide. */
+  getUserById(companyId: string, id: number): Promise<any | undefined>;
 
-  getAllUsers(): Promise<any[]>;
-  createUser(user: any): Promise<any>;
-  updateUser(id: number, updates: any): Promise<any | null>;
-  deleteUser(id: number): Promise<boolean>;
+  getAllCompanies(): Promise<any[]>;
+  getCompanyById(id: string): Promise<any | undefined>;
+  createCompany(company: any): Promise<any>;
+  updateCompany(id: string, updates: any): Promise<any | null>;
 
-  getAllClients(): Promise<any[]>;
-  getClientById(id: number): Promise<any | undefined>;
-  createClient(client: any): Promise<any>;
-  updateClient(id: number, updates: any): Promise<any | null>;
-  deleteClient(id: number): Promise<boolean>;
+  getAllUsers(companyId: string): Promise<any[]>;
+  createUser(companyId: string, user: any): Promise<any>;
+  updateUser(companyId: string, id: number, updates: any): Promise<any | null>;
+  deleteUser(companyId: string, id: number): Promise<boolean>;
 
-  getAllServices(): Promise<any[]>;
-  getServiceById(id: number): Promise<any | undefined>;
-  createService(service: any): Promise<any>;
-  updateService(id: number, updates: any): Promise<any | null>;
+  getAllClients(companyId: string): Promise<any[]>;
+  getClientById(companyId: string, id: number): Promise<any | undefined>;
+  createClient(companyId: string, client: any): Promise<any>;
+  updateClient(companyId: string, id: number, updates: any): Promise<any | null>;
+  deleteClient(companyId: string, id: number): Promise<boolean>;
+
+  getAllServices(companyId: string): Promise<any[]>;
+  getServiceById(companyId: string, id: number): Promise<any | undefined>;
+  createService(companyId: string, service: any): Promise<any>;
+  updateService(companyId: string, id: number, updates: any): Promise<any | null>;
   /** Cascades to the mission's types de tâches. */
-  deleteService(id: number): Promise<boolean>;
+  deleteService(companyId: string, id: number): Promise<boolean>;
 
-  getAllTaskTypes(): Promise<any[]>;
-  getTaskTypeById(id: number): Promise<any | undefined>;
-  createTaskType(taskType: any): Promise<any>;
-  updateTaskType(id: number, updates: any): Promise<any | null>;
-  deleteTaskType(id: number): Promise<boolean>;
+  getAllTaskTypes(companyId: string): Promise<any[]>;
+  getTaskTypeById(companyId: string, id: number): Promise<any | undefined>;
+  createTaskType(companyId: string, taskType: any): Promise<any>;
+  updateTaskType(companyId: string, id: number, updates: any): Promise<any | null>;
+  deleteTaskType(companyId: string, id: number): Promise<boolean>;
 
-  getAllInvoices(): Promise<any[]>;
-  getInvoiceById(id: string): Promise<any | undefined>;
-  createInvoice(invoice: any): Promise<any>;
-  updateInvoice(id: string, updates: any): Promise<any | null>;
-  deleteInvoice(id: string): Promise<boolean>;
-  /** Next legal-sequence number, zero-padded to 4 digits. Reserved atomically. */
-  nextInvoiceNumber(): Promise<string>;
+  getAllInvoices(companyId: string): Promise<any[]>;
+  getInvoiceById(companyId: string, id: string): Promise<any | undefined>;
+  createInvoice(companyId: string, invoice: any): Promise<any>;
+  updateInvoice(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteInvoice(companyId: string, id: string): Promise<boolean>;
+  /** Next legal-sequence number for this company, zero-padded to 4 digits. Reserved atomically. */
+  nextInvoiceNumber(companyId: string): Promise<string>;
 
-  getAllLeaveRequests(): Promise<any[]>;
-  getLeaveRequestById(id: number): Promise<any | undefined>;
-  createLeaveRequest(leave: any): Promise<any>;
-  updateLeaveRequest(id: number, updates: any): Promise<any | null>;
+  getAllLeaveRequests(companyId: string): Promise<any[]>;
+  getLeaveRequestById(companyId: string, id: number): Promise<any | undefined>;
+  createLeaveRequest(companyId: string, leave: any): Promise<any>;
+  updateLeaveRequest(companyId: string, id: number, updates: any): Promise<any | null>;
 
-  getAllAbsenceAuthorizations(): Promise<any[]>;
-  getAbsenceAuthorizationById(id: number): Promise<any | undefined>;
-  createAbsenceAuthorization(auth: any): Promise<any>;
-  updateAbsenceAuthorization(id: number, updates: any): Promise<any | null>;
+  getAllAbsenceAuthorizations(companyId: string): Promise<any[]>;
+  getAbsenceAuthorizationById(companyId: string, id: number): Promise<any | undefined>;
+  createAbsenceAuthorization(companyId: string, auth: any): Promise<any>;
+  updateAbsenceAuthorization(companyId: string, id: number, updates: any): Promise<any | null>;
 
-  getAllLeaveBalances(): Promise<any[]>;
-  getLeaveBalanceByUserId(userId: number): Promise<any>;
-  updateLeaveBalance(userId: number, updates: any): Promise<any>;
+  getAllLeaveBalances(companyId: string): Promise<any[]>;
+  getLeaveBalanceByUserId(companyId: string, userId: number): Promise<any>;
+  updateLeaveBalance(companyId: string, userId: number, updates: any): Promise<any>;
 
-  getAllTimeEntries(): Promise<any[]>;
-  getTimeEntryById(id: string): Promise<any | undefined>;
-  createTimeEntry(entry: any): Promise<any>;
-  updateTimeEntry(id: string, updates: any): Promise<any | null>;
-  deleteTimeEntry(id: string): Promise<boolean>;
+  getAllTimeEntries(companyId: string): Promise<any[]>;
+  getTimeEntryById(companyId: string, id: string): Promise<any | undefined>;
+  createTimeEntry(companyId: string, entry: any): Promise<any>;
+  updateTimeEntry(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteTimeEntry(companyId: string, id: string): Promise<boolean>;
 
-  getAllMessages(): Promise<any[]>;
-  createMessage(message: any): Promise<any>;
-  markMessagesRead(readerId: number, fromUserId: number): Promise<number>;
+  getAllMessages(companyId: string): Promise<any[]>;
+  createMessage(companyId: string, message: any): Promise<any>;
+  markMessagesRead(companyId: string, readerId: number, fromUserId: number): Promise<number>;
 
   /** A mission + type de tâche an admin hands to a collaborator to work on. */
-  getAllTaskAssignments(): Promise<any[]>;
-  getTaskAssignmentById(id: string): Promise<any | undefined>;
-  createTaskAssignment(assignment: any): Promise<any>;
-  updateTaskAssignment(id: string, updates: any): Promise<any | null>;
-  deleteTaskAssignment(id: string): Promise<boolean>;
+  getAllTaskAssignments(companyId: string): Promise<any[]>;
+  getTaskAssignmentById(companyId: string, id: string): Promise<any | undefined>;
+  createTaskAssignment(companyId: string, assignment: any): Promise<any>;
+  updateTaskAssignment(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteTaskAssignment(companyId: string, id: string): Promise<boolean>;
 
   /** Generic per-user notifications — new message, task assigned, HR events. */
-  getAllNotifications(): Promise<any[]>;
-  createNotification(notification: any): Promise<any>;
-  updateNotification(id: string, updates: any): Promise<any | null>;
+  getAllNotifications(companyId: string): Promise<any[]>;
+  createNotification(companyId: string, notification: any): Promise<any>;
+  updateNotification(companyId: string, id: string, updates: any): Promise<any | null>;
 
   // Ressources Métier — the reusable "template -> client instance" engine
   // shared by documents à fournir and procédures (differentiated by `type`).
-  getAllResourceTemplates(): Promise<any[]>;
-  getResourceTemplateById(id: string): Promise<any | undefined>;
-  createResourceTemplate(template: any): Promise<any>;
-  updateResourceTemplate(id: string, updates: any): Promise<any | null>;
+  getAllResourceTemplates(companyId: string): Promise<any[]>;
+  getResourceTemplateById(companyId: string, id: string): Promise<any | undefined>;
+  createResourceTemplate(companyId: string, template: any): Promise<any>;
+  updateResourceTemplate(companyId: string, id: string, updates: any): Promise<any | null>;
   /** Cascades to the template's items. */
-  deleteResourceTemplate(id: string): Promise<boolean>;
+  deleteResourceTemplate(companyId: string, id: string): Promise<boolean>;
 
-  getAllResourceTemplateItems(): Promise<any[]>;
-  createResourceTemplateItem(item: any): Promise<any>;
-  updateResourceTemplateItem(id: string, updates: any): Promise<any | null>;
-  deleteResourceTemplateItem(id: string): Promise<boolean>;
+  getAllResourceTemplateItems(companyId: string): Promise<any[]>;
+  createResourceTemplateItem(companyId: string, item: any): Promise<any>;
+  updateResourceTemplateItem(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteResourceTemplateItem(companyId: string, id: string): Promise<boolean>;
 
   /** A template affected to a client — a frozen copy, per §3.5 of the cahier des charges. */
-  getAllClientResourceInstances(): Promise<any[]>;
-  getClientResourceInstanceById(id: string): Promise<any | undefined>;
-  createClientResourceInstance(instance: any): Promise<any>;
-  updateClientResourceInstance(id: string, updates: any): Promise<any | null>;
+  getAllClientResourceInstances(companyId: string): Promise<any[]>;
+  getClientResourceInstanceById(companyId: string, id: string): Promise<any | undefined>;
+  createClientResourceInstance(companyId: string, instance: any): Promise<any>;
+  updateClientResourceInstance(companyId: string, id: string, updates: any): Promise<any | null>;
   /** Cascades to the instance's item statuses. */
-  deleteClientResourceInstance(id: string): Promise<boolean>;
+  deleteClientResourceInstance(companyId: string, id: string): Promise<boolean>;
 
-  getAllClientResourceItemStatuses(): Promise<any[]>;
-  createClientResourceItemStatus(status: any): Promise<any>;
-  updateClientResourceItemStatus(id: string, updates: any): Promise<any | null>;
+  getAllClientResourceItemStatuses(companyId: string): Promise<any[]>;
+  createClientResourceItemStatus(companyId: string, status: any): Promise<any>;
+  updateClientResourceItemStatus(companyId: string, id: string, updates: any): Promise<any | null>;
 
-  getAllUsefulLinks(): Promise<any[]>;
-  createUsefulLink(link: any): Promise<any>;
-  updateUsefulLink(id: string, updates: any): Promise<any | null>;
-  deleteUsefulLink(id: string): Promise<boolean>;
+  getAllUsefulLinks(companyId: string): Promise<any[]>;
+  createUsefulLink(companyId: string, link: any): Promise<any>;
+  updateUsefulLink(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteUsefulLink(companyId: string, id: string): Promise<boolean>;
 
   /** Suivi mensuel des échéances — a named column (year, month, label) on the grid. */
-  getAllEcheanceColumns(): Promise<any[]>;
-  createEcheanceColumn(column: any): Promise<any>;
-  updateEcheanceColumn(id: string, updates: any): Promise<any | null>;
+  getAllEcheanceColumns(companyId: string): Promise<any[]>;
+  createEcheanceColumn(companyId: string, column: any): Promise<any>;
+  updateEcheanceColumn(companyId: string, id: string, updates: any): Promise<any | null>;
   /** Cascades to every client's status cell for this column. */
-  deleteEcheanceColumn(id: string): Promise<boolean>;
+  deleteEcheanceColumn(companyId: string, id: string): Promise<boolean>;
 
   /** One status cell per (clientId, columnId); absent = vide. */
-  getAllEcheanceStatuses(): Promise<any[]>;
-  createEcheanceStatus(status: any): Promise<any>;
-  updateEcheanceStatus(id: string, updates: any): Promise<any | null>;
+  getAllEcheanceStatuses(companyId: string): Promise<any[]>;
+  createEcheanceStatus(companyId: string, status: any): Promise<any>;
+  updateEcheanceStatus(companyId: string, id: string, updates: any): Promise<any | null>;
 
   /** The fixed-vocabulary options a status cell can be set to — admin-editable, not hardcoded. */
-  getAllEcheanceStatusOptions(): Promise<any[]>;
-  createEcheanceStatusOption(option: any): Promise<any>;
-  updateEcheanceStatusOption(id: string, updates: any): Promise<any | null>;
-  deleteEcheanceStatusOption(id: string): Promise<boolean>;
+  getAllEcheanceStatusOptions(companyId: string): Promise<any[]>;
+  createEcheanceStatusOption(companyId: string, option: any): Promise<any>;
+  updateEcheanceStatusOption(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteEcheanceStatusOption(companyId: string, id: string): Promise<boolean>;
 
-  /** A "Créer un compte" / "Essai gratuit" request from the public landing page. */
+  /** A "Créer un compte" / "Essai gratuit" lead from the public landing page — global, pre-account. */
   getAllOrders(): Promise<any[]>;
   createOrder(order: any): Promise<any>;
 
-  getSettings(): Promise<any>;
-  updateSettings(updates: any): Promise<any>;
+  getSettings(companyId: string): Promise<any>;
+  updateSettings(companyId: string, updates: any): Promise<any>;
+
+  /** Platform's own receiving bank details, shown to a trial company deciding to pay — a global singleton, distinct from any company's own Cash issuer settings. */
+  getPlatformSettings(): Promise<any>;
+  updatePlatformSettings(updates: any): Promise<any>;
 
   /** Releases the connection pool. Only meaningful for the Postgres backend. */
   close?(): Promise<void>;
@@ -158,7 +172,28 @@ export const defaultSettings = () => ({
   },
 });
 
+export const defaultPlatformSettings = () => ({
+  bankName: '',
+  iban: '',
+  rib: '',
+  swift: '',
+  instructions: '',
+});
+
+/** The one company that existed before multi-tenancy — every pre-migration row and the two seeded accounts belong to it. */
+export const LEGACY_COMPANY_ID = 'company-1';
+
+/** Free-trial length for a newly signed-up company, per the sales-call-then-convert flow. */
+export const TRIAL_DAYS = 30;
+
+export const PLAN_SEAT_LIMITS: Record<string, number> = {
+  FREELANCE: 1,
+  EQUIPE: 5,
+  CROISSANCE: 10,
+};
+
 export const emptyDb = () => ({
+  companies: [],
   users: [],
   clients: [],
   services: [],
@@ -186,7 +221,8 @@ export const emptyDb = () => ({
   echeanceStatuses: [],
   echeanceStatusOptions: [],
   orders: [],
-  settings: defaultSettings(),
+  settingsByCompany: [],
+  platformSettings: defaultPlatformSettings(),
 });
 
 /**
@@ -222,25 +258,35 @@ export const COLLAB_PERMISSIONS = [
 ];
 
 /**
- * Seeds the two default accounts if they are absent.
+ * Seeds the legacy cabinet's company + its two default accounts if absent.
  *
- * Written against the `Database` interface rather than against one engine's
- * internals, so the JSON file and PostgreSQL seed identically and there is only
- * one copy of this logic to keep correct.
+ * `company-1` and the fixed user ids 1/2 are deliberate: this is what lets a
+ * JWT issued before the multi-tenant migration keep resolving correctly
+ * afterward (see `authenticate` in server.ts, which defaults a missing
+ * `companyId` claim to `'company-1'`) — reseeding with fresh ids would
+ * silently invalidate every issued token the same way `Date.now()` ids
+ * always have here.
  *
- * The ids are fixed at 1 and 2 deliberately: with `Date.now()` ids, reseeding
- * silently invalidated every issued JWT and every request came back 401.
- *
- * An account that already exists is left completely alone. The previous code
- * topped up its permissions on every boot, which would undo an admin who had
- * deliberately revoked one from `collab` — it grew as one-off dev migrations
- * and has no purpose on a real deployment, where the accounts arrive already
- * populated from the import.
+ * An account that already exists is left completely alone — this must not
+ * top up permissions on every boot, which would undo an admin's deliberate
+ * revocation.
  */
 export async function seedDefaults(
   db: Database,
   bcrypt: { hash(s: string, rounds: number): Promise<string> },
 ) {
+  if (!(await db.getCompanyById(LEGACY_COMPANY_ID))) {
+    await db.createCompany({
+      id: LEGACY_COMPANY_ID,
+      name: 'Cabinet',
+      status: 'ACTIVE',
+      plan: 'LEGACY',
+      seatLimit: 999,
+      createdAt: new Date().toISOString(),
+      trialEndsAt: null,
+    });
+  }
+
   const ensure = async (
     id: number,
     username: string,
@@ -248,9 +294,10 @@ export async function seedDefaults(
     role: string,
     permissions: string[],
   ) => {
-    if (await db.get('SELECT * FROM users WHERE username = ?', username)) return;
-    await db.createUser({
+    if (await db.getUserByUsername(username)) return;
+    await db.createUser(LEGACY_COMPANY_ID, {
       id,
+      companyId: LEGACY_COMPANY_ID,
       username,
       password: await bcrypt.hash(password, 10),
       role,
