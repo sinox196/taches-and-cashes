@@ -138,7 +138,14 @@ async function ensureSchema(pool: pg.Pool) {
     used        DOUBLE PRECISION NOT NULL DEFAULT 0,
     PRIMARY KEY (company_id, user_id)
   )`);
-  // Migrates a pre-multi-tenant table (old PK was bare user_id) — a no-op once already migrated.
+  // Migrates a pre-multi-tenant table (old PK was bare user_id, no company_id
+  // column at all) — a no-op once already migrated. The column has to be
+  // added *before* the DO block below can back-fill or key on it; the
+  // `CREATE TABLE IF NOT EXISTS` above never touches an already-existing
+  // table, so on a legacy database this ADD COLUMN is the only thing that
+  // ever creates it. The DEFAULT also back-fills every existing row in the
+  // same statement, so the later UPDATE is normally a no-op.
+  await q(`ALTER TABLE leave_balances ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '${LEGACY_COMPANY_ID}'`);
   await q(`DO $$
     BEGIN
       IF EXISTS (
