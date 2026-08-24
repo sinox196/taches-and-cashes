@@ -24,15 +24,41 @@ function getTransporter() {
   return transporter;
 }
 
-export async function sendMail(opts: { to: string; subject: string; html: string; from?: string }): Promise<{ sent: boolean }> {
+/** Crude tag strip for the plain-text alternative — good enough for the
+ *  short, simple transactional bodies this sends. A text/plain part isn't
+ *  decorative: mail without one reads to spam filters as HTML-only bulk
+ *  mail, which is exactly the pattern a first-party transactional sender
+ *  wants to avoid. */
+function toPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export async function sendMail(opts: { to: string; subject: string; html: string; from?: string; replyTo?: string }): Promise<{ sent: boolean }> {
   const t = getTransporter();
-  const from = opts.from || process.env.SMTP_FROM || process.env.SMTP_USER;
-  if (!t || !from) {
+  const rawFrom = opts.from || process.env.SMTP_FROM || process.env.SMTP_USER;
+  if (!t || !rawFrom) {
     console.warn(`[email] SMTP not configured — would have sent "${opts.subject}" to ${opts.to}`);
     return { sent: false };
   }
+  // A bare address ("from") reads as bulk/automated mail to both spam
+  // filters and the inbox UI; a named sender ("Name <address>") is what a
+  // legitimate first-party sender looks like.
+  const from = rawFrom.includes('<') ? rawFrom : `"Tâches & Cash" <${rawFrom}>`;
   try {
-    await t.sendMail({ from, to: opts.to, subject: opts.subject, html: opts.html });
+    await t.sendMail({
+      from,
+      to: opts.to,
+      replyTo: opts.replyTo || 'contact@taches-and-cash.com',
+      subject: opts.subject,
+      html: opts.html,
+      text: toPlainText(opts.html),
+    });
     return { sent: true };
   } catch (error) {
     console.error('[email] send failed:', error);

@@ -3807,6 +3807,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           </p>
           ${bank.instructions ? `<p>${escapeHtml(bank.instructions)}</p>` : ''}
           <p>Dès réception de votre paiement, nous confirmerons l'activation de votre abonnement.</p>
+          <p style="margin-top:24px;padding-top:16px;border-top:1px solid #E6E9EE;color:#8A93A0;font-size:12px;">
+            Tâches &amp; Cash — <a href="mailto:contact@taches-and-cash.com">contact@taches-and-cash.com</a>
+          </p>
         `,
       });
 
@@ -3853,6 +3856,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           <p>Connectez-vous avec votre identifiant habituel : <strong>${escapeHtml(admin?.username || '')}</strong> sur
              <a href="https://taches-and-cash.com">taches-and-cash.com</a>.</p>
           <p>Merci de votre confiance.</p>
+          <p style="margin-top:24px;padding-top:16px;border-top:1px solid #E6E9EE;color:#8A93A0;font-size:12px;">
+            Tâches &amp; Cash — <a href="mailto:contact@taches-and-cash.com">contact@taches-and-cash.com</a>
+          </p>
         `,
       });
 
