@@ -206,7 +206,7 @@ async function ensureSchema(pool: pg.Pool) {
   // gets stamped with the legacy cabinet's companyId — a no-op once every row
   // already has one, so re-running it on every boot is always safe.
   for (const table of TENANT_TABLES) {
-    await q(`UPDATE ${table} SET data = data || jsonb_build_object('companyId', $1) WHERE data->>'companyId' IS NULL`, [LEGACY_COMPANY_ID]);
+    await q(`UPDATE ${table} SET data = data || jsonb_build_object('companyId', $1::text) WHERE data->>'companyId' IS NULL`, [LEGACY_COMPANY_ID]);
   }
 
   // Indexes for the lookups that run on every request.
