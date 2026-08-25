@@ -8,6 +8,8 @@ import { downloadInvoicePdf, printInvoicePdf, CompanyBlock } from './invoicePdf'
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
+const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT', USD: 'USD', EUR: 'EUR' };
+
 /** Payment/attestation dates are stored ISO; documents read DD/MM/YYYY throughout. */
 const frDate = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
@@ -37,6 +39,8 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
   const suspended = invoice.vatRegime === 'SUSPENSION';
   const detailed = invoice.billingMode === 'DETAILLEE';
   const custom = Object.entries(invoice.customFields || {});
+  const currency = invoice.currency || 'TND';
+  const currencySuffix = CURRENCY_SUFFIX[currency] || currency;
 
   // The issuer block belongs on every document, so it is loaded once here and
   // handed to the PDF as well as rendered below.
@@ -154,7 +158,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                     <td className="px-3 py-2 text-gray-900 whitespace-pre-wrap break-words">{l.designation}</td>
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{l.quantity}</td>}
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{money(l.unitPrice)}</td>}
-                    <td className="px-3 py-2 text-right text-gray-600">{(l.vatRate * 100).toFixed(0)} %</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{l.vatExempt ? 'Non soumis' : `${(l.vatRate * 100).toFixed(0)} %`}</td>
                     <td className="px-3 py-2 text-right font-mono text-gray-900">{money(l.montantHT)}</td>
                   </tr>
                 ))}
@@ -228,7 +232,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               {invoice.advances > 0 && <Row label="Moins avances perçues" value={`− ${money(invoice.advances)}`} />}
               <div className="flex justify-between px-4 py-3 bg-navy text-white">
                 <span className="font-bold">Montant de facture</span>
-                <span className="font-mono font-bold">{money(invoice.totalNetToPay)} DT</span>
+                <span className="font-mono font-bold">{money(invoice.totalNetToPay)} {currencySuffix}</span>
               </div>
             </div>
           </div>
@@ -236,7 +240,9 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
           <p className="text-[12.5px] text-gray-800 leading-relaxed border-t border-gray-200 pt-4">
             Arrêtée la présente <span className="font-semibold">{(invoice.title || '').toLowerCase()}</span> à un
             montant total TTC net de{' '}
-            <span className="font-semibold">{amountToFrenchWords(invoice.totalNetToPay)}</span>.
+            <span className="font-semibold">
+              {currency === 'TND' ? amountToFrenchWords(invoice.totalNetToPay) : `${money(invoice.totalNetToPay)} ${currencySuffix}`}
+            </span>.
           </p>
 
           {/* Issuer footer — the same block the PDF prints, so the screen and

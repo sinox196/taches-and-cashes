@@ -1973,6 +1973,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    */
   const computeInvoiceTotals = (invoice: any) => {
     const suspended = invoice.vatRegime === 'SUSPENSION';
+    // Export sales also charge zero VAT, but — unlike suspension — carry no
+    // attestation/bon-de-commande wording and no indicative-VAT breakdown.
+    const zeroVat = suspended || invoice.vatRegime === 'EXPORT';
     const lines = Array.isArray(invoice.lines) ? invoice.lines : [];
 
 
@@ -1985,8 +1988,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     for (const line of lines) {
       const ht = num(Number(line.montantHT), 0);
       totalHT += ht;
-      const realRate = num(Number(line.vatRate), 0);
-      const chargedRate = suspended ? 0 : realRate;
+      // "Non soumis" (out of VAT scope) always charges zero, same as suspension/export.
+      const realRate = line.vatExempt ? 0 : num(Number(line.vatRate), 0);
+      const chargedRate = zeroVat ? 0 : realRate;
       vatByRate.set(chargedRate, (vatByRate.get(chargedRate) || 0) + ht);
       indicativeByRate.set(realRate, (indicativeByRate.get(realRate) || 0) + ht);
     }
@@ -2009,7 +2013,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const totalVAT = round3(vatBreakdown.reduce((s, v) => s + v.amount, 0));
     const totalTTC = round3(totalHTr + totalVAT);                                   // (3)
     const withholdingRate = num(Number(invoice.withholdingRate), 0);                // (4)
-    const withholdingAmount = round3(totalTTC * withholdingRate);                   // (5)
+    // Masking the retenue on the document also drops it from the net-to-pay
+    // math — it isn't just hidden, it stops being applied at all.
+    const withholdingAmount = invoice.showWithholding === false ? 0 : round3(totalTTC * withholdingRate); // (5)
     const stampDuty = num(Number(invoice.stampDuty), 0);                            // (6)
     const netToPay = round3(totalTTC - withholdingAmount + stampDuty);              // (7)
     const disbursements = num(Number(invoice.disbursements), 0);                    // (8)
@@ -2169,7 +2175,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         documentKind: kind,
         title: String(body.title || 'Facture').trim(),
         billingMode: body.billingMode === 'DETAILLEE' ? 'DETAILLEE' : 'FORFAIT',
-        vatRegime: body.vatRegime === 'SUSPENSION' ? 'SUSPENSION' : 'DROIT_COMMUN',
+        vatRegime: body.vatRegime === 'SUSPENSION' ? 'SUSPENSION' : body.vatRegime === 'EXPORT' ? 'EXPORT' : 'DROIT_COMMUN',
+        currency: ['TND', 'USD', 'EUR'].includes(body.currency) ? body.currency : 'TND',
         clientId: body.clientId ?? null,
         clientName: body.clientName || '',
         clientTaxId: body.clientTaxId || '',
@@ -2193,6 +2200,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           quantity: num(Number(l.quantity), 1),
           unitPrice: num(Number(l.unitPrice), 0),
           vatRate: num(Number(l.vatRate), 0),
+          vatExempt: !!l.vatExempt,
           montantHT: num(Number(l.montantHT), 0),
         })),
         ...totals,

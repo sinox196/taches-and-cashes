@@ -22,6 +22,12 @@ const KIND_LABEL: Record<string, string> = {
 const REGIME_LABEL: Record<string, string> = {
   DROIT_COMMUN: 'Droit commun',
   SUSPENSION: 'Suspension de TVA',
+  EXPORT: 'Vente à l’export',
+};
+const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT', USD: 'USD', EUR: 'EUR' };
+const REGIME_BADGE: Record<string, string> = {
+  SUSPENSION: 'bg-amber-50 text-amber-700',
+  EXPORT: 'bg-purple-50 text-purple-700',
 };
 
 /**
@@ -177,14 +183,14 @@ export const CashManagement: React.FC = () => {
                     <td className="px-4 py-3 text-gray-500">{inv.issueDate}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                        inv.vatRegime === 'SUSPENSION' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'
+                        REGIME_BADGE[inv.vatRegime] ?? 'bg-blue-50 text-blue-700'
                       }`}>
                         {REGIME_LABEL[inv.vatRegime] ?? inv.vatRegime}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-gray-700">{money(inv.totalHT)}</td>
                     <td className="px-4 py-3 text-right bg-emerald-50/20">
-                      <span className="font-mono font-semibold text-emerald-900">{money(inv.totalNetToPay)} DT</span>
+                      <span className="font-mono font-semibold text-emerald-900">{money(inv.totalNetToPay)} {CURRENCY_SUFFIX[inv.currency] || inv.currency || 'DT'}</span>
                     </td>
                     <td className="px-4 py-3 text-center">
                       {canManage && (

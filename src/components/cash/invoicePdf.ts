@@ -44,6 +44,8 @@ const money = (v: number) =>
     .toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
     .replace(/[\u00a0\u202f]/g, ' ');
 
+const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT', USD: 'USD', EUR: 'EUR' };
+
 /** Payment dates are stored ISO; documents read DD/MM/YYYY throughout. */
 const frDate = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
@@ -71,6 +73,8 @@ const RIGHT = W - M;
 export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const suspended = invoice.vatRegime === 'SUSPENSION';
+  const currency = invoice.currency || 'TND';
+  const currencySuffix = CURRENCY_SUFFIX[currency] || currency;
   const detailed = invoice.billingMode === 'DETAILLEE';
   let y = M;
 
@@ -193,7 +197,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
       const raw = c.k === 'designation' ? null
         : c.k === 'quantity' ? String(l.quantity ?? '')
         : c.k === 'unitPrice' ? money(l.unitPrice)
-        : c.k === 'vat' ? `${Math.round((l.vatRate || 0) * 100)} %`
+        : c.k === 'vat' ? (l.vatExempt ? 'Non soumis' : `${Math.round((l.vatRate || 0) * 100)} %`)
         : money(l.montantHT);
       if (raw === null) {
         let ny = y + 4.5;
@@ -294,16 +298,19 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   doc.rect(tx - 4, y, RIGHT - tx + 4, 9, 'F');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(255, 255, 255);
   text('Montant de facture', tx, y + 6);
-  text(`${money(invoice.totalNetToPay)} DT`, RIGHT - 2, y + 6, { align: 'right' });
+  text(`${money(invoice.totalNetToPay)} ${currencySuffix}`, RIGHT - 2, y + 6, { align: 'right' });
   y += 15;
 
   // ---- amount in words ---------------------------------------------------
   if (y > 240) { doc.addPage(); y = M; }
   rule(y); y += 5;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK);
+  const netWords = currency === 'TND'
+    ? amountToFrenchWords(invoice.totalNetToPay)
+    : `${money(invoice.totalNetToPay)} ${currencySuffix}`;
   for (const line of wrap(
     `Arrêtée la présente ${String(invoice.title || '').toLowerCase()} à un montant total TTC net de `
-    + `${amountToFrenchWords(invoice.totalNetToPay)}.`, RIGHT - M)) {
+    + `${netWords}.`, RIGHT - M)) {
     text(line, M, y); y += 4.5;
   }
 
