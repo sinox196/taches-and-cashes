@@ -878,6 +878,14 @@ async function startServer() {
         });
       }
 
+      // 2b. Multiple specific clients at once (a picker, not free-text search)
+      if (req.query.clientIds) {
+        const idSet = new Set(
+          String(req.query.clientIds).split(',').map((s: string) => Number(s.trim())).filter(Number.isFinite),
+        );
+        if (idSet.size > 0) clients = clients.filter((c: any) => idSet.has(c.id));
+      }
+
       // 3. Sorting. Callers with their own sort UI (ClientsManagement) always
       // pass both params explicitly; this default only affects callers that
       // don't (the debounced client-search autocomplete used across Pointage/
@@ -909,12 +917,6 @@ async function startServer() {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 100; // default to 100, or maybe we just return all if no pagination passed?
 
-      // If client didn't explicitly request pagination, maybe return array to preserve backward compatibility?
-      // The user wants "Do not load the entire Clients database... Use pagination".
-      // We will ALWAYS return pagination wrapper if page/limit is provided, else we return array.
-      const startIndex = (page - 1) * limit;
-      const page_ = req.query.page ? clients.slice(startIndex, startIndex + limit) : clients;
-
       // "Montant de facture" — the sum of a client's own invoices, computed
       // once per request (a single scan over every invoice, then O(1)
       // per-client lookups) rather than one invoice query per client row.
@@ -931,7 +933,10 @@ async function startServer() {
         const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
         montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
       }
-      const enriched = page_.map((c: any) => {
+      // Enriched over every client matching the current search/filters, not
+      // just the current page — the "Total Général" row needs the ledger
+      // figures of clients that aren't currently visible too.
+      const enrichedAll = clients.map((c: any) => {
         const montantFacture = round3(
           (montantFactureByClient.get(String(c.id)) || 0) +
           (montantFactureByClient.get(`name:${c.name}`) || 0),
@@ -941,10 +946,26 @@ async function startServer() {
         return { ...c, montantFacture, resteAPayer: round3(soldeAnterieur - encaissements + montantFacture) };
       });
 
+      // If client didn't explicitly request pagination, maybe return array to preserve backward compatibility?
+      // The user wants "Do not load the entire Clients database... Use pagination".
+      // We will ALWAYS return pagination wrapper if page/limit is provided, else we return array.
+      const startIndex = (page - 1) * limit;
+      const page_ = req.query.page ? enrichedAll.slice(startIndex, startIndex + limit) : enrichedAll;
+
       if (req.query.page) {
-        res.json({ data: enriched, total: clients.length, page, limit });
+        // Sums across the whole filtered set, not the page — this is what the
+        // Clients table's frozen "Total Général" row displays, and it must
+        // stay correct regardless of which page is currently showing.
+        const totals = enrichedAll.reduce((acc: any, c: any) => {
+          acc.soldeAnterieur = round3(acc.soldeAnterieur + num(Number(c.soldeAnterieur), 0));
+          acc.montantFacture = round3(acc.montantFacture + num(Number(c.montantFacture), 0));
+          acc.encaissements = round3(acc.encaissements + sumEncaissements(c));
+          acc.resteAPayer = round3(acc.resteAPayer + num(Number(c.resteAPayer), 0));
+          return acc;
+        }, { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
+        res.json({ data: page_, total: clients.length, page, limit, totals });
       } else {
-        res.json(enriched);
+        res.json(page_);
       }
     } catch (error) {
       console.error(error);

@@ -3,6 +3,7 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
+import { MultiSelectAutocomplete } from '../dashboard/MultiSelectAutocomplete';
 import { formatCostTND } from '../../utils/formatters';
 
 export interface EncaissementEntry {
@@ -63,6 +64,9 @@ export const ClientsManagement: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'Active' | 'Inactive'>('ALL');
+  /** Several specific clients at once, alongside (not instead of) free-text search. */
+  const [selectedClients, setSelectedClients] = useState<{ id: number; name: string }[]>([]);
+  const [totals, setTotals] = useState({ soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -135,7 +139,7 @@ export const ClientsManagement: React.FC = () => {
       fetchClients();
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [page, searchTerm, activeFilters, statusFilter, sortField, sortDir]);
+  }, [page, searchTerm, activeFilters, statusFilter, sortField, sortDir, selectedClients]);
 
   const fetchAvailableFields = async () => {
     try {
@@ -167,6 +171,9 @@ export const ClientsManagement: React.FC = () => {
         sortDir,
         filters: JSON.stringify(combinedFilters)
       });
+      if (selectedClients.length > 0) {
+        params.set('clientIds', selectedClients.map(c => c.id).join(','));
+      }
 
       const res = await fetch(`/api/clients?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -176,6 +183,7 @@ export const ClientsManagement: React.FC = () => {
         if (data && data.data) {
           setClients(data.data);
           setTotalCount(data.total);
+          setTotals(data.totals || { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
         } else if (Array.isArray(data)) {
           setClients(data);
           setTotalCount(data.length);
@@ -209,6 +217,7 @@ export const ClientsManagement: React.FC = () => {
     setActiveFilters({});
     setStatusFilter('ALL');
     setSearchTerm('');
+    setSelectedClients([]);
     setPage(1);
   };
 
@@ -399,6 +408,13 @@ export const ClientsManagement: React.FC = () => {
             />
           </div>
 
+          <MultiSelectAutocomplete
+            placeholder="Filtrer par client(s)…"
+            endpoint="/api/clients"
+            selectedItems={selectedClients}
+            onChange={(items) => { setSelectedClients(items); setPage(1); }}
+          />
+
           <div className="flex gap-2 relative">
             <div className="relative">
               <button
@@ -511,10 +527,19 @@ export const ClientsManagement: React.FC = () => {
           </div>
         </div>
         {/* Active Filters Display */}
-        {(Object.keys(activeFilters).length > 0 || statusFilter !== 'ALL') && (
+        {(Object.keys(activeFilters).length > 0 || statusFilter !== 'ALL' || selectedClients.length > 0) && (
           <div className="flex flex-wrap items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
             <span className="text-[12px] font-medium text-gray-600">Filtres actifs:</span>
-            
+
+            {selectedClients.length > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-gray-200 rounded-full text-[12px] font-medium text-gray-700">
+                {selectedClients.length} client{selectedClients.length > 1 ? 's' : ''} sélectionné{selectedClients.length > 1 ? 's' : ''}
+                <button onClick={() => setSelectedClients([])} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
             {statusFilter !== 'ALL' && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-gray-200 rounded-full text-[12px] font-medium text-gray-700">
                 Statut: {statusFilter === 'Active' ? 'Actif' : 'Inactif'}
@@ -552,16 +577,18 @@ export const ClientsManagement: React.FC = () => {
             <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="overflow-x-auto w-full">
+          <div className="max-h-[65vh] overflow-y-auto overflow-x-auto">
               <table className="w-full text-left border-collapse whitespace-nowrap min-w-max">
+                {/* Bloc en-tête figé: column labels + "Total Général" both stay
+                    pinned while the body scrolls, so neither the titles nor
+                    the running totals ever get lost off the top of the view. */}
                 <thead>
                   <tr className="bg-[#F9FAFB] border-b border-gray-200">
                     {allTableColumns.filter(c => visibleColumns.includes(c.key)).map(col => (
-                      <th 
-                        key={col.key} 
+                      <th
+                        key={col.key}
                         onClick={() => handleSort(col.key)}
-                        className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors group select-none"
+                        className="h-11 sticky top-0 z-20 bg-[#F9FAFB] px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors group select-none"
                       >
                         <div className={`flex items-center gap-1 ${['soldeAnterieur', 'encaissements', 'montantFacture', 'resteAPayer'].includes(col.key) ? 'justify-end' : ''}`}>
                           {col.label}
@@ -572,9 +599,26 @@ export const ClientsManagement: React.FC = () => {
                         </div>
                       </th>
                     ))}
-                    <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right sticky right-0 bg-[#F9FAFB] z-10">
+                    <th className="h-11 px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right sticky top-0 right-0 bg-[#F9FAFB] z-30">
                       Actions
                     </th>
+                  </tr>
+                  <tr className="bg-gray-100 border-b border-gray-200">
+                    {allTableColumns.filter(c => visibleColumns.includes(c.key)).map((col, i) => {
+                      const isFinancial = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer'].includes(col.key);
+                      return (
+                        <td key={col.key} className="h-11 sticky top-11 z-20 bg-gray-100 px-5 py-2.5 text-[12px]">
+                          {i === 0 ? (
+                            <span className="font-bold text-gray-800">Total Général</span>
+                          ) : isFinancial ? (
+                            <span className="block text-right font-mono font-bold text-gray-900">
+                              {formatCostTND((totals as any)[col.key] || 0)}
+                            </span>
+                          ) : null}
+                        </td>
+                      );
+                    })}
+                    <td className="h-11 sticky top-11 right-0 bg-gray-100 z-30 px-5 py-2.5" />
                   </tr>
                 </thead>
                 <tbody className="text-[12px] divide-y divide-gray-50">
@@ -702,7 +746,6 @@ export const ClientsManagement: React.FC = () => {
                   )}
                 </tbody>
               </table>
-            </div>
           </div>
         )}
         {/* Pagination */}

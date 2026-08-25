@@ -102,7 +102,7 @@ export const MultiSelectAutocomplete: React.FC<MultiSelectAutocompleteProps> = (
 
       {/* Dropdown */}
       {isOpen && query.length >= 1 && (
-        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto">
+        <div className="absolute z-40 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto">
           {results.length > 0 ? (
             <ul className="py-1">
               {results.map((item) => (
