@@ -21,7 +21,7 @@ const VAT_REGIMES = [
   { id: 'SUSPENSION', label: 'Suspension de TVA' },
 ];
 const VAT_RATES = [0, 0.07, 0.13, 0.19];
-const WITHHOLDING_RATES = [0, 0.01, 0.015, 0.03];
+const WITHHOLDING_RATES = [0, 0.005, 0.01, 0.015, 0.05, 0.1];
 /** Suggested titles; "Autre document" allows a free one. */
 const TITLES = ['Facture', "Note d'honoraires"];
 
@@ -130,11 +130,19 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
         }))
       : [emptyLine()]);
   const [withholdingRate, setWithholdingRate] = useState(invoice?.withholdingRate ?? 0.01);
+  const [showWithholding, setShowWithholding] = useState(invoice ? invoice.showWithholding !== false : true);
   const [stampDuty, setStampDuty] = useState<number | ''>(invoice?.stampDuty ?? 1);
   const [showDisbursements, setShowDisbursements] = useState(!!invoice?.disbursements);
   const [disbursements, setDisbursements] = useState<number | ''>(invoice?.disbursements || '');
   const [showAdvances, setShowAdvances] = useState(!!invoice?.advances);
   const [advances, setAdvances] = useState<number | ''>(invoice?.advances || '');
+
+  // Only meaningful under "Suspension de TVA" — printed under the invoice
+  // number on the document. Kept in state regardless of régime so switching
+  // back and forth doesn't lose what was typed.
+  const [attestationNumber, setAttestationNumber] = useState(invoice?.attestationNumber ?? '');
+  const [attestationDate, setAttestationDate] = useState(invoice?.attestationDate ?? '');
+  const [bonCommandeNumber, setBonCommandeNumber] = useState(invoice?.bonCommandeNumber ?? '');
 
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -193,17 +201,28 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   const totals = useMemo(() => {
     const round3 = (x: number) => Math.round((x + Number.EPSILON) * 1000) / 1000;
     const byRate = new Map<number, number>();
+    const indicativeByRate = new Map<number, number>();
     let totalHT = 0;
     for (const l of lines) {
       const ht = lineHT(l);
       totalHT += ht;
-      const rate = suspended ? 0 : l.vatRate;
-      byRate.set(rate, (byRate.get(rate) || 0) + ht);
+      const realRate = l.vatRate;
+      const chargedRate = suspended ? 0 : realRate;
+      byRate.set(chargedRate, (byRate.get(chargedRate) || 0) + ht);
+      indicativeByRate.set(realRate, (indicativeByRate.get(realRate) || 0) + ht);
     }
     const breakdown = [...byRate.entries()]
       .filter(([r]) => !suspended && r > 0)
       .map(([rate, base]) => ({ rate, base: round3(base), amount: round3(base * rate) }))
       .sort((a, b) => a.rate - b.rate);
+    // Purely informational under suspension — never added to tva/ttc below.
+    const indicativeBreakdown = suspended
+      ? [...indicativeByRate.entries()]
+          .filter(([r]) => r > 0)
+          .map(([rate, base]) => ({ rate, base: round3(base), amount: round3(base * rate) }))
+          .sort((a, b) => a.rate - b.rate)
+      : [];
+    const indicativeTotal = round3(indicativeBreakdown.reduce((s, b) => s + b.amount, 0));
 
     const ht = round3(totalHT);
     const tva = round3(breakdown.reduce((s, b) => s + b.amount, 0));
@@ -214,7 +233,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
     const deb = showDisbursements ? n(Number(disbursements)) : 0;
     const adv = showAdvances ? n(Number(advances)) : 0;
     const totalNet = round3(net + deb - adv);
-    return { breakdown, ht, tva, ttc, rsAmount, stamp, net, deb, adv, totalNet };
+    return { breakdown, indicativeBreakdown, indicativeTotal, ht, tva, ttc, rsAmount, stamp, net, deb, adv, totalNet };
   }, [lines, suspended, detailed, withholdingRate, stampDuty, showDisbursements, disbursements, showAdvances, advances]);
 
   const dateWarning = !isEdit && !freeNumber && lastIssueDate && issueDate < lastIssueDate
@@ -248,13 +267,21 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
             designation: l.designation.trim(),
             quantity: detailed ? n(Number(l.quantity)) : 1,
             unitPrice: detailed ? n(Number(l.unitPrice)) : 0,
-            vatRate: suspended ? 0 : l.vatRate,
+            // The line's own rate is always sent, suspended or not — the
+            // server is what decides whether it's actually charged; under
+            // suspension it still needs the real rate to show the
+            // "TVA à titre indicatif" breakdown.
+            vatRate: l.vatRate,
             montantHT: lineHT(l),
           })),
           withholdingRate,
+          showWithholding,
           stampDuty: n(Number(stampDuty)),
           disbursements: totals.deb,
           advances: totals.adv,
+          attestationNumber: attestationNumber.trim(),
+          attestationDate,
+          bonCommandeNumber: bonCommandeNumber.trim(),
         }),
       });
       if (!res.ok) {
@@ -316,6 +343,37 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               </select>
             </Choice>
           </div>
+
+          {suspended && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-5 border-b border-gray-200 -mt-2">
+              <Choice label="N° Attestation">
+                <input
+                  type="text"
+                  value={attestationNumber}
+                  onChange={e => setAttestationNumber(e.target.value)}
+                  className={SELECT_CLS}
+                  placeholder="xxxxxxxxx"
+                />
+              </Choice>
+              <Choice label="Date de l'attestation">
+                <input
+                  type="date"
+                  value={attestationDate}
+                  onChange={e => setAttestationDate(e.target.value)}
+                  className={SELECT_CLS}
+                />
+              </Choice>
+              <Choice label="N° Bon de commande">
+                <input
+                  type="text"
+                  value={bonCommandeNumber}
+                  onChange={e => setBonCommandeNumber(e.target.value)}
+                  className={SELECT_CLS}
+                  placeholder="xxxxxxxxx"
+                />
+              </Choice>
+            </div>
+          )}
 
           {/* ---- 2. En-tête ---- */}
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -535,7 +593,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                     <th className="px-3 py-2 font-semibold">Désignation</th>
                     {detailed && <th className="px-3 py-2 font-semibold w-24">Quantité</th>}
                     {detailed && <th className="px-3 py-2 font-semibold w-32">Prix unitaire</th>}
-                    {!suspended && <th className="px-3 py-2 font-semibold w-28">TVA</th>}
+                    <th className="px-3 py-2 font-semibold w-28">TVA</th>
                     <th className="px-3 py-2 font-semibold w-36 text-right">Montant HT</th>
                     <th className="w-10" />
                   </tr>
@@ -572,17 +630,18 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                           />
                         </td>
                       )}
-                      {!suspended && (
-                        <td className="px-3 py-2">
-                          <select
-                            value={l.vatRate}
-                            onChange={e => setLine(i, { vatRate: parseFloat(e.target.value) })}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-[12.5px] bg-white"
-                          >
-                            {VAT_RATES.map(r => <option key={r} value={r}>{(r * 100).toFixed(0)} %</option>)}
-                          </select>
-                        </td>
-                      )}
+                      <td className="px-3 py-2">
+                        <select
+                          value={l.vatRate}
+                          onChange={e => setLine(i, { vatRate: parseFloat(e.target.value) })}
+                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-[12.5px] bg-white"
+                        >
+                          {VAT_RATES.map(r => <option key={r} value={r}>{(r * 100).toFixed(0)} %</option>)}
+                        </select>
+                        {suspended && (
+                          <p className="text-[10px] text-gray-400 mt-0.5">Indicatif — non facturé</p>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         {detailed ? (
                           <span className="font-mono text-gray-900">{money(lineHT(l))}</span>
@@ -647,8 +706,33 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 </div>
               )}
               {suspended && (
-                <div className="border border-dashed border-gray-300 rounded-xl px-4 py-3 text-[12px] text-gray-500">
-                  Suspension de TVA — aucune TVA n'est facturée.
+                <div className="border border-dashed border-gray-300 rounded-xl overflow-hidden">
+                  <div className="px-4 py-2.5 text-[11.5px] text-gray-500 bg-gray-50 border-b border-gray-200">
+                    Suspension de TVA — aucune TVA n'est facturée. Détail ci-dessous à titre indicatif uniquement.
+                  </div>
+                  {totals.indicativeBreakdown.length > 0 && (
+                    <table className="w-full text-left text-[12.5px]">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
+                          <th className="px-3 py-2 font-semibold">TVA</th>
+                          <th className="px-3 py-2 font-semibold text-right">Base</th>
+                          <th className="px-3 py-2 font-semibold text-right">Montant</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {totals.indicativeBreakdown.map(b => (
+                          <tr key={b.rate}>
+                            <td className="px-3 py-2">{(b.rate * 100).toFixed(0)} %</td>
+                            <td className="px-3 py-2 text-right font-mono">{money(b.base)}</td>
+                            <td className="px-3 py-2 text-right font-mono">{money(b.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <div className="px-4 py-2 text-[12px] text-gray-600 border-t border-gray-200">
+                    Total TVA à titre indicatif : <span className="font-mono font-semibold">{money(totals.indicativeTotal)}</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -669,17 +753,30 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               </div>
 
               <div className="flex justify-between items-center px-4 py-2">
-                <span className="text-gray-600">Taux de la retenue à la source</span>
+                <label className="flex items-center gap-1.5 text-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showWithholding}
+                    onChange={e => setShowWithholding(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  Taux de la retenue à la source
+                </label>
                 <select
                   value={withholdingRate}
                   onChange={e => setWithholdingRate(parseFloat(e.target.value))}
-                  className="px-2 py-1 border border-gray-300 rounded text-[12px] bg-white"
+                  className="px-2 py-1 border border-gray-300 rounded text-[12px] bg-white ml-auto"
                 >
                   {WITHHOLDING_RATES.map(r => (
                     <option key={r} value={r}>{(r * 100).toLocaleString('fr-FR')} %</option>
                   ))}
                 </select>
               </div>
+              {!showWithholding && (
+                <p className="px-4 pb-1 -mt-1 text-[10.5px] text-gray-400">
+                  Masquée sur le document — le montant net reste calculé avec cette retenue.
+                </p>
+              )}
               <div className="flex justify-between px-4 py-2">
                 <span className="text-gray-600">Montant de la retenue à la source</span>
                 <span className="font-mono text-gray-900">− {money(totals.rsAmount)}</span>

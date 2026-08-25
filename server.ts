@@ -1978,17 +1978,32 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
     let totalHT = 0;
     const vatByRate = new Map<number, number>();
+    // Suspension never charges VAT, but the line's own rate is still tracked
+    // separately below — the document must still show what VAT *would* have
+    // applied ("à titre indicatif"), it just isn't charged or paid.
+    const indicativeByRate = new Map<number, number>();
     for (const line of lines) {
       const ht = num(Number(line.montantHT), 0);
       totalHT += ht;
-      const rate = suspended ? 0 : num(Number(line.vatRate), 0);
-      vatByRate.set(rate, (vatByRate.get(rate) || 0) + ht);
+      const realRate = num(Number(line.vatRate), 0);
+      const chargedRate = suspended ? 0 : realRate;
+      vatByRate.set(chargedRate, (vatByRate.get(chargedRate) || 0) + ht);
+      indicativeByRate.set(realRate, (indicativeByRate.get(realRate) || 0) + ht);
     }
 
     const vatBreakdown = [...vatByRate.entries()]
       .filter(([rate]) => !suspended && rate > 0)
       .map(([rate, base]) => ({ rate, base: round3(base), amount: round3(base * rate) }))
       .sort((a, b) => a.rate - b.rate);
+
+    // Purely informational under suspension — never added to totalVAT/totalTTC.
+    const indicativeVatBreakdown = suspended
+      ? [...indicativeByRate.entries()]
+          .filter(([rate]) => rate > 0)
+          .map(([rate, base]) => ({ rate, base: round3(base), amount: round3(base * rate) }))
+          .sort((a, b) => a.rate - b.rate)
+      : [];
+    const indicativeVatTotal = round3(indicativeVatBreakdown.reduce((s, v) => s + v.amount, 0));
 
     const totalHTr = round3(totalHT);
     const totalVAT = round3(vatBreakdown.reduce((s, v) => s + v.amount, 0));
@@ -2003,6 +2018,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
     return {
       vatBreakdown,
+      indicativeVatBreakdown,
+      indicativeVatTotal,
       totalHT: totalHTr,
       totalVAT,
       totalTTC,
@@ -2162,6 +2179,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         dueDate: body.dueDate || '',
         showDueDate: body.showDueDate !== false,
         bankId: body.bankId || null,
+        // Only meaningful under "Suspension de TVA" — printed under the
+        // invoice number, but always stored so switching régime back and
+        // forth doesn't lose what was typed.
+        attestationNumber: String(body.attestationNumber || '').trim(),
+        attestationDate: body.attestationDate ? String(body.attestationDate).slice(0, 10) : '',
+        bonCommandeNumber: String(body.bonCommandeNumber || '').trim(),
+        // Masks the Retenue à la source line on the printed document without
+        // changing the actual net-to-pay math — same idea as showDueDate.
+        showWithholding: body.showWithholding !== false,
         lines: body.lines.map((l: any) => ({
           designation: String(l.designation || '').trim(),
           quantity: num(Number(l.quantity), 1),

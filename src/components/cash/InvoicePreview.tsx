@@ -8,6 +8,12 @@ import { downloadInvoicePdf, printInvoicePdf, CompanyBlock } from './invoicePdf'
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
+/** Payment/attestation dates are stored ISO; documents read DD/MM/YYYY throughout. */
+const frDate = (iso: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
+};
+
 /** Module scope: see the note in InvoiceEditor about remounting. */
 const Row: React.FC<{ label: string; value: string; strong?: boolean; muted?: boolean }> = ({ label, value, strong, muted }) => (
   <div className={`flex justify-between px-4 py-2 ${strong ? 'bg-gray-50' : ''}`}>
@@ -102,6 +108,13 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               <div className="text-[13px] text-gray-500 mt-0.5">
                 N° <span className="font-mono font-bold text-gray-900">{invoice.number}</span>
               </div>
+              {suspended && (
+                <div className="text-[11px] text-gray-500 mt-2 leading-snug">
+                  <div className="font-semibold text-gray-700">Vente en suspension de la TVA</div>
+                  <div>Selon Attestation N° {invoice.attestationNumber || 'xxxxxxxxx'} du {invoice.attestationDate ? frDate(invoice.attestationDate) : 'jj/mm/aa'}</div>
+                  <div>Et bon de commande N°{invoice.bonCommandeNumber || 'xxxxxxxxx'}</div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -131,7 +144,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                   <th className="px-3 py-2 font-semibold">Désignation</th>
                   {detailed && <th className="px-3 py-2 font-semibold text-right">Qté</th>}
                   {detailed && <th className="px-3 py-2 font-semibold text-right">P.U.</th>}
-                  {!suspended && <th className="px-3 py-2 font-semibold text-right">TVA</th>}
+                  <th className="px-3 py-2 font-semibold text-right">TVA</th>
                   <th className="px-3 py-2 font-semibold text-right">Montant HT</th>
                 </tr>
               </thead>
@@ -141,7 +154,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                     <td className="px-3 py-2 text-gray-900 whitespace-pre-wrap break-words">{l.designation}</td>
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{l.quantity}</td>}
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{money(l.unitPrice)}</td>}
-                    {!suspended && <td className="px-3 py-2 text-right text-gray-600">{(l.vatRate * 100).toFixed(0)} %</td>}
+                    <td className="px-3 py-2 text-right text-gray-600">{(l.vatRate * 100).toFixed(0)} %</td>
                     <td className="px-3 py-2 text-right font-mono text-gray-900">{money(l.montantHT)}</td>
                   </tr>
                 ))}
@@ -174,8 +187,30 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                 </div>
               )}
               {suspended && (
-                <div className="border border-dashed border-gray-300 rounded-lg px-3 py-2 text-[12px] text-gray-500">
-                  Suspension de TVA
+                <div className="border border-dashed border-gray-300 rounded-lg overflow-hidden">
+                  {(invoice.indicativeVatBreakdown || []).length > 0 && (
+                    <table className="w-full text-left text-[12px]">
+                      <thead>
+                        <tr className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
+                          <th className="px-3 py-2 font-semibold">TVA</th>
+                          <th className="px-3 py-2 font-semibold text-right">Base</th>
+                          <th className="px-3 py-2 font-semibold text-right">Montant</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {invoice.indicativeVatBreakdown.map((b: any) => (
+                          <tr key={b.rate}>
+                            <td className="px-3 py-2">{(b.rate * 100).toFixed(0)} %</td>
+                            <td className="px-3 py-2 text-right font-mono">{money(b.base)}</td>
+                            <td className="px-3 py-2 text-right font-mono">{money(b.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <div className="px-3 py-2 text-[12px] text-gray-500 border-t border-gray-200">
+                    Total TVA à titre indicatif : <span className="font-mono">{money(invoice.indicativeVatTotal || 0)}</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -184,7 +219,9 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               <Row label="Total HT" value={money(invoice.totalHT)} />
               <Row label="Total TVA" value={money(invoice.totalVAT)} />
               <Row label="Total TTC" value={money(invoice.totalTTC)} strong />
-              <Row label={`Retenue à la source — ${(invoice.withholdingRate * 100).toLocaleString('fr-FR')} %`} value={`− ${money(invoice.withholdingAmount)}`} />
+              {invoice.showWithholding !== false && (
+                <Row label={`Retenue à la source — ${(invoice.withholdingRate * 100).toLocaleString('fr-FR')} %`} value={`− ${money(invoice.withholdingAmount)}`} />
+              )}
               <Row label="Timbre fiscal" value={money(invoice.stampDuty)} />
               <Row label="Net à payer" value={money(invoice.netToPay)} strong />
               {invoice.disbursements > 0 && <Row label="Remboursement de débours" value={`+ ${money(invoice.disbursements)}`} />}

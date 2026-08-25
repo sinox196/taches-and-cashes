@@ -90,6 +90,17 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); setInk(MUTED);
   text(`N° ${invoice.number || ''}`, RIGHT, y + 12, { align: 'right' });
 
+  // Required wording for a suspended-VAT sale, printed right under the
+  // document number so it can never be missed or separated from it.
+  if (suspended) {
+    doc.setFontSize(8); setInk(MUTED);
+    doc.setFont('helvetica', 'bold');
+    text('Vente en suspension de la TVA', RIGHT, y + 17, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    text(`Selon Attestation N° ${invoice.attestationNumber || 'xxxxxxxxx'} du ${invoice.attestationDate ? frDate(invoice.attestationDate) : 'jj/mm/aa'}`, RIGHT, y + 21, { align: 'right' });
+    text(`Et bon de commande N°${invoice.bonCommandeNumber || 'xxxxxxxxx'}`, RIGHT, y + 25, { align: 'right' });
+  }
+
   // Logo, top-left, beside the issuer text rather than above it — that keeps
   // the header's total height unchanged whether or not a logo is configured.
   const companyX = block?.logo ? M + 28 : M;
@@ -115,7 +126,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     if (contact) text(contact, companyX, cy);
   }
 
-  y += 24;
+  y += suspended ? 34 : 24;
   rule(y);
   y += 8;
 
@@ -143,12 +154,15 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   y = Math.max(ly, y + 6) + 4;
 
   // ---- lines -------------------------------------------------------------
+  // The rate column stays even under suspension — it's what the "TVA à
+  // titre indicatif" breakdown below is computed from, so it must stay
+  // visible for the reader to see which rate each line nominally carries.
   const cols = detailed
     ? [{ k: 'designation', w: 78, a: 'left' }, { k: 'quantity', w: 18, a: 'right' },
-       { k: 'unitPrice', w: 26, a: 'right' }, ...(suspended ? [] : [{ k: 'vat', w: 18, a: 'right' }]),
-       { k: 'montantHT', w: suspended ? 60 : 42, a: 'right' }]
-    : [{ k: 'designation', w: suspended ? 122 : 104, a: 'left' },
-       ...(suspended ? [] : [{ k: 'vat', w: 18, a: 'right' }]),
+       { k: 'unitPrice', w: 26, a: 'right' }, { k: 'vat', w: 18, a: 'right' },
+       { k: 'montantHT', w: 42, a: 'right' }]
+    : [{ k: 'designation', w: 104, a: 'left' },
+       { k: 'vat', w: 18, a: 'right' },
        { k: 'montantHT', w: 60, a: 'right' }];
   const label: Record<string, string> = {
     designation: 'Désignation', quantity: 'Qté', unitPrice: 'P.U.', vat: 'TVA', montantHT: 'Montant HT',
@@ -225,8 +239,35 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     doc.rect(bx, totalsTop, bw, by - totalsTop + 2);
     breakdownBottom = by + 2;
   } else if (suspended) {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setInk(MUTED);
-    text('Suspension de TVA', M, totalsTop + 4);
+    // No VAT is charged, but the document still has to show what it would
+    // have been ("à titre indicatif") — same box style as the charged
+    // breakdown above, just sourced from indicativeVatBreakdown instead.
+    const bx = M, bw = tx - 8 - M;
+    const c1 = bx + bw * 0.42, c2 = bx + bw;
+    let by = totalsTop;
+    const indicative = invoice.indicativeVatBreakdown || [];
+    if (indicative.length > 0) {
+      doc.setFillColor(HEAD[0], HEAD[1], HEAD[2]);
+      doc.rect(bx, by, bw, 6, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setInk(MUTED);
+      text('TVA', bx + 2, by + 4.2);
+      text('BASE', c1, by + 4.2, { align: 'right' });
+      text('MONTANT', c2 - 2, by + 4.2, { align: 'right' });
+      by += 6;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setInk(INK);
+      for (const b of indicative) {
+        by += 5;
+        text(`${Math.round((b.rate || 0) * 100)} %`, bx + 2, by);
+        text(money(b.base), c1, by, { align: 'right' });
+        text(money(b.amount), c2 - 2, by, { align: 'right' });
+      }
+      doc.setDrawColor(LINE[0], LINE[1], LINE[2]); doc.setLineWidth(0.2);
+      doc.rect(bx, totalsTop, bw, by - totalsTop + 2);
+      by += 2;
+    }
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); setInk(MUTED);
+    text(`Total TVA à titre indicatif : ${money(invoice.indicativeVatTotal || 0)}`, bx, by + 4);
+    breakdownBottom = by + 8;
   }
 
   const row = (lbl: string, value: string, bold = false) => {
@@ -238,7 +279,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   row('Total HT', money(invoice.totalHT));
   row('Total TVA', money(invoice.totalVAT));
   row('Total TTC', money(invoice.totalTTC), true);
-  if (invoice.withholdingAmount) {
+  if (invoice.withholdingAmount && invoice.showWithholding !== false) {
     row(`Retenue à la source — ${((invoice.withholdingRate || 0) * 100).toLocaleString('fr-FR')} %`,
       `- ${money(invoice.withholdingAmount)}`);
   }
