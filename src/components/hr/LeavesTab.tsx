@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { LeaveRequest } from '../../types';
 import { Plus, Check, X, Clock, AlertCircle } from 'lucide-react';
@@ -41,6 +42,10 @@ export const LeavesTab: React.FC = () => {
 
   const [rejectionModalId, setRejectionModalId] = useState<number | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+
+  useEscapeToClose(() => setIsCreating(false), isCreating);
+  useEscapeToClose(() => { setApprovalModalId(null); setApprovalComment(''); }, !!approvalModalId);
+  useEscapeToClose(() => { setRejectionModalId(null); setRejectionReason(''); }, !!rejectionModalId);
 
   const fetchLeaves = () => {
     fetch('/api/hr/leaves', { headers: { 'Authorization': `Bearer ${token}` } })

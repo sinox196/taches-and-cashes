@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Printer, Download, Pencil, Trash2 } from 'lucide-react';
 import { amountToFrenchWords } from '../../utils/amountToWords';
 import { useAuth } from '../../context/AuthContext';
@@ -25,6 +26,7 @@ interface InvoicePreviewProps {
 
 /** The issued document, laid out as described in the cahier des charges. */
 export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose, onEdit, onDelete }) => {
+  useEscapeToClose(onClose);
   const { token } = useAuth();
   const suspended = invoice.vatRegime === 'SUSPENSION';
   const detailed = invoice.billingMode === 'DETAILLEE';
@@ -188,7 +190,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               {invoice.disbursements > 0 && <Row label="Remboursement de débours" value={`+ ${money(invoice.disbursements)}`} />}
               {invoice.advances > 0 && <Row label="Moins avances perçues" value={`− ${money(invoice.advances)}`} />}
               <div className="flex justify-between px-4 py-3 bg-navy text-white">
-                <span className="font-bold">Total net à payer</span>
+                <span className="font-bold">Montant de facture</span>
                 <span className="font-mono font-bold">{money(invoice.totalNetToPay)} DT</span>
               </div>
             </div>
@@ -212,9 +214,8 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                   <div className="font-semibold text-gray-900">{block.company.name}</div>
                   {block.company.address && <div>{block.company.address}</div>}
                   {block.company.taxId && <div>MF: {block.company.taxId}</div>}
-                  {(block.company.email || block.company.phone) && (
-                    <div>{[block.company.email, block.company.phone].filter(Boolean).join('  ')}</div>
-                  )}
+                  {block.company.email && <div>{block.company.email}</div>}
+                  {block.company.phone && <div>{block.company.phone}</div>}
                 </div>
               ) : (
                 <div className="text-gray-300 italic">Non renseignées</div>
@@ -225,20 +226,28 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               <div className="font-bold text-gray-400 uppercase tracking-[0.05em] text-[9.5px] mb-1">
                 Informations bancaires
               </div>
-              <div className="text-gray-700 leading-relaxed">
-                <div>Banque : {block?.bank?.name || <span className="text-gray-300">—</span>}</div>
-                <div className="font-mono break-all">
-                  IBAN : {block?.bank?.iban || <span className="text-gray-300 font-sans">—</span>}
-                </div>
-              </div>
+              {(() => {
+                const selectedBank = block?.banks?.find(b => b.id === invoice?.bankId);
+                const defaultBank = selectedBank || block?.banks?.find(b => b.id === block.defaultBankId) || block?.banks?.[0];
+                return (
+                  <div className="text-gray-700 leading-relaxed">
+                    <div>Banque : {defaultBank?.name || <span className="text-gray-300">—</span>}</div>
+                    {defaultBank?.rib && <div className="font-mono break-all">RIB : {defaultBank.rib}</div>}
+                    <div className="font-mono break-all">
+                      IBAN : {defaultBank?.iban || <span className="text-gray-300 font-sans">—</span>}
+                    </div>
+                    {defaultBank?.swift && <div className="font-mono break-all">SWIFT : {defaultBank.swift}</div>}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="sm:text-right">
-              {block?.signature ? (
-                <>
-                  <img src={block.signature} alt="Signature" className="h-14 inline-block object-contain" />
-                  <div className="text-[9.5px] text-gray-400 mt-1">Signature</div>
-                </>
+              {block?.showSignature !== false && (block?.signature || block?.stamp) ? (
+                <div className="flex sm:justify-end gap-2">
+                  {block.stamp && <img src={block.stamp} alt="Cachet" className="h-14 inline-block object-contain" />}
+                  {block.signature && <img src={block.signature} alt="Signature" className="h-14 inline-block object-contain" />}
+                </div>
               ) : (
                 <div className="text-gray-300 italic">Aucune signature</div>
               )}

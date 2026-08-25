@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Pencil, Trash2, Loader2, FileCheck2, Link2, CalendarClock, ExternalLink, Briefcase } from 'lucide-react';
 import { DocumentTemplatesManager, type ResourceTemplate, type ResourceTemplateItem } from './DocumentTemplatesManager';
@@ -29,6 +30,7 @@ export const ResourcesManagement: React.FC = () => {
 
   const [importingTemplate, setImportingTemplate] = useState(false);
   const [linkForm, setLinkForm] = useState<null | { id?: string; category: string; label: string; url: string; description: string; icon: string }>(null);
+  useEscapeToClose(() => setLinkForm(null), !!linkForm);
 
   const load = async () => {
     try {

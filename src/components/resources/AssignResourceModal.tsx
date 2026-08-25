@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Loader, Send, Search } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
@@ -13,6 +14,7 @@ interface AssignResourceModalProps {
 }
 
 export const AssignResourceModal: React.FC<AssignResourceModalProps> = ({ client, onClose, onAssigned }) => {
+  useEscapeToClose(onClose);
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 

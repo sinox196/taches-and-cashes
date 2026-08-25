@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import {
   X, Plus, Trash2, Loader, Search, Upload, Calendar, AlertTriangle,
 } from 'lucide-react';
@@ -63,6 +64,7 @@ interface InvoiceEditorProps {
 }
 
 export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, onClose, onSaved }) => {
+  useEscapeToClose(onClose);
   const isEdit = !!invoice;
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
@@ -80,11 +82,21 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   const [lastIssueDate, setLastIssueDate] = useState<string | null>(null);
   /** Read-only here — the logo is configured once in Informations de facturation. */
   const [logo, setLogo] = useState<string | null>(null);
+  /** The banks configured in Informations de facturation — this document picks one. */
+  const [banks, setBanks] = useState<{ id: string; name: string }[]>([]);
+  const [bankId, setBankId] = useState(invoice?.bankId ?? '');
   useEffect(() => {
     let cancelled = false;
     fetch('/api/cash/company', { headers: { Authorization: `Bearer ${token}` } })
       .then(res => (res.ok ? res.json() : null))
-      .then(body => { if (!cancelled && body?.logo) setLogo(body.logo); })
+      .then(body => {
+        if (cancelled || !body) return;
+        if (body.logo) setLogo(body.logo);
+        setBanks(body.banks || []);
+        // A new document defaults to the configured default bank; an
+        // existing one keeps whichever bank it already carries.
+        if (!isEdit && !bankId) setBankId(body.defaultBankId || '');
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [token]);
@@ -123,22 +135,6 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   const [disbursements, setDisbursements] = useState<number | ''>(invoice?.disbursements || '');
   const [showAdvances, setShowAdvances] = useState(!!invoice?.advances);
   const [advances, setAdvances] = useState<number | ''>(invoice?.advances || '');
-
-  // Encaissements: what the client has actually paid, possibly in several
-  // instalments on different dates. The server owns the derived totals; these
-  // rows are only the input.
-  const [payments, setPayments] = useState<{ id: string; amount: number | ''; date: string; note: string }[]>(
-    (invoice?.payments ?? []).map((pay: any) => ({
-      id: String(pay.id), amount: pay.amount ?? '', date: pay.date ?? '', note: pay.note ?? '',
-    })),
-  );
-  const addPayment = () => setPayments(prev => [
-    ...prev,
-    { id: `pay-${Date.now()}-${prev.length}`, amount: '', date: new Date().toISOString().slice(0, 10), note: '' },
-  ]);
-  const updatePayment = (id: string, patch: Partial<{ amount: number | ''; date: string; note: string }>) =>
-    setPayments(prev => prev.map(pay => (pay.id === id ? { ...pay, ...patch } : pay)));
-  const removePayment = (id: string) => setPayments(prev => prev.filter(pay => pay.id !== id));
 
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -218,10 +214,8 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
     const deb = showDisbursements ? n(Number(disbursements)) : 0;
     const adv = showAdvances ? n(Number(advances)) : 0;
     const totalNet = round3(net + deb - adv);
-    const paid = round3(payments.reduce((sum, pay) => sum + n(Number(pay.amount)), 0));
-    return { breakdown, ht, tva, ttc, rsAmount, stamp, net, deb, adv, totalNet,
-             paid, remaining: round3(totalNet - paid) };
-  }, [lines, suspended, detailed, withholdingRate, stampDuty, showDisbursements, disbursements, showAdvances, advances, payments]);
+    return { breakdown, ht, tva, ttc, rsAmount, stamp, net, deb, adv, totalNet };
+  }, [lines, suspended, detailed, withholdingRate, stampDuty, showDisbursements, disbursements, showAdvances, advances]);
 
   const dateWarning = !isEdit && !freeNumber && lastIssueDate && issueDate < lastIssueDate
     ? `La date doit être postérieure ou égale à celle de la dernière facture légale (${lastIssueDate}).`
@@ -249,6 +243,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           clientTaxId, clientAddress,
           customFields: Object.fromEntries(customFields.filter(f => f.label.trim()).map(f => [f.label.trim(), f.value])),
           issueDate, dueDate: showDueDate ? dueDate : '', showDueDate,
+          bankId: bankId || null,
           lines: lines.map(l => ({
             designation: l.designation.trim(),
             quantity: detailed ? n(Number(l.quantity)) : 1,
@@ -260,11 +255,6 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           stampDuty: n(Number(stampDuty)),
           disbursements: totals.deb,
           advances: totals.adv,
-          // Rows without a date are drafts the user never finished; the server
-          // drops them too, but filtering here keeps the payload honest.
-          payments: payments
-            .filter(pay => pay.date)
-            .map(pay => ({ id: pay.id, amount: n(Number(pay.amount)), date: pay.date, note: pay.note })),
         }),
       });
       if (!res.ok) {
@@ -516,6 +506,22 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 </div>
               )}
               <p className="text-[10.5px] text-gray-400 mt-1">Optionnel — peut être masqué sur le document.</p>
+
+              {banks.length > 0 && (
+                <div className="mt-3">
+                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Banque de règlement</label>
+                  <select
+                    value={bankId}
+                    onChange={e => setBankId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-white"
+                  >
+                    {banks.map(b => (
+                      <option key={b.id} value={b.id}>{b.name || 'Banque sans nom'}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10.5px] text-gray-400 mt-1">RIB/IBAN affichés sur ce document.</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -724,97 +730,9 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               </div>
 
               <div className="flex justify-between px-4 py-3 bg-navy text-white rounded-b-xl">
-                <span className="font-bold">Total net à payer</span>
+                <span className="font-bold">Montant de facture</span>
                 <span className="font-mono font-bold">{money(totals.totalNet)} DT</span>
               </div>
-            </div>
-          </div>
-
-          {/* ---- Encaissements ----
-               Sits after (10) on purpose: payments settle the document, they
-               are not part of the numbered cascade and must not shift it. */}
-          <div className="border border-gray-200 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-              <div>
-                <h4 className="text-[12.5px] font-bold text-gray-800">Encaissements</h4>
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  Un document peut être réglé en plusieurs fois — ajoutez une ligne par versement.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={addPayment}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-white flex items-center gap-1.5 shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" /> Ajouter
-              </button>
-            </div>
-
-            {payments.length === 0 ? (
-              <p className="px-4 py-4 text-[12px] text-gray-400 italic">
-                Aucun encaissement — le document reste dû en totalité.
-              </p>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {payments.map(pay => (
-                  <div key={pay.id} className="flex flex-wrap items-end gap-3 px-4 py-3">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-400 mb-1">Montant</label>
-                      <input
-                        type="number" min="0" step="0.001"
-                        value={pay.amount}
-                        onChange={e => updatePayment(pay.id, { amount: e.target.value === '' ? '' : parseFloat(e.target.value) })}
-                        className="w-32 px-2 py-1.5 border border-gray-300 rounded text-[12px] text-right"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-400 mb-1">Date</label>
-                      <input
-                        type="date"
-                        value={pay.date}
-                        onChange={e => updatePayment(pay.id, { date: e.target.value })}
-                        className="px-2 py-1.5 border border-gray-300 rounded text-[12px]"
-                      />
-                    </div>
-                    <div className="flex-1 min-w-[140px]">
-                      <label className="block text-[10px] font-semibold text-gray-400 mb-1">
-                        Référence <span className="font-normal text-gray-300">(facultatif)</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={pay.note}
-                        onChange={e => updatePayment(pay.id, { note: e.target.value })}
-                        placeholder="Ex: virement, chèque n°…"
-                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-[12px]"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removePayment(pay.id)}
-                      className="p-1.5 text-gray-400 hover:text-red-600 rounded"
-                      title="Supprimer cet encaissement"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="flex flex-wrap justify-end gap-6 px-4 py-3 bg-gray-50 border-t border-gray-200 text-[12.5px]">
-              <span className="text-gray-600">
-                Montant encaissé <span className="font-mono font-bold text-gray-900 ml-1.5">{money(totals.paid)} DT</span>
-              </span>
-              <span className="text-gray-600">
-                Reste à payer
-                {/* Negative means the client overpaid — surfaced, not clamped. */}
-                <span className={`font-mono font-bold ml-1.5 ${
-                  Math.abs(totals.remaining) < 0.001 ? 'text-emerald-700'
-                    : totals.remaining < 0 ? 'text-amber-700' : 'text-gray-900'
-                }`}>
-                  {Math.abs(totals.remaining) < 0.001 ? 'Soldé' : `${money(totals.remaining)} DT`}
-                </span>
-              </span>
             </div>
           </div>
 

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
+import { formatCostTND } from '../../utils/formatters';
 
 export interface Client {
   id: number;
@@ -20,6 +22,14 @@ export interface Client {
   createdBy: number;
   missionCount?: number;
   customFields?: Record<string, string>;
+  /** Manually typed by the admin — a running ledger, not derived from anything. */
+  soldeAnterieur: number;
+  /** Manually typed — total collected from this client, kept separate from any single invoice. */
+  encaissements: number;
+  /** Derived server-side: the sum of this client's own invoices' totals. */
+  montantFacture?: number;
+  /** Derived server-side: montantFacture - soldeAnterieur - encaissements. */
+  resteAPayer?: number;
 }
 
 export const ClientsManagement: React.FC = () => {
@@ -34,11 +44,14 @@ export const ClientsManagement: React.FC = () => {
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   
   const [viewingClient, setViewingClient] = useState<Client | null>(null);
+  useEscapeToClose(() => setIsModalOpen(false), isModalOpen);
+  useEscapeToClose(() => setViewingClient(null), !!viewingClient);
 
   // Form State
   const [formData, setFormData] = useState<Partial<Client>>({
     customFields: {},
-    name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: ''
+    name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '',
+    soldeAnterieur: '' as any, encaissements: '' as any,
   });
   const [formError, setFormError] = useState('');
   const [newFieldName, setNewFieldName] = useState('');
@@ -72,7 +85,7 @@ export const ClientsManagement: React.FC = () => {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    return ['name', 'contact', 'taxId', 'status']; // Default columns
+    return ['name', 'soldeAnterieur', 'encaissements', 'montantFacture', 'resteAPayer', 'taxId', 'contact', 'status']; // Default columns
   });
 
   const toggleColumn = (key: string) => {
@@ -178,9 +191,13 @@ export const ClientsManagement: React.FC = () => {
 
   const standardColumns = [
     { key: 'name', label: 'Client / Nom' },
-    { key: 'contact', label: 'Contact (Email/Tél)' },
+    { key: 'soldeAnterieur', label: 'Solde antérieur' },
+    { key: 'encaissements', label: 'Encaissements' },
+    { key: 'montantFacture', label: 'Montant de facture' },
+    { key: 'resteAPayer', label: 'Reste à payer' },
     { key: 'taxId', label: 'Matricule' },
     { key: 'address', label: 'Adresse' },
+    { key: 'contact', label: 'Contact (Email/Tél)' },
     { key: 'city', label: 'Ville' },
     { key: 'country', label: 'Pays' },
     { key: 'status', label: 'Statut' },
@@ -208,7 +225,7 @@ export const ClientsManagement: React.FC = () => {
 
   const handleOpenCreate = () => {
     setEditingClient(null);
-    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {} });
+    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {}, soldeAnterieur: '' as any, encaissements: '' as any });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -237,7 +254,7 @@ export const ClientsManagement: React.FC = () => {
     }
   };
 
-  const handleFormChange = (field: keyof Client, value: string) => {
+  const handleFormChange = (field: keyof Client, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -505,7 +522,7 @@ export const ClientsManagement: React.FC = () => {
                         onClick={() => handleSort(col.key)}
                         className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors group select-none"
                       >
-                        <div className="flex items-center gap-1">
+                        <div className={`flex items-center gap-1 ${['soldeAnterieur', 'encaissements', 'montantFacture', 'resteAPayer'].includes(col.key) ? 'justify-end' : ''}`}>
                           {col.label}
                           <div className={`flex flex-col opacity-0 group-hover:opacity-100 transition-opacity ${sortField === col.key ? '!opacity-100' : ''}`}>
                             <ChevronRight className={`w-3 h-3 -rotate-90 -mb-1.5 ${sortField === col.key && sortDir === 'asc' ? 'text-gray-900' : 'text-gray-400'}`} />
@@ -559,6 +576,14 @@ export const ClientsManagement: React.FC = () => {
                                   </div>
                                 )}
                               </div>
+                            </td>
+                          );
+                        }
+                        if (col.key === 'soldeAnterieur' || col.key === 'encaissements' || col.key === 'montantFacture' || col.key === 'resteAPayer') {
+                          const amount = Number(client[col.key as keyof Client]) || 0;
+                          return (
+                            <td key={col.key} className="px-5 py-4 text-right font-mono text-gray-700">
+                              {formatCostTND(amount)}
                             </td>
                           );
                         }
@@ -694,6 +719,30 @@ export const ClientsManagement: React.FC = () => {
                     onChange={e => handleFormChange('name', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                     placeholder="Ex: Tech Corp SA"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Solde antérieur</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={formData.soldeAnterieur || ''}
+                    onChange={e => handleFormChange('soldeAnterieur', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                    placeholder="0.000"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Encaissements</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={formData.encaissements || ''}
+                    onChange={e => handleFormChange('encaissements', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                    placeholder="0.000"
                   />
                 </div>
 
@@ -856,7 +905,7 @@ export const ClientsManagement: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {Object.entries(formData.customFields || {}).map(([key, value]) => (
+                      {Object.entries(formData.customFields || {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => (
                         <div key={key} className="flex items-center gap-3">
                           <div className="w-1/3">
                             <input
@@ -1018,7 +1067,7 @@ export const ClientsManagement: React.FC = () => {
                 <section>
                   <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Champs personnalisés</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-50/50 p-4 rounded-lg border border-gray-100">
-                    {Object.entries(viewingClient.customFields).map(([key, value]) => (
+                    {Object.entries(viewingClient.customFields).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => (
                       <div key={key}>
                         <div className="text-[11px] text-gray-500 mb-0.5">{key}</div>
                         <div className="text-[13px] font-medium text-gray-900">{value as string || '-'}</div>

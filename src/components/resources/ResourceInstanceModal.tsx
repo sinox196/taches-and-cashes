@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Check, Lock, Loader, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
@@ -32,6 +33,7 @@ interface ResourceInstanceModalProps {
  * ahead), and a progress bar computed from items_terminés / total_items.
  */
 export const ResourceInstanceModal: React.FC<ResourceInstanceModalProps> = ({ instance, onClose, onChanged }) => {
+  useEscapeToClose(onClose);
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, User, CheckCircle2, Clock, Pause, Briefcase, Calendar, Clock4, AlertCircle } from 'lucide-react';
 import { roleMeta, roleLabel } from '../../constants/roles';
 
@@ -8,6 +9,7 @@ interface EmployeeDetailsModalProps {
 }
 
 export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({ employee, onClose }) => {
+  useEscapeToClose(onClose);
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm transition-opacity">
       <div 

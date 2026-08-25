@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Building2, Check, Loader, Trash2, Upload, X } from 'lucide-react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
+import { Building2, Check, Loader, Plus, Trash2, Upload, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { CompanyBlock } from './invoicePdf';
+import { CompanyBlock, BankAccount } from './invoicePdf';
 import { friendlyError } from '../../utils/errors';
 
 /**
@@ -49,12 +50,16 @@ const prepareImage = (file: File, maxW: number, maxH: number, tooLargeMessage: s
 
 const EMPTY: CompanyBlock = {
   company: { name: '', address: '', taxId: '', email: '', phone: '' },
-  bank: { name: '', iban: '' },
+  banks: [],
+  defaultBankId: '',
   logo: '',
   signature: '',
+  stamp: '',
+  showSignature: true,
 };
 
 export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  useEscapeToClose(onClose);
   const { token } = useAuth();
   const [form, setForm] = useState<CompanyBlock>(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -63,6 +68,7 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [error, setError] = useState('');
   const logoFileRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const stampFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch('/api/cash/company', { headers: { Authorization: `Bearer ${token}` } })
@@ -74,8 +80,20 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
   const setCompany = (k: keyof CompanyBlock['company'], v: string) =>
     setForm(f => ({ ...f, company: { ...f.company, [k]: v } }));
-  const setBank = (k: keyof CompanyBlock['bank'], v: string) =>
-    setForm(f => ({ ...f, bank: { ...f.bank, [k]: v } }));
+
+  const addBank = () =>
+    setForm(f => {
+      const id = `local-${Date.now()}`;
+      return { ...f, banks: [...f.banks, { id, name: '', rib: '', iban: '', swift: '' }], defaultBankId: f.defaultBankId || id };
+    });
+  const updateBank = (id: string, k: keyof BankAccount, v: string) =>
+    setForm(f => ({ ...f, banks: f.banks.map(b => (b.id === id ? { ...b, [k]: v } : b)) }));
+  const removeBank = (id: string) =>
+    setForm(f => {
+      const banks = f.banks.filter(b => b.id !== id);
+      return { ...f, banks, defaultBankId: f.defaultBankId === id ? (banks[0]?.id || '') : f.defaultBankId };
+    });
+  const setDefaultBank = (id: string) => setForm(f => ({ ...f, defaultBankId: id }));
 
   const pickLogo = async (file: File | undefined) => {
     if (!file) return;
@@ -94,6 +112,17 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
     try {
       const signature = await prepareImage(file, 600, 300, 'Signature trop lourde même après réduction. Utilisez une image plus simple.');
       setForm(f => ({ ...f, signature }));
+    } catch (e: any) {
+      setError(friendlyError(e));
+    }
+  };
+
+  const pickStamp = async (file: File | undefined) => {
+    if (!file) return;
+    setError('');
+    try {
+      const stamp = await prepareImage(file, 600, 300, 'Cachet trop lourd même après réduction. Utilisez une image plus simple.');
+      setForm(f => ({ ...f, stamp }));
     } catch (e: any) {
       setError(friendlyError(e));
     }
@@ -168,13 +197,53 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
             </section>
 
             <section className="space-y-3">
-              <h3 className="text-[11px] font-extrabold text-gray-800 uppercase tracking-[0.05em]">
-                Informations bancaires
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {field('Banque', form.bank.name, v => setBank('name', v), 'Banque')}
-                {field('IBAN', form.bank.iban, v => setBank('iban', v), 'TN59 XXXX XXXX XXXX XXXX XXXX', true)}
+              <div className="flex items-center justify-between">
+                <h3 className="text-[11px] font-extrabold text-gray-800 uppercase tracking-[0.05em]">
+                  Informations bancaires
+                </h3>
+                <span className="text-[10.5px] text-gray-400">Réglement reçu sur la banque par défaut</span>
               </div>
+
+              {form.banks.length === 0 && (
+                <p className="text-[12px] text-gray-400 italic">Aucune banque configurée.</p>
+              )}
+
+              {form.banks.map((bank, i) => (
+                <div key={bank.id} className="border border-gray-200 rounded-lg p-3 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-[12px] font-bold text-gray-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="defaultBank"
+                        checked={form.defaultBankId === bank.id}
+                        onChange={() => setDefaultBank(bank.id)}
+                        className="accent-navy"
+                      />
+                      Banque {i + 1}{form.defaultBankId === bank.id ? ' — par défaut' : ''}
+                    </label>
+                    <button
+                      onClick={() => removeBank(bank.id)}
+                      className="text-gray-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50"
+                      title="Supprimer cette banque"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {field('Banque', bank.name, v => updateBank(bank.id, 'name', v), 'ATB, BIAT, BNA…')}
+                    {field('RIB', bank.rib, v => updateBank(bank.id, 'rib', v), '00 000 0000000000000 00', true)}
+                    {field('IBAN', bank.iban, v => updateBank(bank.id, 'iban', v), 'TN59 XXXX XXXX XXXX XXXX XXXX', true)}
+                    {field('Code BIC (Swift)', bank.swift, v => updateBank(bank.id, 'swift', v), 'XXXXTNTT', true)}
+                  </div>
+                </div>
+              ))}
+
+              <button
+                onClick={addBank}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" /> Ajouter Banque
+              </button>
             </section>
 
             <section className="space-y-3">
@@ -217,41 +286,92 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
             </section>
 
             <section className="space-y-3">
-              <h3 className="text-[11px] font-extrabold text-gray-800 uppercase tracking-[0.05em]">
-                Signature
-              </h3>
-              <div className="flex items-center gap-4">
-                <div className="w-40 h-20 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 shrink-0">
-                  {form.signature
-                    ? <img src={form.signature} alt="Signature" className="max-h-16 max-w-36 object-contain" />
-                    : <span className="text-[11px] text-gray-300">Aucune</span>}
-                </div>
-                <div className="flex flex-wrap gap-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[11px] font-extrabold text-gray-800 uppercase tracking-[0.05em]">
+                  Signature et cachet
+                </h3>
+                <label className="flex items-center gap-2 text-[12px] font-medium text-gray-600 cursor-pointer">
                   <input
-                    ref={fileRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hidden"
-                    onChange={e => { pickSignature(e.target.files?.[0]); e.target.value = ''; }}
+                    type="checkbox"
+                    checked={form.showSignature}
+                    onChange={e => setForm(f => ({ ...f, showSignature: e.target.checked }))}
+                    className="accent-navy w-4 h-4"
                   />
-                  <button
-                    onClick={() => fileRef.current?.click()}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5" /> Choisir une image
-                  </button>
-                  {form.signature && (
-                    <button
-                      onClick={() => setForm(f => ({ ...f, signature: '' }))}
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-red-600 hover:bg-red-50 flex items-center gap-1.5"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" /> Retirer
-                    </button>
-                  )}
+                  Afficher sur les documents
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold text-gray-500">Signature</p>
+                  <div className="flex items-center gap-4">
+                    <div className="w-32 h-20 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 shrink-0">
+                      {form.signature
+                        ? <img src={form.signature} alt="Signature" className="max-h-16 max-w-28 object-contain" />
+                        : <span className="text-[11px] text-gray-300">Aucune</span>}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        ref={fileRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={e => { pickSignature(e.target.files?.[0]); e.target.value = ''; }}
+                      />
+                      <button
+                        onClick={() => fileRef.current?.click()}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                      >
+                        <Upload className="w-3.5 h-3.5" /> Choisir
+                      </button>
+                      {form.signature && (
+                        <button
+                          onClick={() => setForm(f => ({ ...f, signature: '' }))}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-red-600 hover:bg-red-50 flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Retirer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold text-gray-500">Cachet</p>
+                  <div className="flex items-center gap-4">
+                    <div className="w-32 h-20 border border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 shrink-0">
+                      {form.stamp
+                        ? <img src={form.stamp} alt="Cachet" className="max-h-16 max-w-28 object-contain" />
+                        : <span className="text-[11px] text-gray-300">Aucun</span>}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        ref={stampFileRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={e => { pickStamp(e.target.files?.[0]); e.target.value = ''; }}
+                      />
+                      <button
+                        onClick={() => stampFileRef.current?.click()}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                      >
+                        <Upload className="w-3.5 h-3.5" /> Choisir
+                      </button>
+                      {form.stamp && (
+                        <button
+                          onClick={() => setForm(f => ({ ...f, stamp: '' }))}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-red-600 hover:bg-red-50 flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Retirer
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
               <p className="text-[11px] text-gray-400">
-                PNG, JPEG ou WEBP. L'image est réduite automatiquement avant enregistrement.
+                PNG, JPEG ou WEBP. Les images sont réduites automatiquement avant enregistrement.
               </p>
             </section>
           </div>

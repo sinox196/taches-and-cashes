@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, MessageCircle, ClipboardCheck, CalendarDays, Clock4, Check } from 'lucide-react';
+import { Bell, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 /**
@@ -18,6 +18,7 @@ interface NotificationBellProps {
 
 const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClass: string }> = {
   TASK_ASSIGNED: { icon: ClipboardCheck, nav: 'Dashboard', iconClass: 'bg-blue-50 text-blue-600' },
+  TASK_REMINDER: { icon: CalendarClock, nav: 'Dashboard', iconClass: 'bg-purple-50 text-purple-600' },
   LEAVE_REQUEST: { icon: CalendarDays, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },
   LEAVE_DECISION: { icon: CalendarDays, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
   ABSENCE_REQUEST: { icon: Clock4, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },

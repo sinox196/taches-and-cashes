@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { PresenceSettingsCard } from './PresenceSettingsCard';
 import { useAuth, User } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -68,6 +69,7 @@ export const UsersManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  useEscapeToClose(() => setIsModalOpen(false), isModalOpen);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   
   const toggleGroup = (groupName: string) => {

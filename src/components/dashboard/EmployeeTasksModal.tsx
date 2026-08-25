@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Briefcase, Clock, CheckCircle2, Play, Pause, Search } from 'lucide-react';
 import { formatCostTND } from '../../utils/formatters';
 import { roleLabel } from '../../constants/roles';
@@ -29,6 +30,7 @@ const StatusBadge: React.FC<{ statut: string }> = ({ statut }) => {
 };
 
 export const EmployeeTasksModal: React.FC<EmployeeTasksModalProps> = ({ employee, filters, onClose }) => {
+  useEscapeToClose(onClose);
   const { user, token } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RUNNING' | 'PAUSED'>('ALL');

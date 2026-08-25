@@ -1,31 +1,36 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useEscapeToClose } from '../hooks/useEscapeToClose';
-import { X, ChevronDown, Search, Loader, Send } from 'lucide-react';
+import { X, ChevronDown, Search, Loader, CalendarClock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 
 /**
- * An admin hands a mission + type de tâche to a staff member. It shows up
- * pending on that person's dashboard (AssignedTasksCard) until they start it,
- * at which point it becomes an ordinary running time entry — same client
- * picker and mission/type cascade as "Démarrer nouvelle tâche" (NewTaskCard),
- * with a collaborator field added.
+ * Any user plans a task for themselves — a calendar date, a priority and an
+ * optional reminder, on top of the same client/mission/type-de-tâche cascade
+ * "Démarrer nouvelle tâche" and "Assigner une tâche" already use. It lands as
+ * a PENDING task_assignments row targeting yourself, so it shows up on your
+ * own dashboard (AssignedTasksCard) exactly like an admin's assignment does —
+ * no separate storage or display path needed. Unlike AssignTaskModal, this is
+ * never gated on ASSIGN_TASKS: planning your own work is not "assigning".
  */
 
-interface AssignTaskModalProps {
+const PRIORITIES = [
+  { value: 'BASSE', label: 'Basse' },
+  { value: 'NORMALE', label: 'Normale' },
+  { value: 'HAUTE', label: 'Haute' },
+  { value: 'URGENTE', label: 'Urgente' },
+];
+
+interface PlanTaskModalProps {
   services: any[];
   taskTypes: any[];
   onClose: () => void;
-  onAssigned: () => void;
+  onPlanned: () => void;
 }
 
-export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, taskTypes, onClose, onAssigned }) => {
+export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskTypes, onClose, onPlanned }) => {
   useEscapeToClose(onClose);
-  const { token } = useAuth();
-
-  const [staff, setStaff] = useState<any[]>([]);
-  const [loadingStaff, setLoadingStaff] = useState(true);
-  const [assignedToUserId, setAssignedToUserId] = useState('');
+  const { token, user } = useAuth();
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientResults, setClientResults] = useState<any[]>([]);
@@ -38,18 +43,13 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
   const [selectedServiceId, setSelectedServiceId] = useState('');
   const [selectedTaskTypeId, setSelectedTaskTypeId] = useState('');
   const [description, setDescription] = useState('');
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [priority, setPriority] = useState('NORMALE');
+  const [reminderAt, setReminderAt] = useState('');
 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    fetch('/api/users/assignable', { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setStaff)
-      .catch(() => setStaff([]))
-      .finally(() => setLoadingStaff(false));
-  }, [token]);
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
@@ -59,8 +59,8 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  // Same debounced server-side lookup NewTaskCard uses — the client list is
-  // never loaded in full.
+  // Same debounced server-side lookup NewTaskCard/AssignTaskModal use — the
+  // client list is never loaded in full.
   useEffect(() => {
     const term = clientSearch.trim();
     if (term.length < 1 || selectedClientId) { setClientResults([]); return; }
@@ -97,11 +97,11 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
     ? taskTypes.filter((t) => String(t.serviceId) === String(selectedServiceId))
     : [];
 
-  const canSubmit = !!assignedToUserId && !!selectedServiceId;
+  const canSubmit = !!selectedServiceId;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || !user) return;
     setError('');
     setSaving(true);
     try {
@@ -111,7 +111,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          assignedToUserId: Number(assignedToUserId),
+          assignedToUserId: user.id,
           client: selectedClient ? selectedClient.name : clientSearch.trim(),
           clientId: selectedClient ? Number(selectedClient.id) : undefined,
           pole: service?.name,
@@ -119,12 +119,15 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
           taskType: taskType?.name,
           taskTypeId: taskType ? Number(taskType.id) : undefined,
           description: description.trim(),
+          scheduledDate: scheduledDate || undefined,
+          priority,
+          reminderAt: reminderAt ? new Date(reminderAt).toISOString() : undefined,
         }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Assignation impossible.');
+      if (!res.ok) throw new Error(body.error || 'Planification impossible.');
       setDone(true);
-      onAssigned();
+      onPlanned();
     } catch (e: any) {
       setError(friendlyError(e));
     } finally {
@@ -136,7 +139,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm overflow-y-auto">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg my-4">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-[14px] font-bold text-gray-900">Assigner une tâche</h2>
+          <h2 className="text-[14px] font-bold text-gray-900">Planifier une tâche</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100">
             <X className="w-5 h-5" />
           </button>
@@ -145,10 +148,10 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
         {done ? (
           <div className="p-8 text-center">
             <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-              <Send className="w-5 h-5" />
+              <CalendarClock className="w-5 h-5" />
             </div>
-            <p className="text-[13px] font-semibold text-gray-900">Tâche assignée.</p>
-            <p className="text-[12px] text-gray-500 mt-1">Elle apparaît maintenant sur le tableau de bord du collaborateur.</p>
+            <p className="text-[13px] font-semibold text-gray-900">Tâche planifiée.</p>
+            <p className="text-[12px] text-gray-500 mt-1">Elle apparaît maintenant sur votre tableau de bord.</p>
             <button
               onClick={onClose}
               className="mt-4 px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover"
@@ -158,29 +161,6 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="p-5 space-y-3.5">
-            <div>
-              <label className="text-[11px] font-semibold text-gray-400 block mb-1">Collaborateur</label>
-              {loadingStaff ? (
-                <div className="flex items-center gap-2 text-[12px] text-gray-400 py-2">
-                  <Loader className="w-3.5 h-3.5 animate-spin" /> Chargement…
-                </div>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={assignedToUserId}
-                    onChange={(e) => setAssignedToUserId(e.target.value)}
-                    className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-2 pr-8 text-[13px] font-medium text-gray-800 focus:outline-none focus:border-gray-400"
-                  >
-                    <option value="" disabled>Sélectionner un collaborateur</option>
-                    {staff.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
-              )}
-            </div>
-
             <div ref={dropdownRef}>
               <label className="text-[11px] font-semibold text-gray-400 block mb-1">
                 Client <span className="font-normal text-gray-300">(facultatif)</span>
@@ -272,6 +252,47 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
               )}
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 block mb-1">
+                  Date prévue <span className="font-normal text-gray-300">(facultatif)</span>
+                </label>
+                <input
+                  type="date"
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-md px-3 py-2 text-[13px] font-medium text-gray-800 focus:outline-none focus:border-gray-400"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 block mb-1">Priorité</label>
+                <div className="relative">
+                  <select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value)}
+                    className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-2 pr-8 text-[13px] font-medium text-gray-800 focus:outline-none focus:border-gray-400"
+                  >
+                    {PRIORITIES.map((p) => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-gray-400 block mb-1">
+                Rappel <span className="font-normal text-gray-300">(facultatif — une notification vous sera envoyée)</span>
+              </label>
+              <input
+                type="datetime-local"
+                value={reminderAt}
+                onChange={(e) => setReminderAt(e.target.value)}
+                className="w-full bg-white border border-gray-200 rounded-md px-3 py-2 text-[13px] font-medium text-gray-800 focus:outline-none focus:border-gray-400"
+              />
+            </div>
+
             <div>
               <label className="text-[11px] font-semibold text-gray-400 block mb-1">
                 Instructions <span className="font-normal text-gray-300">(facultatif)</span>
@@ -279,7 +300,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Précisions pour le collaborateur…"
+                placeholder="Précisions sur la tâche…"
                 rows={2}
                 className="w-full border border-gray-200 rounded-md px-3 py-2 text-[13px] text-gray-800 focus:outline-none focus:border-gray-400 placeholder-gray-300 resize-none"
               />
@@ -305,7 +326,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
                 className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {saving && <Loader className="w-4 h-4 animate-spin" />}
-                Assigner
+                Planifier
               </button>
             </div>
           </form>

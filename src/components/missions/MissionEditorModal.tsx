@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Trash2, X, Loader, ListChecks } from 'lucide-react';
 import { friendlyError } from '../../utils/errors';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 
 export interface Mission {
   id: number;
@@ -51,6 +52,7 @@ export const MissionEditorModal: React.FC<MissionEditorModalProps> = ({
   onSaved,
   onDeleted,
 }) => {
+  useEscapeToClose(onClose);
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 

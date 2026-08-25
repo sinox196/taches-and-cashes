@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Loader2, Mail, CheckCircle2, Lock, User, Phone, Building2 } from 'lucide-react';
 import { friendlyError } from '../../utils/errors';
 import { useAuth } from '../../context/AuthContext';
@@ -29,6 +30,7 @@ const PLAN_CODES: Record<string, string> = {
  *   notifies contact@taches-and-cash.com.
  */
 export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, onClose }) => {
+  useEscapeToClose(onClose);
   const { login } = useAuth();
   const isSignup = plan in PLAN_CODES;
 

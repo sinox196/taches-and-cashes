@@ -57,9 +57,9 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   const [poleFilter, setPoleFilter] = useState('ALL');
   const [collabFilter, setCollabFilter] = useState('ALL');
 
-  const uniqueClients = Array.from(new Set(entries.map(e => e.client))).sort();
-  const uniquePoles = Array.from(new Set(entries.map(e => e.pole))).sort();
-  const uniqueCollaborateurs = Array.from(new Set(entries.map(e => e.userName || 'Unknown'))).sort();
+  const uniqueClients = Array.from(new Set(entries.map(e => e.client))).sort((a: string, b: string) => a.localeCompare(b));
+  const uniquePoles = Array.from(new Set(entries.map(e => e.pole))).sort((a: string, b: string) => a.localeCompare(b));
+  const uniqueCollaborateurs = Array.from(new Set(entries.map(e => e.userName || 'Unknown'))).sort((a: string, b: string) => a.localeCompare(b));
 
   // Filter entries based on search & status
   const filteredEntries = entries.filter((item) => {

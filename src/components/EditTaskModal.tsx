@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check } from 'lucide-react';
 import { TimeEntry } from '../types';
+import { useEscapeToClose } from '../hooks/useEscapeToClose';
 
 interface EditTaskModalProps {
   entry: TimeEntry | null;
@@ -37,6 +38,8 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       setTaskTypeId(entry.taskTypeId != null ? String(entry.taskTypeId) : '');
     }
   }, [entry]);
+
+  useEscapeToClose(onClose, isOpen);
 
   if (!isOpen || !entry) return null;
 

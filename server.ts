@@ -496,21 +496,46 @@ async function startServer() {
    * changing the bank details also changes them on documents already issued.
    * If that ever becomes a problem, snapshot it at creation the way `pole` is.
    */
-  const companyBlock = (settings: any) => ({
-    company: {
-      name: String(settings?.company?.name || ''),
-      address: String(settings?.company?.address || ''),
-      taxId: String(settings?.company?.taxId || ''),
-      email: String(settings?.company?.email || ''),
-      phone: String(settings?.company?.phone || ''),
-    },
-    bank: {
-      name: String(settings?.bank?.name || ''),
-      iban: String(settings?.bank?.iban || ''),
-    },
-    logo: typeof settings?.logo === 'string' ? settings.logo : '',
-    signature: typeof settings?.signature === 'string' ? settings.signature : '',
-  });
+  const companyBlock = (settings: any) => {
+    // `banks` replaced the old single `bank` object. A row saved before this
+    // change has no `banks` array — recovered here as a one-item list, the
+    // same "recover a legacy shape" idiom `normalizeBalance()` already uses,
+    // so every reader (this shaper is the only one) sees the new shape.
+    let banks = Array.isArray(settings?.banks) ? settings.banks : null;
+    if (!banks) {
+      banks = (settings?.bank?.name || settings?.bank?.iban)
+        ? [{ id: 'bank-1', name: String(settings.bank.name || ''), rib: '', iban: String(settings.bank.iban || ''), swift: '' }]
+        : [];
+    }
+    banks = banks.map((b: any, i: number) => ({
+      id: String(b?.id || `bank-${i + 1}`),
+      name: String(b?.name || ''),
+      rib: String(b?.rib || ''),
+      iban: String(b?.iban || ''),
+      swift: String(b?.swift || ''),
+    }));
+    const defaultBankId = banks.some((b: any) => b.id === settings?.defaultBankId)
+      ? settings.defaultBankId
+      : (banks[0]?.id || '');
+
+    return {
+      company: {
+        name: String(settings?.company?.name || ''),
+        address: String(settings?.company?.address || ''),
+        taxId: String(settings?.company?.taxId || ''),
+        email: String(settings?.company?.email || ''),
+        phone: String(settings?.company?.phone || ''),
+      },
+      banks,
+      defaultBankId,
+      logo: typeof settings?.logo === 'string' ? settings.logo : '',
+      signature: typeof settings?.signature === 'string' ? settings.signature : '',
+      stamp: typeof settings?.stamp === 'string' ? settings.stamp : '',
+      // Absent on a pre-existing row = show, matching the behavior before
+      // this toggle existed (a configured signature always rendered).
+      showSignature: settings?.showSignature !== false,
+    };
+  };
 
   /** A logo/signature is a small inline image — anything else is refused rather than stored and later rendered. */
   const validateInlineImage = (value: string, label: string) => {
@@ -539,11 +564,17 @@ async function startServer() {
       const body = req.body || {};
       const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
 
-      // A signature/logo is a small inline image. Anything else — a remote
-      // URL, a script-bearing SVG — is refused rather than stored and later rendered.
+      // A signature/logo/stamp is a small inline image. Anything else — a
+      // remote URL, a script-bearing SVG — is refused rather than stored and
+      // later rendered.
       let signature = typeof body.signature === 'string' ? body.signature : undefined;
       if (signature !== undefined) {
         const err = validateInlineImage(signature, 'La signature');
+        if (err) return res.status(400).json({ error: err });
+      }
+      let stamp = typeof body.stamp === 'string' ? body.stamp : undefined;
+      if (stamp !== undefined) {
+        const err = validateInlineImage(stamp, 'Le cachet');
         if (err) return res.status(400).json({ error: err });
       }
       let logo = typeof body.logo === 'string' ? body.logo : undefined;
@@ -552,7 +583,24 @@ async function startServer() {
         if (err) return res.status(400).json({ error: err });
       }
 
+      // Up to 10 accounts is generous for a single cabinet and keeps this
+      // array from growing without bound from a scripted/repeated request.
+      const banks = Array.isArray(body.banks)
+        ? body.banks.slice(0, 10).map((b: any, i: number) => ({
+            id: text(b?.id, 40) || genId('bank'),
+            name: text(b?.name, 120),
+            rib: text(b?.rib, 40),
+            iban: text(b?.iban, 60),
+            swift: text(b?.swift, 20),
+          }))
+        : undefined;
+
       const current = await db.getSettings(req.user.companyId);
+      const resolvedBanks = banks !== undefined ? banks : (current?.banks ?? []);
+      const defaultBankId = resolvedBanks.some((b: any) => b.id === body.defaultBankId)
+        ? body.defaultBankId
+        : (resolvedBanks[0]?.id ?? '');
+
       const updated = await db.updateSettings(req.user.companyId, {
         company: {
           name: text(body.company?.name, 120),
@@ -561,12 +609,12 @@ async function startServer() {
           email: text(body.company?.email, 120),
           phone: text(body.company?.phone, 40),
         },
-        bank: {
-          name: text(body.bank?.name, 120),
-          iban: text(body.bank?.iban, 60),
-        },
+        banks: resolvedBanks,
+        defaultBankId,
         logo: logo !== undefined ? logo : (current?.logo ?? ''),
         signature: signature !== undefined ? signature : (current?.signature ?? ''),
+        stamp: stamp !== undefined ? stamp : (current?.stamp ?? ''),
+        showSignature: typeof body.showSignature === 'boolean' ? body.showSignature : (current?.showSignature !== false),
       });
       res.json(companyBlock(updated));
     } catch (error) {
@@ -586,7 +634,8 @@ async function startServer() {
       const balances = await db.getAllLeaveBalances(req.user.companyId);
       // Don't send passwords to client. Same shape as POST/PUT responses so the
       // list can be updated in place after a create/edit.
-      res.json(users.map((u: any) => withLeaveBalance(publicUser(u), balances)));
+      const sorted = [...users].sort((a: any, b: any) => (a.username || '').localeCompare(b.username || ''));
+      res.json(sorted.map((u: any) => withLeaveBalance(publicUser(u), balances)));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -724,6 +773,28 @@ async function startServer() {
   // Clients API Routes
   // ---------------------------------------------------------
 
+  /**
+   * The client's running ledger — used by GET (batched, one invoice scan for
+   * every returned row) and by POST/PUT below (a single client, so a direct
+   * scan is cheap). Both must agree, since editing a client's own soldeAnterieur/
+   * encaissements would otherwise show stale montantFacture/resteAPayer until
+   * the list happened to reload.
+   */
+  const enrichClientLedger = async (companyId: string, client: any) => {
+    const invoices = await db.getAllInvoices(companyId);
+    let montantFacture = 0;
+    for (const inv of invoices) {
+      const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
+      if (key === String(client.id) || key === `name:${client.name}`) {
+        montantFacture += num(Number(inv.totalNetToPay), 0);
+      }
+    }
+    montantFacture = round3(montantFacture);
+    const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
+    const encaissements = num(Number(client.encaissements), 0);
+    return { ...client, montantFacture, resteAPayer: round3(montantFacture - soldeAnterieur - encaissements) };
+  };
+
   // GET /api/clients
   app.get('/api/clients', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
     try {
@@ -777,9 +848,12 @@ async function startServer() {
         });
       }
 
-      // 3. Sorting
-      const sortField = req.query.sortField || 'createdAt';
-      const sortDir = req.query.sortDir || 'desc';
+      // 3. Sorting. Callers with their own sort UI (ClientsManagement) always
+      // pass both params explicitly; this default only affects callers that
+      // don't (the debounced client-search autocomplete used across Pointage/
+      // assignment forms), where alphabetical is the more useful order.
+      const sortField = req.query.sortField || 'name';
+      const sortDir = req.query.sortDir || 'asc';
 
       clients.sort((a, b) => {
         let valA = a[sortField];
@@ -804,17 +878,40 @@ async function startServer() {
       // 4. Pagination
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 100; // default to 100, or maybe we just return all if no pagination passed?
-      
-      // If client didn't explicitly request pagination, maybe return array to preserve backward compatibility? 
+
+      // If client didn't explicitly request pagination, maybe return array to preserve backward compatibility?
       // The user wants "Do not load the entire Clients database... Use pagination".
       // We will ALWAYS return pagination wrapper if page/limit is provided, else we return array.
+      const startIndex = (page - 1) * limit;
+      const page_ = req.query.page ? clients.slice(startIndex, startIndex + limit) : clients;
+
+      // "Montant de facture" — the sum of a client's own invoices, computed
+      // once per request (a single scan over every invoice, then O(1)
+      // per-client lookups) rather than one invoice query per client row.
+      // An invoice typed with a free-text client name (never linked via the
+      // search dropdown) has no `clientId` — matched here by name instead,
+      // same fallback `clientBucketKey()` already uses for the KPI dashboard,
+      // so a document like that isn't silently dropped from the total.
+      const allInvoices = await db.getAllInvoices(req.user.companyId);
+      const montantFactureByClient = new Map<string, number>();
+      for (const inv of allInvoices) {
+        const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
+        montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+      }
+      const enriched = page_.map((c: any) => {
+        const montantFacture = round3(
+          (montantFactureByClient.get(String(c.id)) || 0) +
+          (montantFactureByClient.get(`name:${c.name}`) || 0),
+        );
+        const soldeAnterieur = num(Number(c.soldeAnterieur), 0);
+        const encaissements = num(Number(c.encaissements), 0);
+        return { ...c, montantFacture, resteAPayer: round3(montantFacture - soldeAnterieur - encaissements) };
+      });
+
       if (req.query.page) {
-        const total = clients.length;
-        const startIndex = (page - 1) * limit;
-        const paginated = clients.slice(startIndex, startIndex + limit);
-        res.json({ data: paginated, total, page, limit });
+        res.json({ data: enriched, total: clients.length, page, limit });
       } else {
-        res.json(clients);
+        res.json(enriched);
       }
     } catch (error) {
       console.error(error);
@@ -832,7 +929,7 @@ async function startServer() {
           Object.keys(c.customFields).forEach(k => customFieldKeys.add(k));
         }
       });
-      res.json(Array.from(customFieldKeys));
+      res.json(Array.from(customFieldKeys).sort((a, b) => a.localeCompare(b)));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -871,7 +968,8 @@ app.get('/api/kpi/users/search', authenticate, async (req: any, res: any) => {
     );
   }
   // limit to 10 for autocomplete
-  res.json(users.slice(0, 10).map((u: any) => ({ id: u.id, name: u.fullName || u.username, role: u.role })));
+  const sorted = [...users].sort((a: any, b: any) => (a.fullName || a.username).localeCompare(b.fullName || b.username));
+  res.json(sorted.slice(0, 10).map((u: any) => ({ id: u.id, name: u.fullName || u.username, role: u.role })));
 });
 
 app.get('/api/kpi/clients/search', authenticate, async (req: any, res: any) => {
@@ -884,7 +982,8 @@ app.get('/api/kpi/clients/search', authenticate, async (req: any, res: any) => {
     clients = clients.filter((c: any) => c.name.toLowerCase().includes(q));
   }
   // limit to 10
-  res.json(clients.slice(0, 10).map((c: any) => ({ id: c.id, name: c.name })));
+  const sortedClients = [...clients].sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+  res.json(sortedClients.slice(0, 10).map((c: any) => ({ id: c.id, name: c.name })));
 });
 
 /**
@@ -1243,16 +1342,24 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // Documents carry `clientName` where entries carry `client`, so they are
     // normalised onto the identical bucket key — otherwise a client tracked by
     // name on one side and by id on the other would split into two rows.
-    const invoiceBuckets = new Map<string, { netToPay: number; paid: number; count: number }>();
+    const invoiceBuckets = new Map<string, { netToPay: number; count: number }>();
     const allInvoices = await db.getAllInvoices(req.user.companyId) || [];
+    // "Montant de facture" is a lifetime running-balance figure (same one
+    // shown on the Clients page), not scoped to the dashboard's date filter —
+    // computed here from the unfiltered `allInvoices` fetched above. Keyed
+    // the same way as `clientBuckets`/`invoiceBuckets` (id, or name when the
+    // document was never linked to a real client record), so every entry
+    // below can look itself up with the exact same `key` it already has.
+    const montantFactureByClient = new Map<string, number>();
     for (const inv of allInvoices) {
+      const k = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
+      montantFactureByClient.set(k, round3((montantFactureByClient.get(k) || 0) + num(Number(inv.totalNetToPay), 0)));
       const ts = parseIsoDate(inv.issueDate);
       if (ts < startTs || ts > endTs) continue;
       if (filterClientIds && filterClientIds.length > 0 && !filterClientIds.includes(inv.clientId)) continue;
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
-      const acc = invoiceBuckets.get(key) || { netToPay: 0, paid: 0, count: 0 };
+      const acc = invoiceBuckets.get(key) || { netToPay: 0, count: 0 };
       acc.netToPay += num(Number(inv.totalNetToPay), 0);
-      acc.paid += num(Number(inv.totalPaid), 0);
       acc.count += 1;
       invoiceBuckets.set(key, acc);
       // A client invoiced in the period but with no tracked time still belongs
@@ -1297,6 +1404,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // The task list is deliberately NOT included here. With hundreds of
       // clients it would mean serialising the whole history on every dashboard
       // load; the rows below fetch it from /api/kpi/client-tasks on expand.
+      const montantFacture = round3(montantFactureByClient.get(key) || 0);
+      const soldeAnterieur = num(Number(clientRecord?.soldeAnterieur), 0);
+      const encaissements = num(Number(clientRecord?.encaissements), 0);
       return {
         id: first.clientId ?? key,
         key,
@@ -1309,13 +1419,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         totalCostFormatted: `${Math.round(totalCost).toLocaleString('fr-FR')} TND`,
         unpricedTasks,
         contributors,
-        // Billing for the same client over the same period. `remainingToPay`
-        // stays derived rather than summed from the documents, so it can never
-        // disagree with the two figures shown beside it.
+        // Billing for the same client over the same period.
         invoiceCount: invoiceBuckets.get(key)?.count ?? 0,
         netToPay: round3(invoiceBuckets.get(key)?.netToPay ?? 0),
-        totalPaid: round3(invoiceBuckets.get(key)?.paid ?? 0),
-        remainingToPay: round3((invoiceBuckets.get(key)?.netToPay ?? 0) - (invoiceBuckets.get(key)?.paid ?? 0)),
+        // The client's running ledger — lifetime, not period-scoped (same
+        // figures shown on the Clients page, so the two never disagree).
+        soldeAnterieur,
+        encaissements,
+        montantFacture,
+        resteAPayer: round3(montantFacture - soldeAnterieur - encaissements),
       };
     }).sort((a, b) => b.totalCost - a.totalCost || b.netToPay - a.netToPay || b.durationSeconds - a.durationSeconds);
 
@@ -1330,7 +1442,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // would still ship it over the wire.
     const stripCost = ({
       totalCost, totalCostFormatted, hourlyRate, cost,
-      netToPay, totalPaid, remainingToPay, invoiceCount,
+      netToPay, invoiceCount,
+      soldeAnterieur, encaissements, montantFacture, resteAPayer,
       ...rest
     }: any) => rest;
     res.json({
@@ -1353,8 +1466,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.post('/api/clients', authenticate, requirePermission('CREATE_CLIENTS'), async (req: any, res: any) => {
     try {
-      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields } = req.body;
-      
+      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements } = req.body;
+
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Client name is required' });
       }
@@ -1372,12 +1485,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: status || 'Active',
         notes: notes || '',
         customFields: customFields || {},
+        soldeAnterieur: num(Number(soldeAnterieur), 0),
+        encaissements: num(Number(encaissements), 0),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         createdBy: req.user.id
       });
-      
-      res.status(201).json(newClient);
+
+      res.status(201).json(await enrichClientLedger(req.user.companyId, newClient));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1387,8 +1502,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.put('/api/clients/:id', authenticate, requirePermission('EDIT_CLIENTS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields } = req.body;
-      
+      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements } = req.body;
+
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Client name is required' });
       }
@@ -1405,6 +1520,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: status || 'Active',
         notes: notes || '',
         customFields: customFields || {},
+        soldeAnterieur: num(Number(soldeAnterieur), 0),
+        encaissements: num(Number(encaissements), 0),
         updatedAt: new Date().toISOString()
       };
       
@@ -1413,7 +1530,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(404).json({ error: 'Client not found' });
       }
 
-      res.json(updated);
+      res.json(await enrichClientLedger(req.user.companyId, updated));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1564,7 +1681,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.get('/api/services', authenticate, async (req: any, res: any) => {
     try {
       const services = await db.getAllServices(req.user.companyId);
-      res.json(services);
+      res.json([...services].sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1643,7 +1760,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         const sid = parseInt(req.query.serviceId, 10);
         taskTypes = taskTypes.filter((t: any) => t.serviceId === sid);
       }
-      res.json(taskTypes);
+      res.json([...taskTypes].sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1873,37 +1990,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   };
 
   /**
-   * Encaissements — what the client has actually paid against a document.
-   *
-   * A document can be settled in several instalments, so this is a *list*, each
-   * entry carrying its own amount and date; the two figures shown in the Cash
-   * table are derived from it and never stored independently:
-   *
-   *   totalPaid     = sum of the encaissements
-   *   remainingToPay = (10) total net à payer − totalPaid
-   *
-   * Deliberately outside `computeInvoiceTotals()`, which owns the numbered
-   * cascade (1)–(10) of the cahier des charges and stops at (10). Payments come
-   * after the document is issued and must not shift any of those numbers.
-   *
-   * `remainingToPay` may go negative (an overpayment); that is surfaced rather
-   * than clamped, because silently showing 0 would hide a real accounting error.
-   */
-  const normalizePayments = (rawPayments: any): any[] => {
-    if (!Array.isArray(rawPayments)) return [];
-    return rawPayments
-      .map((p: any) => ({
-        id: String(p?.id || `pay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
-        amount: round3(num(Number(p?.amount), 0)),
-        date: String(p?.date || '').slice(0, 10),
-        note: String(p?.note || '').trim(),
-      }))
-      .filter((p: any) => p.date && Number.isFinite(p.amount))
-      // Chronological, so the table reads as a payment history.
-      .sort((a: any, b: any) => a.date.localeCompare(b.date));
-  };
-
-  /**
    * Dates may not decrease along the legal sequence.
    *
    * Numbering and chronology have to agree: invoice n° 2 cannot be dated before
@@ -1940,12 +2026,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       return `La date ne peut pas suivre celle de la facture n° ${following.label} (${following.date}).`;
     }
     return null;
-  };
-
-  const computePaymentState = (totalNetToPay: number, rawPayments: any) => {
-    const payments = normalizePayments(rawPayments);
-    const totalPaid = round3(payments.reduce((sum: number, p: any) => sum + p.amount, 0));
-    return { payments, totalPaid, remainingToPay: round3(totalNetToPay - totalPaid) };
   };
 
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
@@ -2037,7 +2117,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
 
       const totals = computeInvoiceTotals(body);
-      const paymentState = computePaymentState(totals.totalNetToPay, body.payments);
       if (kind !== 'AUTRE') number = await db.nextInvoiceNumber(req.user.companyId);
 
       const invoice = await db.createInvoice(req.user.companyId, {
@@ -2055,6 +2134,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         issueDate: body.issueDate,
         dueDate: body.dueDate || '',
         showDueDate: body.showDueDate !== false,
+        bankId: body.bankId || null,
         lines: body.lines.map((l: any) => ({
           designation: String(l.designation || '').trim(),
           quantity: num(Number(l.quantity), 1),
@@ -2063,7 +2143,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           montantHT: num(Number(l.montantHT), 0),
         })),
         ...totals,
-        ...paymentState,
         createdBy: req.user.id,
         createdAt: new Date().toISOString(),
       });
@@ -2119,12 +2198,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         if (dateError) return res.status(400).json({ error: dateError });
       }
       const totals = computeInvoiceTotals(merged);
-      const paymentState = computePaymentState(totals.totalNetToPay, merged.payments);
 
       const updated = await db.updateInvoice(req.user.companyId, req.params.id, {
         ...merged,
         ...totals,
-        ...paymentState,
         updatedAt: new Date().toISOString(),
       });
       res.json(updated);
@@ -2154,7 +2231,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const users = await db.getAllUsers(req.user.companyId);
       // Allow ADMIN, MANAGER, SUPERVISOR to be approvers
       const approvers = users.filter((u: any) => HR_APPROVER_ROLES.includes(u.role));
-      res.json(approvers.map((u: any) => ({ id: u.id, name: u.username, role: u.role })));
+      res.json(
+        approvers
+          .map((u: any) => ({ id: u.id, name: u.username, role: u.role }))
+          .sort((a: any, b: any) => a.name.localeCompare(b.name)),
+      );
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -2966,17 +3047,32 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
-  app.post('/api/task-assignments', authenticate, requirePermission('ASSIGN_TASKS'), async (req: any, res: any) => {
+  /**
+   * Two distinct uses share this route: an admin/ASSIGN_TASKS holder handing
+   * work to someone else, and "Planifier une tâche" — any user planning work
+   * for themselves. Only the first needs the permission check, so it is done
+   * inline here rather than in a blanket `requirePermission` middleware,
+   * which would also block a plain user from planning their own tasks.
+   */
+  app.post('/api/task-assignments', authenticate, async (req: any, res: any) => {
     try {
-      const { assignedToUserId, client, clientId, pole, serviceId, taskType, taskTypeId, description } = req.body;
+      const { assignedToUserId, client, clientId, pole, serviceId, taskType, taskTypeId, description, scheduledDate, priority, reminderAt } = req.body;
       const targetId = Number(assignedToUserId);
       if (!Number.isFinite(targetId)) return res.status(400).json({ error: 'assignedToUserId requis' });
       if (!String(pole || '').trim()) return res.status(400).json({ error: 'La mission est requise' });
 
+      if (targetId !== req.user.id) {
+        const requester = await db.getUserById(req.user.companyId, req.user.id);
+        const canAssign = requester?.role === 'ADMIN' || JSON.parse(requester?.permissions || '[]').includes('ASSIGN_TASKS');
+        if (!canAssign) return res.status(403).json({ error: 'Forbidden: Missing permission ASSIGN_TASKS' });
+      }
+
       const target = await db.getUserById(req.user.companyId, targetId);
       if (!target) return res.status(404).json({ error: 'Collaborateur introuvable' });
 
+      const PRIORITIES = ['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'];
       const assigner = await db.getUserById(req.user.companyId, req.user.id);
+      const isSelfPlanned = targetId === req.user.id;
       const assignment = await db.createTaskAssignment(req.user.companyId, {
         id: `assign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         assignedToUserId: targetId,
@@ -2993,16 +3089,22 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         timeEntryId: null,
         createdAt: new Date().toISOString(),
         startedAt: null,
+        scheduledDate: scheduledDate ? String(scheduledDate).slice(0, 10) : null,
+        priority: PRIORITIES.includes(priority) ? priority : 'NORMALE',
+        reminderAt: reminderAt ? new Date(reminderAt).toISOString() : null,
+        reminderFired: false,
       });
 
-      await notify(
-        req.user.companyId,
-        targetId,
-        'TASK_ASSIGNED',
-        'Nouvelle tâche assignée',
-        `${assignment.assignedByName} vous a assigné « ${assignment.pole}${assignment.taskType ? ' · ' + assignment.taskType : ''} »` +
-          (assignment.client ? ` pour ${assignment.client}` : ''),
-      );
+      if (!isSelfPlanned) {
+        await notify(
+          req.user.companyId,
+          targetId,
+          'TASK_ASSIGNED',
+          'Nouvelle tâche assignée',
+          `${assignment.assignedByName} vous a assigné « ${assignment.pole}${assignment.taskType ? ' · ' + assignment.taskType : ''} »` +
+            (assignment.client ? ` pour ${assignment.client}` : ''),
+        );
+      }
 
       res.status(201).json(assignment);
     } catch (error) {
@@ -3011,11 +3113,42 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
-  /** Pending assignments for the logged-in user — the dashboard widget. */
+  /**
+   * Pending assignments for the logged-in user — the dashboard widget.
+   *
+   * Also where a "rappel" actually fires: there is no cron job in this app
+   * (see presence/trial-expiry for the same idiom), so a due reminder is
+   * lazily turned into a real notification the next time this endpoint is
+   * hit — which is every time the dashboard housing AssignedTasksCard loads.
+   * `reminderFired` keeps it from notifying twice.
+   */
   app.get('/api/task-assignments/mine', authenticate, async (req: any, res: any) => {
     try {
       const mine = (await db.getAllTaskAssignments(req.user.companyId))
         .filter((a: any) => a.assignedToUserId === req.user.id && a.status === 'PENDING');
+
+      const now = Date.now();
+      for (const a of mine) {
+        if (a.reminderAt && !a.reminderFired && new Date(a.reminderAt).getTime() <= now) {
+          await db.updateTaskAssignment(req.user.companyId, a.id, { reminderFired: true });
+          a.reminderFired = true;
+          await notify(
+            req.user.companyId,
+            req.user.id,
+            'TASK_REMINDER',
+            'Rappel de tâche planifiée',
+            `« ${a.pole}${a.taskType ? ' · ' + a.taskType : ''} »${a.client ? ` pour ${a.client}` : ''}`,
+          );
+        }
+      }
+
+      mine.sort((x: any, y: any) => {
+        if (!x.scheduledDate && !y.scheduledDate) return 0;
+        if (!x.scheduledDate) return 1;
+        if (!y.scheduledDate) return -1;
+        return x.scheduledDate.localeCompare(y.scheduledDate);
+      });
+
       res.json(mine);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -3064,13 +3197,23 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
-  /** Cancels a pending assignment. A started one is real history — left alone. */
-  app.delete('/api/task-assignments/:id', authenticate, requirePermission('ASSIGN_TASKS'), async (req: any, res: any) => {
+  /**
+   * Cancels a pending assignment. A started one is real history — left alone.
+   * The owner of a self-planned task ("Planifier une tâche") may cancel it
+   * without ASSIGN_TASKS, same reasoning as the create route above; cancelling
+   * someone else's assignment still requires the permission.
+   */
+  app.delete('/api/task-assignments/:id', authenticate, async (req: any, res: any) => {
     try {
       const assignment = await db.getTaskAssignmentById(req.user.companyId, req.params.id);
       if (!assignment) return res.status(404).json({ error: 'Not found' });
       if (assignment.status !== 'PENDING') {
         return res.status(400).json({ error: 'Seule une tâche en attente peut être annulée' });
+      }
+      if (assignment.assignedToUserId !== req.user.id) {
+        const requester = await db.getUserById(req.user.companyId, req.user.id);
+        const canAssign = requester?.role === 'ADMIN' || JSON.parse(requester?.permissions || '[]').includes('ASSIGN_TASKS');
+        if (!canAssign) return res.status(403).json({ error: 'Forbidden: Missing permission ASSIGN_TASKS' });
       }
       await db.deleteTaskAssignment(req.user.companyId, req.params.id);
       res.json({ success: true });
@@ -3094,7 +3237,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     try {
       let templates = await db.getAllResourceTemplates(req.user.companyId);
       if (req.query.type) templates = templates.filter((t: any) => t.type === req.query.type);
-      res.json(templates);
+      res.json([...templates].sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -3356,7 +3499,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   app.get('/api/useful-links', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
-      res.json(await db.getAllUsefulLinks(req.user.companyId));
+      const links = await db.getAllUsefulLinks(req.user.companyId);
+      // Sorted by category then label so the client's `Object.entries()`
+      // grouping (which preserves insertion order) reads alphabetically too.
+      res.json([...links].sort((a: any, b: any) =>
+        (a.category || '').localeCompare(b.category || '') || (a.label || '').localeCompare(b.label || '')));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -3755,7 +3902,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.get('/api/platform/companies', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
     try {
       const companies = await db.getAllCompanies();
-      res.json(companies.filter((c: any) => c.id !== LEGACY_COMPANY_ID));
+      res.json(
+        companies
+          .filter((c: any) => c.id !== LEGACY_COMPANY_ID)
+          .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')),
+      );
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

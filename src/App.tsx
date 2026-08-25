@@ -7,6 +7,7 @@ import { TimeTrackingTable } from './components/TimeTrackingTable';
 import { PausedTasksList } from './components/PausedTasksList';
 import { EditTaskModal } from './components/EditTaskModal';
 import { AssignTaskModal } from './components/AssignTaskModal';
+import { PlanTaskModal } from './components/PlanTaskModal';
 import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { MyDashboard } from './components/dashboard/MyDashboard';
 import { ChatPage } from './components/chat/ChatPage';
@@ -21,7 +22,7 @@ import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
-import { Loader2, ClipboardCheck } from 'lucide-react';
+import { Loader2, ClipboardCheck, CalendarClock } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -191,6 +192,7 @@ export default function App() {
 
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [isAssignTaskOpen, setIsAssignTaskOpen] = useState(false);
+  const [isPlanTaskOpen, setIsPlanTaskOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Interval timer tick: Update running durations locally
@@ -274,6 +276,7 @@ export default function App() {
 
   const handleStopTimer = () => {
     if (myRunningEntry) {
+      if (!confirm('Voulez-vous vraiment arrêter cette tâche ? Le temps déjà enregistré sera conservé.')) return;
       // heureFin is stamped server-side when the task actually completes.
       updateTimeEntryApi(myRunningEntry.id, { statut: 'COMPLETED' });
       showToast('Chronomètre arrêté et enregistré.');
@@ -381,6 +384,7 @@ export default function App() {
   // Admin acting on someone else's task: set the status directly, without
   // touching the admin's own running timer.
   const handleAdminChangeStatus = async (entry: TimeEntry, statut: TimeEntry['statut']) => {
+    if (statut === 'COMPLETED' && !confirm(`Voulez-vous vraiment arrêter cette tâche de ${entry.userName || 'ce collaborateur'} ? Le temps déjà enregistré sera conservé.`)) return;
     await updateTimeEntryApi(entry.id, { statut });
     const label = statut === 'PAUSED' ? 'mise en pause' : statut === 'RUNNING' ? 'reprise' : 'clôturée';
     showToast(`Tâche de ${entry.userName || 'collaborateur'} ${label}.`);
@@ -456,15 +460,24 @@ export default function App() {
                   Suivi du temps de travail et coût calculé des collaborateurs en temps réel
                 </p>
               </div>
-              {hasPermission('ASSIGN_TASKS') && (
+              <div className="flex flex-wrap gap-2 shrink-0">
                 <button
-                  onClick={() => setIsAssignTaskOpen(true)}
-                  className="shrink-0 flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  onClick={() => setIsPlanTaskOpen(true)}
+                  className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
-                  <ClipboardCheck className="w-3.5 h-3.5" />
-                  Assigner une tâche
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  Planifier une tâche
                 </button>
-              )}
+                {hasPermission('ASSIGN_TASKS') && (
+                  <button
+                    onClick={() => setIsAssignTaskOpen(true)}
+                    className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <ClipboardCheck className="w-3.5 h-3.5" />
+                    Assigner une tâche
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Two columns: the activity on the left, and on the right a panel
@@ -549,6 +562,15 @@ export default function App() {
           taskTypes={taskTypesList}
           onClose={() => setIsAssignTaskOpen(false)}
           onAssigned={() => showToast('Tâche assignée.')}
+        />
+      )}
+
+      {isPlanTaskOpen && (
+        <PlanTaskModal
+          services={servicesList}
+          taskTypes={taskTypesList}
+          onClose={() => setIsPlanTaskOpen(false)}
+          onPlanned={() => showToast('Tâche planifiée.')}
         />
       )}
 

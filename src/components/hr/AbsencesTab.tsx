@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { AbsenceAuthorization } from '../../types';
 import { Plus, Check, X, Clock, AlertCircle } from 'lucide-react';
@@ -48,6 +49,10 @@ export const AbsencesTab: React.FC = () => {
 
   const [rejectionModalId, setRejectionModalId] = useState<number | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+
+  useEscapeToClose(() => setIsCreating(false), isCreating);
+  useEscapeToClose(() => { setApprovalModalId(null); setApprovalComment(''); }, !!approvalModalId);
+  useEscapeToClose(() => { setRejectionModalId(null); setRejectionReason(''); }, !!rejectionModalId);
 
   const fetchAuths = () => {
     fetch('/api/hr/authorizations', { headers: { 'Authorization': `Bearer ${token}` } })

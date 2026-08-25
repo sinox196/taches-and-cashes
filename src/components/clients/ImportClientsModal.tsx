@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Upload, FileSpreadsheet, Loader, Check, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
@@ -41,6 +42,7 @@ export const ImportClientsModal: React.FC<{ onClose: () => void; onImported: () 
   onClose,
   onImported,
 }) => {
+  useEscapeToClose(onClose);
   const { token } = useAuth();
   const [step, setStep] = useState<Step>('upload');
   const [dragOver, setDragOver] = useState(false);

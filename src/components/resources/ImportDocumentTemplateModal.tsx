@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Loader, Upload, Trash2, Search, FileSpreadsheet, Check } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
@@ -18,6 +19,7 @@ interface ImportDocumentTemplateModalProps {
  * of "I already have the sheet and I know which clients need it".
  */
 export const ImportDocumentTemplateModal: React.FC<ImportDocumentTemplateModalProps> = ({ onClose, onImported }) => {
+  useEscapeToClose(onClose);
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   const fileRef = useRef<HTMLInputElement>(null);

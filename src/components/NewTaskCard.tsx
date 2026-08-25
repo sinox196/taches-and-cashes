@@ -212,11 +212,11 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                     <button
                       type="button"
                       onClick={() => openMissionEditor(null)}
-                      className="text-[9px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                      className="text-[11px] text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-colors"
                       title="Créer une mission et ses types de tâches"
                     >
-                      <Plus className="w-3 h-3" />
-                      Ajouter
+                      <Plus className="w-3.5 h-3.5" />
+                      Ajouter une mission
                     </button>
                     {currentMission && (
                       <button

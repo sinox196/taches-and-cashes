@@ -15,11 +15,22 @@ import { amountToFrenchWords } from '../../utils/amountToWords';
  * never differ, and printing no longer involves the app's own page at all.
  */
 
+export interface BankAccount {
+  id: string;
+  name: string;
+  rib: string;
+  iban: string;
+  swift: string;
+}
+
 export interface CompanyBlock {
   company: { name: string; address: string; taxId: string; email: string; phone: string };
-  bank: { name: string; iban: string };
+  banks: BankAccount[];
+  defaultBankId: string;
   logo: string;
   signature: string;
+  stamp: string;
+  showSignature: boolean;
 }
 
 /**
@@ -241,26 +252,9 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   doc.setFillColor(INK[0], INK[1], INK[2]);
   doc.rect(tx - 4, y, RIGHT - tx + 4, 9, 'F');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(255, 255, 255);
-  text('Total net à payer', tx, y + 6);
+  text('Montant de facture', tx, y + 6);
   text(`${money(invoice.totalNetToPay)} DT`, RIGHT - 2, y + 6, { align: 'right' });
   y += 15;
-
-  // ---- encaissements -----------------------------------------------------
-  if ((invoice.payments || []).length > 0) {
-    if (y > 235) { doc.addPage(); y = M; }
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); setInk(MUTED);
-    text('ENCAISSEMENTS', M, y); y += 5;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK);
-    for (const pay of invoice.payments) {
-      text(`${frDate(pay.date)}${pay.note ? `  ·  ${pay.note}` : ''}`, M, y);
-      text(money(pay.amount), M + 90, y, { align: 'right' });
-      y += 4.5;
-    }
-    doc.setFont('helvetica', 'bold');
-    text('Reste à payer', M, y + 1);
-    text(`${money(invoice.remainingToPay ?? 0)} DT`, M + 90, y + 1, { align: 'right' });
-    y += 9;
-  }
 
   // ---- amount in words ---------------------------------------------------
   if (y > 240) { doc.addPage(); y = M; }
@@ -287,29 +281,45 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     fy += 4;
 
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); setInk(INK);
-    const left = [
+    // Each piece of company info on its own line, not joined into a paragraph
+    // and re-wrapped — a MF or phone number wrapping mid-line elsewhere reads
+    // as broken data entry.
+    const companyLines = [
       block?.company?.name,
       block?.company?.address,
       block?.company?.taxId ? `MF: ${block.company.taxId}` : '',
-      [block?.company?.email, block?.company?.phone].filter(Boolean).join('  '),
-    ].filter(Boolean).join('  ');
+      block?.company?.email,
+      block?.company?.phone,
+    ].filter(Boolean);
     let cy = fy;
-    for (const line of wrap(left || '—', 70)) { text(line, M, cy); cy += 3.4; }
+    for (const line of (companyLines.length ? companyLines : ['—'])) {
+      for (const wrapped of wrap(line, 70)) { text(wrapped, M, cy); cy += 3.4; }
+    }
 
+    // The document's own chosen bank, falling back to the configured default
+    // (or the first one) for a document created before this selector existed.
+    const selectedBank = block?.banks?.find(b => b.id === invoice?.bankId);
+    const defaultBank = selectedBank || block?.banks?.find(b => b.id === block.defaultBankId) || block?.banks?.[0];
     let by = fy;
-    text(`Banque : ${block?.bank?.name || '—'}`, 90, by); by += 3.4;
-    for (const line of wrap(`IBAN : ${block?.bank?.iban || '—'}`, 60)) { text(line, 90, by); by += 3.4; }
+    text(`Banque : ${defaultBank?.name || '—'}`, 90, by); by += 3.4;
+    if (defaultBank?.rib) { text(`RIB : ${defaultBank.rib}`, 90, by); by += 3.4; }
+    for (const line of wrap(`IBAN : ${defaultBank?.iban || '—'}`, 60)) { text(line, 90, by); by += 3.4; }
+    if (defaultBank?.swift) { text(`SWIFT : ${defaultBank.swift}`, 90, by); by += 3.4; }
 
-    if (block?.signature) {
-      try {
-        const fmt = /^data:image\/png/.test(block.signature) ? 'PNG'
-          : /^data:image\/webp/.test(block.signature) ? 'WEBP' : 'JPEG';
-        doc.addImage(block.signature, fmt, RIGHT - 38, fy - 2, 36, 18, undefined, 'FAST');
-        doc.setFontSize(6.5); setInk(MUTED);
-        text('Signature', RIGHT - 20, fy + 19, { align: 'center' });
-      } catch {
-        /* a corrupt data URL must not take the whole document down */
-      }
+    // Signature and stamp are drawn side by side, gated together on the one
+    // "show" toggle — the admin controls the whole block, not each half.
+    if (block?.showSignature !== false) {
+      const addFooterImage = (dataUrl: string, x: number) => {
+        try {
+          const fmt = /^data:image\/png/.test(dataUrl) ? 'PNG'
+            : /^data:image\/webp/.test(dataUrl) ? 'WEBP' : 'JPEG';
+          doc.addImage(dataUrl, fmt, x, fy - 2, 36, 18, undefined, 'FAST');
+        } catch {
+          /* a corrupt data URL must not take the whole document down */
+        }
+      };
+      if (block?.stamp) addFooterImage(block.stamp, RIGHT - 78);
+      if (block?.signature) addFooterImage(block.signature, RIGHT - 38);
     }
 
     if (pages > 1) {
