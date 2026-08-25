@@ -811,6 +811,9 @@ async function startServer() {
     const invoices = await db.getAllInvoices(companyId);
     let montantFacture = 0;
     for (const inv of invoices) {
+      // "Autre document (non facturable)" is explicitly excluded from the
+      // client's running balance — it exists in Cash but isn't billing.
+      if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       if (key === String(client.id) || key === `name:${client.name}`) {
         montantFacture += num(Number(inv.totalNetToPay), 0);
@@ -922,6 +925,9 @@ async function startServer() {
       const allInvoices = await db.getAllInvoices(req.user.companyId);
       const montantFactureByClient = new Map<string, number>();
       for (const inv of allInvoices) {
+        // "Autre document (non facturable)" is explicitly excluded from the
+        // client's running balance — it exists in Cash but isn't billing.
+        if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
         const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
         montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
       }
@@ -1379,6 +1385,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // below can look itself up with the exact same `key` it already has.
     const montantFactureByClient = new Map<string, number>();
     for (const inv of allInvoices) {
+      // "Autre document (non facturable)" is explicitly excluded from the
+      // client's running balance and from the billing activity below — it
+      // exists in Cash but isn't billing.
+      if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
       const k = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       montantFactureByClient.set(k, round3((montantFactureByClient.get(k) || 0) + num(Number(inv.totalNetToPay), 0)));
       const ts = parseIsoDate(inv.issueDate);
@@ -2016,7 +2026,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // Masking the retenue on the document also drops it from the net-to-pay
     // math — it isn't just hidden, it stops being applied at all.
     const withholdingAmount = invoice.showWithholding === false ? 0 : round3(totalTTC * withholdingRate); // (5)
-    const stampDuty = num(Number(invoice.stampDuty), 0);                            // (6)
+    // Masking the timbre fiscal on the document also drops it from the
+    // net-to-pay math — same rule as the retenue à la source above.
+    const stampDuty = invoice.showStampDuty === false ? 0 : num(Number(invoice.stampDuty), 0); // (6)
     const netToPay = round3(totalTTC - withholdingAmount + stampDuty);              // (7)
     const disbursements = num(Number(invoice.disbursements), 0);                    // (8)
     const advances = num(Number(invoice.advances), 0);                              // (9)
@@ -2062,7 +2074,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     issueDate: string,
   ): string | null => {
     const others = allInvoices
-      .filter((i: any) => i.documentKind !== 'AUTRE' && i.id !== selfId && i.issueDate)
+      .filter((i: any) => i.documentKind === 'FACTURE_LEGALE' && i.id !== selfId && i.issueDate)
       .map((i: any) => ({ n: Number(i.number), label: String(i.number), date: String(i.issueDate) }))
       .filter((i: any) => Number.isFinite(i.n));
 
@@ -2117,7 +2129,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // invoice can bound the next one. Returning the newest document of any
       // kind let an autre document — which is exempt — set a floor the server
       // would never have enforced.
-      const lastLegal = all.find((i: any) => i.documentKind !== 'AUTRE');
+      const lastLegal = all.find((i: any) => i.documentKind === 'FACTURE_LEGALE');
       res.json({
         nextNumber: String(current + 1).padStart(4, '0'),
         lastIssueDate: lastLegal ? lastLegal.issueDate : null,
@@ -2143,15 +2155,17 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Chaque ligne doit avoir une désignation' });
       }
 
-      const kind = body.documentKind === 'AUTRE' ? 'AUTRE' : 'FACTURE_LEGALE';
+      const kind = body.documentKind === 'AUTRE' ? 'AUTRE'
+        : body.documentKind === 'AUTRE_NON_FACTURABLE' ? 'AUTRE_NON_FACTURABLE'
+        : 'FACTURE_LEGALE';
       const all = await db.getAllInvoices(req.user.companyId);
 
-      // Only a legal invoice is bound to the sequence. "Autre document" carries
-      // a free reference (bon de livraison, reçu…), so it neither follows the
-      // sequence nor consumes a number from it — doing so would punch gaps in
-      // the legal numbering.
+      // Only a legal invoice is bound to the sequence. Both "autre" kinds
+      // carry a free reference (bon de livraison, reçu, note interne…), so
+      // neither follows the sequence nor consumes a number from it — doing so
+      // would punch gaps in the legal numbering.
       let number: string;
-      if (kind === 'AUTRE') {
+      if (kind !== 'FACTURE_LEGALE') {
         number = String(body.number ?? '').trim();
         if (!number) {
           return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
@@ -2167,7 +2181,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
 
       const totals = computeInvoiceTotals(body);
-      if (kind !== 'AUTRE') number = await db.nextInvoiceNumber(req.user.companyId);
+      if (kind === 'FACTURE_LEGALE') number = await db.nextInvoiceNumber(req.user.companyId);
 
       const invoice = await db.createInvoice(req.user.companyId, {
         id: `inv-${Date.now()}`,
@@ -2176,7 +2190,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         title: String(body.title || 'Facture').trim(),
         billingMode: body.billingMode === 'DETAILLEE' ? 'DETAILLEE' : 'FORFAIT',
         vatRegime: body.vatRegime === 'SUSPENSION' ? 'SUSPENSION' : body.vatRegime === 'EXPORT' ? 'EXPORT' : 'DROIT_COMMUN',
-        currency: ['TND', 'USD', 'EUR'].includes(body.currency) ? body.currency : 'TND',
+        // Free text beyond TND — the user types their own currency (USD, GBP…)
+        // rather than picking from a fixed list.
+        currency: String(body.currency || 'TND').trim().toUpperCase().slice(0, 12) || 'TND',
         clientId: body.clientId ?? null,
         clientName: body.clientName || '',
         clientTaxId: body.clientTaxId || '',
@@ -2192,9 +2208,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         attestationNumber: String(body.attestationNumber || '').trim(),
         attestationDate: body.attestationDate ? String(body.attestationDate).slice(0, 10) : '',
         bonCommandeNumber: String(body.bonCommandeNumber || '').trim(),
-        // Masks the Retenue à la source line on the printed document without
-        // changing the actual net-to-pay math — same idea as showDueDate.
+        // Masks the Retenue à la source / Timbre fiscal lines on the printed
+        // document — and, unlike showDueDate, also drops them from the actual
+        // net-to-pay math (see computeInvoiceTotals).
         showWithholding: body.showWithholding !== false,
+        showStampDuty: body.showStampDuty !== false,
         lines: body.lines.map((l: any) => ({
           designation: String(l.designation || '').trim(),
           quantity: num(Number(l.quantity), 1),
@@ -2224,7 +2242,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       // A legal invoice's number belongs to the sequence and is never
       // reassigned; a free document's may be corrected.
-      if (merged.documentKind === 'AUTRE') {
+      if (merged.documentKind !== 'FACTURE_LEGALE') {
         const wanted = String(req.body?.number ?? existing.number ?? '').trim();
         if (!wanted) {
           return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
@@ -2252,7 +2270,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
       // Editing bypassed the ordering rule entirely, so a legal invoice created
       // in order could be moved to any date afterwards.
-      if (merged.documentKind !== 'AUTRE') {
+      if (merged.documentKind === 'FACTURE_LEGALE') {
         const dateError = legalSequenceDateError(
           await db.getAllInvoices(req.user.companyId), existing.id, Number(merged.number), merged.issueDate,
         );

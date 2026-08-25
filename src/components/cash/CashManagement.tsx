@@ -18,6 +18,7 @@ const frDate = (iso: string) => {
 const KIND_LABEL: Record<string, string> = {
   FACTURE_LEGALE: 'Facture légale',
   AUTRE: 'Autre document',
+  AUTRE_NON_FACTURABLE: 'Autre document (non facturable)',
 };
 const REGIME_LABEL: Record<string, string> = {
   DROIT_COMMUN: 'Droit commun',

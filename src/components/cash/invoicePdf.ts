@@ -287,7 +287,9 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     row(`Retenue à la source — ${((invoice.withholdingRate || 0) * 100).toLocaleString('fr-FR')} %`,
       `- ${money(invoice.withholdingAmount)}`);
   }
-  row('Timbre fiscal', money(invoice.stampDuty));
+  if (invoice.showStampDuty !== false) {
+    row('Timbre fiscal', money(invoice.stampDuty));
+  }
   row('Net à payer', money(invoice.netToPay), true);
   if (invoice.disbursements > 0) row('Remboursement de débours', `+ ${money(invoice.disbursements)}`);
   if (invoice.advances > 0) row('Moins avances perçues', `- ${money(invoice.advances)}`);

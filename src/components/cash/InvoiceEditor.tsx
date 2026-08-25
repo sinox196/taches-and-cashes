@@ -11,6 +11,7 @@ import { friendlyError } from '../../utils/errors';
 const DOCUMENT_KINDS = [
   { id: 'FACTURE_LEGALE', label: 'Facture légale' },
   { id: 'AUTRE', label: 'Autre document' },
+  { id: 'AUTRE_NON_FACTURABLE', label: 'Autre document (non facturable)' },
 ];
 const BILLING_MODES = [
   { id: 'FORFAIT', label: 'Facturation au Forfait', hint: 'Masque Quantité et Prix Unitaire — la Désignation et le Montant HT sont saisis directement.' },
@@ -23,12 +24,8 @@ const VAT_REGIMES = [
 ];
 const VAT_RATES = [0, 0.07, 0.13, 0.19];
 const WITHHOLDING_RATES = [0, 0.005, 0.01, 0.015, 0.05, 0.1];
-const CURRENCIES = [
-  { code: 'TND', label: 'Dinar tunisien (DT)' },
-  { code: 'USD', label: 'Dollar américain (USD)' },
-  { code: 'EUR', label: 'Euro (EUR)' },
-];
-const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT', USD: 'USD', EUR: 'EUR' };
+/** Any other currency is free text, not a fixed list — typed by the user. */
+const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT' };
 /** Suggested titles; "Autre document" allows a free one. */
 const TITLES = ['Facture', "Note d'honoraires"];
 
@@ -143,6 +140,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   const [withholdingRate, setWithholdingRate] = useState(invoice?.withholdingRate ?? 0.01);
   const [showWithholding, setShowWithholding] = useState(invoice ? invoice.showWithholding !== false : true);
   const [stampDuty, setStampDuty] = useState<number | ''>(invoice?.stampDuty ?? 1);
+  const [showStampDuty, setShowStampDuty] = useState(invoice ? invoice.showStampDuty !== false : true);
   const [showDisbursements, setShowDisbursements] = useState(!!invoice?.disbursements);
   const [disbursements, setDisbursements] = useState<number | ''>(invoice?.disbursements || '');
   const [showAdvances, setShowAdvances] = useState(!!invoice?.advances);
@@ -163,8 +161,8 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   /** Suspension and export both charge zero VAT; only suspension prints the attestation/indicative-VAT extras. */
   const zeroVat = suspended || exported;
   const detailed = billingMode === 'DETAILLEE';
-  /** "Autre document" is outside the legal sequence, so its number is typed. */
-  const freeNumber = documentKind === 'AUTRE';
+  /** Only a legal invoice is bound to the sequence — both "Autre" kinds type their own number. */
+  const freeNumber = documentKind !== 'FACTURE_LEGALE';
 
   useEffect(() => {
     if (isEdit) return; // an issued document keeps its number
@@ -174,7 +172,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
         if (res.ok) {
           const body = await res.json();
           setSequenceNumber(body.nextNumber);
-          setNumber(prev => (documentKind === 'AUTRE' ? prev : body.nextNumber));
+          setNumber(prev => (documentKind !== 'FACTURE_LEGALE' ? prev : body.nextNumber));
           setLastIssueDate(body.lastIssueDate ?? null);
         }
       } catch { /* the number is display-only until save */ }
@@ -241,15 +239,16 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
     const ht = round3(totalHT);
     const tva = round3(breakdown.reduce((s, b) => s + b.amount, 0));
     const ttc = round3(ht + tva);
-    // Masking the retenue drops it from the net-to-pay math too — mirrors the server.
+    // Masking the retenue or the timbre fiscal drops each from the
+    // net-to-pay math too — mirrors the server.
     const rsAmount = showWithholding ? round3(ttc * withholdingRate) : 0;
-    const stamp = n(Number(stampDuty));
+    const stamp = showStampDuty ? n(Number(stampDuty)) : 0;
     const net = round3(ttc - rsAmount + stamp);
     const deb = showDisbursements ? n(Number(disbursements)) : 0;
     const adv = showAdvances ? n(Number(advances)) : 0;
     const totalNet = round3(net + deb - adv);
     return { breakdown, indicativeBreakdown, indicativeTotal, ht, tva, ttc, rsAmount, stamp, net, deb, adv, totalNet };
-  }, [lines, suspended, zeroVat, detailed, withholdingRate, showWithholding, stampDuty, showDisbursements, disbursements, showAdvances, advances]);
+  }, [lines, suspended, zeroVat, detailed, withholdingRate, showWithholding, stampDuty, showStampDuty, showDisbursements, disbursements, showAdvances, advances]);
 
   const dateWarning = !isEdit && !freeNumber && lastIssueDate && issueDate < lastIssueDate
     ? `La date doit être postérieure ou égale à celle de la dernière facture légale (${lastIssueDate}).`
@@ -261,6 +260,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
     if (!clientAddress.trim()) { setError("L'adresse est obligatoire."); return; }
     if (!issueDate) { setError('La date de création est obligatoire.'); return; }
     if (freeNumber && !number.trim()) { setError('Le numéro du document est obligatoire.'); return; }
+    if (!currency.trim()) { setError('La devise est obligatoire.'); return; }
     if (lines.some(l => !l.designation.trim())) { setError('Chaque ligne doit avoir une désignation.'); return; }
     if (dateWarning) { setError(dateWarning); return; }
 
@@ -271,7 +271,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
         method: isEdit ? 'PUT' : 'POST',
         headers: authHeaders,
         body: JSON.stringify({
-          documentKind, billingMode, vatRegime, currency, title,
+          documentKind, billingMode, vatRegime, currency: currency.trim(), title,
           ...(freeNumber ? { number: number.trim() } : {}),
           clientId: client.id, clientName: client.name,
           clientTaxId, clientAddress,
@@ -293,6 +293,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           withholdingRate,
           showWithholding,
           stampDuty: n(Number(stampDuty)),
+          showStampDuty,
           disbursements: totals.deb,
           advances: totals.adv,
           attestationNumber: attestationNumber.trim(),
@@ -327,7 +328,10 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
         <div className="p-5 space-y-6">
           {/* ---- 1. Choix ---- */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-5 border-b border-gray-200">
-            <Choice label="Type de document">
+            <Choice
+              label="Type de document"
+              hint={documentKind === 'AUTRE_NON_FACTURABLE' ? 'Non pris en compte dans le solde du client (Clients et Tableau de bord).' : undefined}
+            >
               <select
                 value={documentKind}
                 onChange={e => {
@@ -336,7 +340,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                   if (!isEdit) {
                     // Don't carry the sequence number onto a free document, nor
                     // a typed reference back onto a legal one.
-                    setNumber(kind === 'AUTRE' ? '' : sequenceNumber);
+                    setNumber(kind !== 'FACTURE_LEGALE' ? '' : sequenceNumber);
                   }
                   // A legal invoice only offers the standard titles; a free one
                   // carried over from "Autre document" would display as blank
@@ -408,7 +412,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
             </div>
 
             <div className="text-right">
-              {documentKind === 'AUTRE' ? (
+              {documentKind !== 'FACTURE_LEGALE' ? (
                 <input
                   value={title}
                   onChange={e => setTitle(e.target.value)}
@@ -603,14 +607,21 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               <div className="mt-3">
                 <label className="block text-[12px] font-semibold text-gray-700 mb-1">Devise</label>
                 <select
-                  value={currency}
-                  onChange={e => setCurrency(e.target.value)}
+                  value={currency === 'TND' ? 'TND' : 'AUTRE'}
+                  onChange={e => setCurrency(e.target.value === 'TND' ? 'TND' : '')}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-white"
                 >
-                  {CURRENCIES.map(c => (
-                    <option key={c.code} value={c.code}>{c.label}</option>
-                  ))}
+                  <option value="TND">Dinar tunisien (DT)</option>
+                  <option value="AUTRE">Autre devise</option>
                 </select>
+                {currency !== 'TND' && (
+                  <input
+                    value={currency}
+                    onChange={e => setCurrency(e.target.value.toUpperCase().slice(0, 12))}
+                    placeholder="Ex: USD, EUR, GBP…"
+                    className="w-full mt-1.5 px-3 py-2 border border-gray-300 rounded-lg text-[13px] font-mono"
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -822,7 +833,15 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 <span className="font-mono text-gray-900">− {money(totals.rsAmount)}</span>
               </div>
               <div className="flex justify-between items-center px-4 py-2">
-                <span className="text-gray-600">Timbre fiscal</span>
+                <label className="flex items-center gap-1.5 text-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showStampDuty}
+                    onChange={e => setShowStampDuty(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  Timbre fiscal
+                </label>
                 <input
                   type="number" min="0" step="0.001"
                   value={stampDuty}
@@ -830,6 +849,11 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                   className="w-24 px-2 py-1 border border-gray-300 rounded text-[12px] text-right"
                 />
               </div>
+              {!showStampDuty && (
+                <p className="px-4 pb-1 -mt-1 text-[10.5px] text-gray-400">
+                  Masqué sur le document — le montant net n'est pas calculé avec ce timbre.
+                </p>
+              )}
               <div className="flex justify-between px-4 py-2 bg-gray-50">
                 <span className="font-semibold text-gray-800">Net à payer</span>
                 <span className="font-mono font-bold text-gray-900">{money(totals.net)}</span>

@@ -226,7 +226,9 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               {invoice.showWithholding !== false && (
                 <Row label={`Retenue à la source — ${(invoice.withholdingRate * 100).toLocaleString('fr-FR')} %`} value={`− ${money(invoice.withholdingAmount)}`} />
               )}
-              <Row label="Timbre fiscal" value={money(invoice.stampDuty)} />
+              {invoice.showStampDuty !== false && (
+                <Row label="Timbre fiscal" value={money(invoice.stampDuty)} />
+              )}
               <Row label="Net à payer" value={money(invoice.netToPay)} strong />
               {invoice.disbursements > 0 && <Row label="Remboursement de débours" value={`+ ${money(invoice.disbursements)}`} />}
               {invoice.advances > 0 && <Row label="Moins avances perçues" value={`− ${money(invoice.advances)}`} />}
