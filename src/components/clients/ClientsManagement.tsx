@@ -5,6 +5,13 @@ import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Bui
 import { ImportClientsModal } from './ImportClientsModal';
 import { formatCostTND } from '../../utils/formatters';
 
+export interface EncaissementEntry {
+  id: string;
+  amount: number;
+  date: string;
+  note?: string;
+}
+
 export interface Client {
   id: number;
   name: string;
@@ -24,13 +31,31 @@ export interface Client {
   customFields?: Record<string, string>;
   /** Manually typed by the admin — a running ledger, not derived from anything. */
   soldeAnterieur: number;
-  /** Manually typed — total collected from this client, kept separate from any single invoice. */
-  encaissements: number;
+  /** A client can be paid in several instalments, so this is a list — the
+   *  displayed total is the sum of these entries' amounts. */
+  encaissements: EncaissementEntry[];
   /** Derived server-side: the sum of this client's own invoices' totals. */
   montantFacture?: number;
-  /** Derived server-side: montantFacture - soldeAnterieur - encaissements. */
+  /** Derived server-side: soldeAnterieur - sum(encaissements) + montantFacture. */
   resteAPayer?: number;
 }
+
+// A client saved before this list existed has `encaissements` stored as a
+// bare number — summed as-is rather than crashing, so existing data (this
+// app's own production included) still reads correctly.
+const sumEncaissements = (entries: EncaissementEntry[] | number | undefined): number =>
+  Array.isArray(entries) ? entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) : (Number(entries) || 0);
+
+/** Same legacy shape recovery, applied when a client is loaded into the edit
+ *  form — the old total becomes one editable, dated entry instead of being
+ *  silently dropped. */
+const encaissementsForEditing = (client: Pick<Client, 'encaissements' | 'updatedAt' | 'createdAt' | 'id'>): EncaissementEntry[] => {
+  if (Array.isArray(client.encaissements)) return client.encaissements;
+  const amount = Number(client.encaissements) || 0;
+  if (amount === 0) return [];
+  const date = (client.updatedAt || client.createdAt || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
+  return [{ id: `legacy-${client.id}`, amount, date, note: 'Ancien montant (migré)' }];
+};
 
 export const ClientsManagement: React.FC = () => {
   const { token, hasPermission } = useAuth();
@@ -51,7 +76,7 @@ export const ClientsManagement: React.FC = () => {
   const [formData, setFormData] = useState<Partial<Client>>({
     customFields: {},
     name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '',
-    soldeAnterieur: '' as any, encaissements: '' as any,
+    soldeAnterieur: '' as any, encaissements: [],
   });
   const [formError, setFormError] = useState('');
   const [newFieldName, setNewFieldName] = useState('');
@@ -85,7 +110,7 @@ export const ClientsManagement: React.FC = () => {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    return ['name', 'soldeAnterieur', 'encaissements', 'montantFacture', 'resteAPayer', 'taxId', 'contact', 'status']; // Default columns
+    return ['name', 'soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer', 'taxId', 'contact', 'status']; // Default columns
   });
 
   const toggleColumn = (key: string) => {
@@ -192,8 +217,8 @@ export const ClientsManagement: React.FC = () => {
   const standardColumns = [
     { key: 'name', label: 'Client / Nom' },
     { key: 'soldeAnterieur', label: 'Solde antérieur' },
-    { key: 'encaissements', label: 'Encaissements' },
     { key: 'montantFacture', label: 'Montant de facture' },
+    { key: 'encaissements', label: 'Encaissements' },
     { key: 'resteAPayer', label: 'Reste à payer' },
     { key: 'taxId', label: 'Matricule' },
     { key: 'address', label: 'Adresse' },
@@ -225,7 +250,7 @@ export const ClientsManagement: React.FC = () => {
 
   const handleOpenCreate = () => {
     setEditingClient(null);
-    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {}, soldeAnterieur: '' as any, encaissements: '' as any });
+    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {}, soldeAnterieur: '' as any, encaissements: [] });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -233,7 +258,7 @@ export const ClientsManagement: React.FC = () => {
   const handleOpenEdit = (client: Client, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingClient(client);
-    setFormData({ ...client });
+    setFormData({ ...client, encaissements: encaissementsForEditing(client) });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -257,6 +282,22 @@ export const ClientsManagement: React.FC = () => {
   const handleFormChange = (field: keyof Client, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
+
+  const addEncaissement = () => setFormData(prev => ({
+    ...prev,
+    encaissements: [
+      ...(prev.encaissements || []),
+      { id: `local-${Date.now()}`, amount: '' as any, date: new Date().toISOString().slice(0, 10), note: '' },
+    ],
+  }));
+  const updateEncaissement = (id: string, patch: Partial<EncaissementEntry>) => setFormData(prev => ({
+    ...prev,
+    encaissements: (prev.encaissements || []).map(e => (e.id === id ? { ...e, ...patch } : e)),
+  }));
+  const removeEncaissement = (id: string) => setFormData(prev => ({
+    ...prev,
+    encaissements: (prev.encaissements || []).filter(e => e.id !== id),
+  }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -579,7 +620,26 @@ export const ClientsManagement: React.FC = () => {
                             </td>
                           );
                         }
-                        if (col.key === 'soldeAnterieur' || col.key === 'encaissements' || col.key === 'montantFacture' || col.key === 'resteAPayer') {
+                        if (col.key === 'encaissements') {
+                          const total = sumEncaissements(client.encaissements);
+                          const entries = Array.isArray(client.encaissements) ? client.encaissements : [];
+                          return (
+                            <td key={col.key} className="px-5 py-4 text-right font-mono text-gray-700">
+                              {formatCostTND(total)}
+                              {entries.length > 0 && (
+                                <div className="text-[10px] text-gray-400 font-sans mt-1 space-y-0.5">
+                                  {entries.map(entry => (
+                                    <div key={entry.id} className="whitespace-nowrap">
+                                      {formatCostTND(Number(entry.amount) || 0)}
+                                      {entry.date && <> · {new Date(entry.date).toLocaleDateString('fr-FR')}</>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        }
+                        if (col.key === 'soldeAnterieur' || col.key === 'montantFacture' || col.key === 'resteAPayer') {
                           const amount = Number(client[col.key as keyof Client]) || 0;
                           return (
                             <td key={col.key} className="px-5 py-4 text-right font-mono text-gray-700">
@@ -734,16 +794,60 @@ export const ClientsManagement: React.FC = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Encaissements</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={formData.encaissements || ''}
-                    onChange={e => handleFormChange('encaissements', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                    placeholder="0.000"
-                  />
+                <div className="md:col-span-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[12px] font-semibold text-gray-700">Encaissements</label>
+                    <button
+                      type="button"
+                      onClick={addEncaissement}
+                      className="text-[11px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> Ajouter un versement
+                    </button>
+                  </div>
+                  {(formData.encaissements || []).length === 0 ? (
+                    <p className="text-[12px] text-gray-400 italic border border-dashed border-gray-200 rounded-lg px-3 py-2.5">
+                      Aucun encaissement enregistré.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {(formData.encaissements || []).map(entry => (
+                        <div key={entry.id} className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            step="0.001"
+                            value={entry.amount === 0 ? '' : entry.amount}
+                            onChange={e => updateEncaissement(entry.id, { amount: e.target.value === '' ? ('' as any) : parseFloat(e.target.value) })}
+                            className="w-1/3 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                            placeholder="Montant"
+                          />
+                          <input
+                            type="date"
+                            value={entry.date || ''}
+                            onChange={e => updateEncaissement(entry.id, { date: e.target.value })}
+                            className="w-1/3 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <input
+                            type="text"
+                            value={entry.note || ''}
+                            onChange={e => updateEncaissement(entry.id, { note: e.target.value })}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                            placeholder="Référence (facultatif)"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeEncaissement(entry.id)}
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-gray-500 text-right">
+                        Total : <span className="font-semibold text-gray-800">{sumEncaissements(formData.encaissements).toLocaleString('fr-FR')} TND</span>
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div>

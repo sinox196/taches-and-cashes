@@ -128,8 +128,8 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
               <th className="px-4 py-3">Durée</th>
               {isAdmin && <th className="px-4 py-3 text-right bg-emerald-50/40">Coût employeur</th>}
               {isAdmin && <th className="px-4 py-3 text-right">Solde antérieur</th>}
-              {isAdmin && <th className="px-4 py-3 text-right">Encaissements</th>}
               {isAdmin && <th className="px-4 py-3 text-right">Montant de facture</th>}
+              {isAdmin && <th className="px-4 py-3 text-right">Encaissements</th>}
               {isAdmin && <th className="px-4 py-3 text-right">Reste à payer</th>}
             </tr>
           </thead>
@@ -200,11 +200,6 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                       </td>
                     )}
                     {isAdmin && (
-                      <td className="px-4 py-3 text-right font-mono text-gray-700">
-                        {formatCostTND(client.encaissements ?? 0)}
-                      </td>
-                    )}
-                    {isAdmin && (
                       <td className="px-4 py-3 text-right">
                         <span className="font-semibold text-gray-900">
                           {formatCostTND(client.montantFacture ?? 0)}
@@ -214,6 +209,11 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                             {client.invoiceCount} doc.
                           </span>
                         )}
+                      </td>
+                    )}
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right font-mono text-gray-700">
+                        {formatCostTND(client.encaissements ?? 0)}
                       </td>
                     )}
                     {isAdmin && (

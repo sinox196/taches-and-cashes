@@ -774,6 +774,33 @@ async function startServer() {
   // ---------------------------------------------------------
 
   /**
+   * A client can be paid in several instalments, so `encaissements` is a
+   * *list*, each entry carrying its own amount and date — the same shape the
+   * old per-invoice payments feature used, just living on the client instead.
+   */
+  const normalizeEncaissements = (raw: any): any[] => {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((e: any) => ({
+        id: String(e?.id || `enc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        amount: round3(num(Number(e?.amount), 0)),
+        date: String(e?.date || '').slice(0, 10),
+        note: String(e?.note || '').trim(),
+      }))
+      .filter((e: any) => e.date && Number.isFinite(e.amount))
+      .sort((a: any, b: any) => a.date.localeCompare(b.date));
+  };
+  // A client saved before this list existed has `encaissements` stored as a
+  // bare number — summed as-is rather than crashing/zeroing it out, so
+  // existing data (including whatever is already in production) still reads
+  // correctly until the admin re-enters it as dated entries.
+  const sumEncaissements = (client: any): number => {
+    const raw = client?.encaissements;
+    if (Array.isArray(raw)) return round3(raw.reduce((s: number, e: any) => s + num(Number(e?.amount), 0), 0));
+    return round3(num(Number(raw), 0));
+  };
+
+  /**
    * The client's running ledger — used by GET (batched, one invoice scan for
    * every returned row) and by POST/PUT below (a single client, so a direct
    * scan is cheap). Both must agree, since editing a client's own soldeAnterieur/
@@ -791,8 +818,8 @@ async function startServer() {
     }
     montantFacture = round3(montantFacture);
     const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
-    const encaissements = num(Number(client.encaissements), 0);
-    return { ...client, montantFacture, resteAPayer: round3(montantFacture - soldeAnterieur - encaissements) };
+    const encaissements = sumEncaissements(client);
+    return { ...client, montantFacture, resteAPayer: round3(soldeAnterieur - encaissements + montantFacture) };
   };
 
   // GET /api/clients
@@ -904,8 +931,8 @@ async function startServer() {
           (montantFactureByClient.get(`name:${c.name}`) || 0),
         );
         const soldeAnterieur = num(Number(c.soldeAnterieur), 0);
-        const encaissements = num(Number(c.encaissements), 0);
-        return { ...c, montantFacture, resteAPayer: round3(montantFacture - soldeAnterieur - encaissements) };
+        const encaissements = sumEncaissements(c);
+        return { ...c, montantFacture, resteAPayer: round3(soldeAnterieur - encaissements + montantFacture) };
       });
 
       if (req.query.page) {
@@ -1406,7 +1433,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // load; the rows below fetch it from /api/kpi/client-tasks on expand.
       const montantFacture = round3(montantFactureByClient.get(key) || 0);
       const soldeAnterieur = num(Number(clientRecord?.soldeAnterieur), 0);
-      const encaissements = num(Number(clientRecord?.encaissements), 0);
+      const encaissements = sumEncaissements(clientRecord);
       return {
         id: first.clientId ?? key,
         key,
@@ -1427,7 +1454,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         soldeAnterieur,
         encaissements,
         montantFacture,
-        resteAPayer: round3(montantFacture - soldeAnterieur - encaissements),
+        resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
       };
     }).sort((a, b) => b.totalCost - a.totalCost || b.netToPay - a.netToPay || b.durationSeconds - a.durationSeconds);
 
@@ -1486,7 +1513,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         notes: notes || '',
         customFields: customFields || {},
         soldeAnterieur: num(Number(soldeAnterieur), 0),
-        encaissements: num(Number(encaissements), 0),
+        encaissements: normalizeEncaissements(encaissements),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         createdBy: req.user.id
@@ -1521,7 +1548,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         notes: notes || '',
         customFields: customFields || {},
         soldeAnterieur: num(Number(soldeAnterieur), 0),
-        encaissements: num(Number(encaissements), 0),
+        encaissements: normalizeEncaissements(encaissements),
         updatedAt: new Date().toISOString()
       };
       
