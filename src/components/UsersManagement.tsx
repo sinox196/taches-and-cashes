@@ -27,6 +27,7 @@ const PERMISSIONS_GROUPED = [
       { id: 'EDIT_CLIENTS', label: 'Modifier clients', desc: 'Peut modifier les clients existants' },
       { id: 'DELETE_CLIENTS', label: 'Supprimer clients', desc: 'Peut archiver/supprimer des clients' },
       { id: 'MANAGE_CLIENT_FIELDS', label: 'Gérer champs', desc: 'Peut gérer les champs personnalisés' },
+      { id: 'VIEW_CLIENT_FINANCIALS', label: 'Voir totaux financiers', desc: 'Peut voir la barre "Total Général" (soldes, facturé, encaissé, reste à payer) sur la liste des clients' },
     ]
   },
   {

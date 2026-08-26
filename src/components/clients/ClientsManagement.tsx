@@ -690,28 +690,30 @@ export const ClientsManagement: React.FC = () => {
                       Actions
                     </th>
                   </tr>
-                  <tr className="bg-gray-100 border-b border-gray-200">
-                    {allTableColumns.filter(c => visibleColumns.includes(c.key)).map((col, i) => {
-                      const isFinancial = FINANCIAL_KEYS.includes(col.key);
-                      return (
-                        <td
-                          key={col.key}
-                          className={`h-11 sticky top-11 bg-gray-100 px-5 py-2.5 text-[12px] ${
-                            col.key === 'name' ? 'left-0 z-40 shadow-[1px_0_0_0_theme(colors.gray.200)]' : 'z-20'
-                          }`}
-                        >
-                          {i === 0 ? (
-                            <span className="font-bold text-gray-800">Total Général</span>
-                          ) : isFinancial ? (
-                            <span className="block text-right font-mono font-bold text-gray-900">
-                              {formatCostTND((totals as any)[col.key] || 0)}
-                            </span>
-                          ) : null}
-                        </td>
-                      );
-                    })}
-                    <td className="h-11 sticky top-11 right-0 bg-gray-100 z-30 px-5 py-2.5" />
-                  </tr>
+                  {hasPermission('VIEW_CLIENT_FINANCIALS') && (
+                    <tr className="bg-gray-100 border-b border-gray-200">
+                      {allTableColumns.filter(c => visibleColumns.includes(c.key)).map((col, i) => {
+                        const isFinancial = FINANCIAL_KEYS.includes(col.key);
+                        return (
+                          <td
+                            key={col.key}
+                            className={`h-11 sticky top-11 bg-gray-100 px-5 py-2.5 text-[12px] ${
+                              col.key === 'name' ? 'left-0 z-40 shadow-[1px_0_0_0_theme(colors.gray.200)]' : 'z-20'
+                            }`}
+                          >
+                            {i === 0 ? (
+                              <span className="font-bold text-gray-800">Total Général</span>
+                            ) : isFinancial ? (
+                              <span className="block text-right font-mono font-bold text-gray-900">
+                                {formatCostTND((totals as any)[col.key] || 0)}
+                              </span>
+                            ) : null}
+                          </td>
+                        );
+                      })}
+                      <td className="h-11 sticky top-11 right-0 bg-gray-100 z-30 px-5 py-2.5" />
+                    </tr>
+                  )}
                 </thead>
                 <tbody className="text-[12px] divide-y divide-gray-50">
                   {filteredClients.map(client => (
