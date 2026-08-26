@@ -45,7 +45,8 @@ const PERMISSIONS_GROUPED = [
       { id: 'MANAGE_LEAVE_REQUESTS', label: 'Gérer congés', desc: 'Peut approuver/refuser les congés' },
       { id: 'CREATE_ABSENCE_AUTHORIZATION', label: 'Demander autorisation', desc: 'Peut soumettre une demande d\'absence' },
       { id: 'MANAGE_ABSENCE_AUTHORIZATIONS', label: 'Gérer autorisations', desc: 'Peut approuver/refuser les autorisations' },
-      { id: 'MANAGE_LOANS_ADVANCES', label: 'Gérer prêts & avances', desc: 'Peut accorder et suivre les prêts et avances des collaborateurs' },
+      { id: 'CREATE_LOAN_REQUEST', label: 'Demander prêt/avance', desc: "Peut soumettre une demande de prêt ou d'avance" },
+      { id: 'MANAGE_LOANS_ADVANCES', label: 'Gérer prêts & avances', desc: 'Peut approuver, refuser et suivre les demandes de prêts et avances des collaborateurs' },
     ]
   },
   {

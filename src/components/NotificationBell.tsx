@@ -30,8 +30,10 @@ const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClas
   LEAVE_DECISION: { icon: CalendarDays, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
   ABSENCE_REQUEST: { icon: Clock4, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },
   ABSENCE_DECISION: { icon: Clock4, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
-  LOAN_GRANTED: { icon: Wallet, nav: 'HR', iconClass: 'bg-teal-50 text-teal-600' },
-  ADVANCE_GRANTED: { icon: Wallet, nav: 'HR', iconClass: 'bg-teal-50 text-teal-600' },
+  LOAN_REQUEST: { icon: Wallet, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },
+  LOAN_DECISION: { icon: Wallet, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
+  ADVANCE_REQUEST: { icon: Wallet, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },
+  ADVANCE_DECISION: { icon: Wallet, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
 };
 
 /**
@@ -52,8 +54,10 @@ const TOAST_VARIANT: Record<string, ToastVariant> = {
   LEAVE_DECISION: 'info',
   ABSENCE_REQUEST: 'warning',
   ABSENCE_DECISION: 'info',
-  LOAN_GRANTED: 'success',
-  ADVANCE_GRANTED: 'success',
+  LOAN_REQUEST: 'warning',
+  LOAN_DECISION: 'info',
+  ADVANCE_REQUEST: 'warning',
+  ADVANCE_DECISION: 'info',
 };
 
 /** "il y a 5 min" — coarse on purpose, this is a notification list, not a log. */

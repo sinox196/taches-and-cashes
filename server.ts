@@ -2386,21 +2386,6 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
-  // Every employee, for the prêts/avances picker — unlike /api/hr/approvers
-  // (HR_APPROVER_ROLES only), a loan or advance can be granted to anyone.
-  app.get('/api/hr/employees', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
-    try {
-      const users = await db.getAllUsers(req.user.companyId);
-      res.json(
-        users
-          .map((u: any) => ({ id: u.id, name: u.fullName || u.username, role: u.role }))
-          .sort((a: any, b: any) => a.name.localeCompare(b.name)),
-      );
-    } catch (error) {
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
-
   // GET Leave Requests
   app.get('/api/hr/leaves', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
     try {
@@ -2696,52 +2681,139 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   });
 
   // ---- Gestion des prêts et avances --------------------------------------
-  // Employer-managed records, not a collaborator-initiated request/approval
-  // workflow like leaves/absences above: someone with MANAGE_LOANS_ADVANCES
-  // (ADMIN always qualifies) grants and updates a loan/advance for any
-  // employee; anyone with VIEW_HR sees their own.
+  // A collaborator-initiated request/approval workflow, same shape as
+  // leaves/absences above: the requester (CREATE_LOAN_REQUEST) picks a
+  // responsable from HR_APPROVER_ROLES (the same /api/hr/approvers list
+  // leaves/absences already use), the request sits PENDING until that
+  // approver (or an ADMIN) approves or rejects it via MANAGE_LOANS_ADVANCES,
+  // and both sides get notified — the request and the decision are two
+  // separate notifications, exactly like LEAVE_REQUEST/LEAVE_DECISION.
 
   app.get('/api/hr/loans', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
     try {
       const perms = JSON.parse(req.user.permissions || '[]');
       const canManage = req.user.role === 'ADMIN' || perms.includes('MANAGE_LOANS_ADVANCES');
       let loans = await db.getAllLoans(req.user.companyId);
-      if (!canManage) loans = loans.filter((l: any) => l.userId === req.user.id);
+      if (!canManage) loans = loans.filter((l: any) => l.userId === req.user.id || l.approverId === req.user.id);
       const users = await db.getAllUsers(req.user.companyId);
       res.json(loans.map((l: any) => ({
         ...l,
         userName: users.find((u: any) => u.id === l.userId)?.fullName || users.find((u: any) => u.id === l.userId)?.username || 'Inconnu',
+        approverName: users.find((u: any) => u.id === l.approverId)?.fullName || users.find((u: any) => u.id === l.approverId)?.username || 'Inconnu',
       })));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.post('/api/hr/loans', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+  app.post('/api/hr/loans', authenticate, requirePermission('CREATE_LOAN_REQUEST'), async (req: any, res: any) => {
     try {
-      const { userId, amount, monthlyDeduction, reason, dateGranted, notes } = req.body;
-      if (!userId || !(Number(amount) > 0)) {
-        return res.status(400).json({ error: "L'employé et un montant positif sont obligatoires." });
+      const { amount, monthlyDeduction, reason, dateGranted, approverId } = req.body;
+      if (!approverId || !(Number(amount) > 0)) {
+        return res.status(400).json({ error: 'Le responsable et un montant positif sont obligatoires.' });
       }
       const loan = await db.createLoan(req.user.companyId, {
         id: Date.now(),
-        userId: Number(userId),
+        userId: req.user.id,
+        approverId: Number(approverId),
         amount: Number(amount),
         monthlyDeduction: Number(monthlyDeduction) || 0,
         amountRepaid: 0,
         reason: String(reason || ''),
         dateGranted: dateGranted || new Date().toISOString().slice(0, 10),
-        status: 'ACTIVE',
-        notes: String(notes || ''),
-        createdBy: req.user.id,
+        status: 'PENDING',
+        notes: '',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
+      const requester = await db.getUserById(req.user.companyId, req.user.id);
       await notify(
-        req.user.companyId, Number(userId), 'LOAN_GRANTED', 'Prêt accordé',
-        `Un prêt de ${Number(amount).toLocaleString('fr-FR')} DT vous a été accordé.`,
+        req.user.companyId, Number(approverId), 'LOAN_REQUEST', 'Demande de prêt à approuver',
+        `${requester?.fullName || requester?.username || 'Un collaborateur'} a demandé un prêt de ${Number(amount).toLocaleString('fr-FR')} DT.`,
       );
       res.status(201).json(loan);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/loans/:id/approve', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const loan = await db.getLoanById(req.user.companyId, id);
+      if (!loan) return res.status(404).json({ error: 'Not found' });
+      if (loan.approverId !== req.user.id && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'You are not authorized to approve this request.' });
+      }
+      if (loan.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
+
+      const updated = await db.updateLoan(req.user.companyId, id, {
+        status: 'ACTIVE',
+        approvedBy: req.user.id,
+        approvedAt: new Date().toISOString(),
+        approverComment: req.body.comment || '',
+        updatedAt: new Date().toISOString(),
+      });
+      await notify(
+        req.user.companyId, loan.userId, 'LOAN_DECISION', 'Prêt approuvé',
+        `Votre demande de prêt de ${Number(loan.amount).toLocaleString('fr-FR')} DT a été approuvée.`,
+      );
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/loans/:id/reject', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { comment } = req.body;
+      if (!comment) return res.status(400).json({ error: 'Rejection reason required' });
+
+      const loan = await db.getLoanById(req.user.companyId, id);
+      if (!loan) return res.status(404).json({ error: 'Not found' });
+      if (loan.approverId !== req.user.id && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'You are not authorized to reject this request.' });
+      }
+      if (loan.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
+
+      const updated = await db.updateLoan(req.user.companyId, id, {
+        status: 'REJECTED',
+        approvedBy: req.user.id,
+        approvedAt: new Date().toISOString(),
+        rejectionReason: comment,
+        approverComment: comment,
+        updatedAt: new Date().toISOString(),
+      });
+      await notify(
+        req.user.companyId, loan.userId, 'LOAN_DECISION', 'Prêt refusé',
+        `Votre demande de prêt de ${Number(loan.amount).toLocaleString('fr-FR')} DT a été refusée : ${comment}`,
+      );
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/loans/:id/cancel', authenticate, async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const loan = await db.getLoanById(req.user.companyId, id);
+      if (!loan) return res.status(404).json({ error: 'Not found' });
+
+      const perms = JSON.parse(req.user.permissions || '[]');
+      if (loan.userId !== req.user.id && !perms.includes('MANAGE_LOANS_ADVANCES') && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      if (loan.status !== 'PENDING' && loan.status !== 'ACTIVE') {
+        return res.status(400).json({ error: 'Request cannot be cancelled' });
+      }
+
+      const updated = await db.updateLoan(req.user.companyId, id, {
+        status: 'CANCELLED',
+        updatedAt: new Date().toISOString(),
+      });
+      res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -2752,22 +2824,20 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const id = parseInt(req.params.id, 10);
       const existing = await db.getLoanById(req.user.companyId, id);
       if (!existing) return res.status(404).json({ error: 'Not found' });
+      // Repayments only make sense once the request is approved and active —
+      // PENDING/REJECTED/CANCELLED go through approve/reject/cancel instead.
+      if (existing.status !== 'ACTIVE' && existing.status !== 'REPAID') {
+        return res.status(400).json({ error: 'Loan is not active' });
+      }
 
-      const { amount, monthlyDeduction, amountRepaid, reason, dateGranted, status, notes } = req.body;
+      const { amountRepaid, notes } = req.body;
       const updates: any = { updatedAt: new Date().toISOString() };
-      if (amount !== undefined) updates.amount = Number(amount);
-      if (monthlyDeduction !== undefined) updates.monthlyDeduction = Number(monthlyDeduction);
       if (amountRepaid !== undefined) updates.amountRepaid = Number(amountRepaid);
-      if (reason !== undefined) updates.reason = String(reason);
-      if (dateGranted !== undefined) updates.dateGranted = dateGranted;
       if (notes !== undefined) updates.notes = String(notes);
-      if (status !== undefined) updates.status = status;
 
-      // A repayment that reaches the full amount closes the loan on its own —
-      // still overridable by an explicit status (e.g. a manual cancellation).
-      const nextAmount = updates.amount ?? existing.amount;
+      // A repayment that reaches the full amount closes the loan on its own.
       const nextRepaid = updates.amountRepaid ?? existing.amountRepaid;
-      if (status === undefined && nextAmount > 0 && nextRepaid >= nextAmount) {
+      if (existing.amount > 0 && nextRepaid >= existing.amount) {
         updates.status = 'REPAID';
       }
 
@@ -2783,40 +2853,124 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const perms = JSON.parse(req.user.permissions || '[]');
       const canManage = req.user.role === 'ADMIN' || perms.includes('MANAGE_LOANS_ADVANCES');
       let advances = await db.getAllAdvances(req.user.companyId);
-      if (!canManage) advances = advances.filter((a: any) => a.userId === req.user.id);
+      if (!canManage) advances = advances.filter((a: any) => a.userId === req.user.id || a.approverId === req.user.id);
       const users = await db.getAllUsers(req.user.companyId);
       res.json(advances.map((a: any) => ({
         ...a,
         userName: users.find((u: any) => u.id === a.userId)?.fullName || users.find((u: any) => u.id === a.userId)?.username || 'Inconnu',
+        approverName: users.find((u: any) => u.id === a.approverId)?.fullName || users.find((u: any) => u.id === a.approverId)?.username || 'Inconnu',
       })));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.post('/api/hr/advances', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+  app.post('/api/hr/advances', authenticate, requirePermission('CREATE_LOAN_REQUEST'), async (req: any, res: any) => {
     try {
-      const { userId, amount, reason, dateGranted, notes } = req.body;
-      if (!userId || !(Number(amount) > 0)) {
-        return res.status(400).json({ error: "L'employé et un montant positif sont obligatoires." });
+      const { amount, reason, dateGranted, approverId } = req.body;
+      if (!approverId || !(Number(amount) > 0)) {
+        return res.status(400).json({ error: 'Le responsable et un montant positif sont obligatoires.' });
       }
       const advance = await db.createAdvance(req.user.companyId, {
         id: Date.now(),
-        userId: Number(userId),
+        userId: req.user.id,
+        approverId: Number(approverId),
         amount: Number(amount),
         reason: String(reason || ''),
         dateGranted: dateGranted || new Date().toISOString().slice(0, 10),
-        status: 'ACTIVE',
-        notes: String(notes || ''),
-        createdBy: req.user.id,
+        status: 'PENDING',
+        notes: '',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
+      const requester = await db.getUserById(req.user.companyId, req.user.id);
       await notify(
-        req.user.companyId, Number(userId), 'ADVANCE_GRANTED', 'Avance accordée',
-        `Une avance de ${Number(amount).toLocaleString('fr-FR')} DT vous a été accordée.`,
+        req.user.companyId, Number(approverId), 'ADVANCE_REQUEST', 'Demande d\'avance à approuver',
+        `${requester?.fullName || requester?.username || 'Un collaborateur'} a demandé une avance de ${Number(amount).toLocaleString('fr-FR')} DT.`,
       );
       res.status(201).json(advance);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/advances/:id/approve', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const advance = await db.getAdvanceById(req.user.companyId, id);
+      if (!advance) return res.status(404).json({ error: 'Not found' });
+      if (advance.approverId !== req.user.id && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'You are not authorized to approve this request.' });
+      }
+      if (advance.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
+
+      const updated = await db.updateAdvance(req.user.companyId, id, {
+        status: 'ACTIVE',
+        approvedBy: req.user.id,
+        approvedAt: new Date().toISOString(),
+        approverComment: req.body.comment || '',
+        updatedAt: new Date().toISOString(),
+      });
+      await notify(
+        req.user.companyId, advance.userId, 'ADVANCE_DECISION', 'Avance approuvée',
+        `Votre demande d'avance de ${Number(advance.amount).toLocaleString('fr-FR')} DT a été approuvée.`,
+      );
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/advances/:id/reject', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { comment } = req.body;
+      if (!comment) return res.status(400).json({ error: 'Rejection reason required' });
+
+      const advance = await db.getAdvanceById(req.user.companyId, id);
+      if (!advance) return res.status(404).json({ error: 'Not found' });
+      if (advance.approverId !== req.user.id && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'You are not authorized to reject this request.' });
+      }
+      if (advance.status !== 'PENDING') return res.status(400).json({ error: 'Request is not pending' });
+
+      const updated = await db.updateAdvance(req.user.companyId, id, {
+        status: 'REJECTED',
+        approvedBy: req.user.id,
+        approvedAt: new Date().toISOString(),
+        rejectionReason: comment,
+        approverComment: comment,
+        updatedAt: new Date().toISOString(),
+      });
+      await notify(
+        req.user.companyId, advance.userId, 'ADVANCE_DECISION', 'Avance refusée',
+        `Votre demande d'avance de ${Number(advance.amount).toLocaleString('fr-FR')} DT a été refusée : ${comment}`,
+      );
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/advances/:id/cancel', authenticate, async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const advance = await db.getAdvanceById(req.user.companyId, id);
+      if (!advance) return res.status(404).json({ error: 'Not found' });
+
+      const perms = JSON.parse(req.user.permissions || '[]');
+      if (advance.userId !== req.user.id && !perms.includes('MANAGE_LOANS_ADVANCES') && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      if (advance.status !== 'PENDING' && advance.status !== 'ACTIVE') {
+        return res.status(400).json({ error: 'Request cannot be cancelled' });
+      }
+
+      const updated = await db.updateAdvance(req.user.companyId, id, {
+        status: 'CANCELLED',
+        updatedAt: new Date().toISOString(),
+      });
+      res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -2827,14 +2981,13 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const id = parseInt(req.params.id, 10);
       const existing = await db.getAdvanceById(req.user.companyId, id);
       if (!existing) return res.status(404).json({ error: 'Not found' });
+      if (existing.status !== 'ACTIVE') {
+        return res.status(400).json({ error: 'Advance is not active' });
+      }
 
-      const { amount, reason, dateGranted, status, notes } = req.body;
-      const updates: any = { updatedAt: new Date().toISOString() };
-      if (amount !== undefined) updates.amount = Number(amount);
-      if (reason !== undefined) updates.reason = String(reason);
-      if (dateGranted !== undefined) updates.dateGranted = dateGranted;
+      const { notes } = req.body;
+      const updates: any = { status: 'REPAID', updatedAt: new Date().toISOString() };
       if (notes !== undefined) updates.notes = String(notes);
-      if (status !== undefined) updates.status = status;
 
       const updated = await db.updateAdvance(req.user.companyId, id, updates);
       res.json(updated);
