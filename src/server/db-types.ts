@@ -66,6 +66,16 @@ export interface Database {
   createAbsenceAuthorization(companyId: string, auth: any): Promise<any>;
   updateAbsenceAuthorization(companyId: string, id: number, updates: any): Promise<any | null>;
 
+  getAllLoans(companyId: string): Promise<any[]>;
+  getLoanById(companyId: string, id: number): Promise<any | undefined>;
+  createLoan(companyId: string, loan: any): Promise<any>;
+  updateLoan(companyId: string, id: number, updates: any): Promise<any | null>;
+
+  getAllAdvances(companyId: string): Promise<any[]>;
+  getAdvanceById(companyId: string, id: number): Promise<any | undefined>;
+  createAdvance(companyId: string, advance: any): Promise<any>;
+  updateAdvance(companyId: string, id: number, updates: any): Promise<any | null>;
+
   getAllLeaveBalances(companyId: string): Promise<any[]>;
   getLeaveBalanceByUserId(companyId: string, userId: number): Promise<any>;
   updateLeaveBalance(companyId: string, userId: number, updates: any): Promise<any>;
@@ -203,6 +213,10 @@ export const emptyDb = () => ({
   invoices: [],
   leaveRequests: [],
   absenceAuthorizations: [],
+  // Gestion des prêts et avances — employer-managed records, not a
+  // collaborator-initiated request/approval workflow like leaves/absences.
+  loans: [],
+  advances: [],
   leaveBalances: [],
   timeEntries: [],
   // Direct messages between two users (chat).

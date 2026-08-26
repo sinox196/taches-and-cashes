@@ -67,7 +67,7 @@ export const MissionsManagement: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex flex-col space-y-6 max-w-[900px] w-full mx-auto p-6 lg:p-8">
+    <div className="flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[900px] w-full mx-auto p-4 sm:p-6 lg:p-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[20px] font-bold text-gray-800 tracking-tight flex items-center gap-2">

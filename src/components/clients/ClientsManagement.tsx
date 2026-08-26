@@ -44,6 +44,9 @@ export interface Client {
 // A client saved before this list existed has `encaissements` stored as a
 // bare number — summed as-is rather than crashing, so existing data (this
 // app's own production included) still reads correctly.
+/** The ledger columns — right-aligned, tinted, and summed in the totals row. */
+const FINANCIAL_KEYS = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer'];
+
 const sumEncaissements = (entries: EncaissementEntry[] | number | undefined): number =>
   Array.isArray(entries) ? entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) : (Number(entries) || 0);
 
@@ -92,8 +95,8 @@ export const ClientsManagement: React.FC = () => {
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [sortField, setSortField] = useState<string>('createdAt');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortField, setSortField] = useState<string>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const handleSort = (key: string) => {
     if (sortField === key) {
@@ -105,7 +108,9 @@ export const ClientsManagement: React.FC = () => {
   };
 
   const [isColumnsOpen, setIsColumnsOpen] = useState(false);
-  
+  useEscapeToClose(() => setIsFilterOpen(false), isFilterOpen);
+  useEscapeToClose(() => setIsColumnsOpen(false), isColumnsOpen);
+
   // Default visible columns
   const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
     const saved = localStorage.getItem('clientsVisibleColumns');
@@ -127,6 +132,13 @@ export const ClientsManagement: React.FC = () => {
 
   const [filterKey, setFilterKey] = useState<string>('name');
   const [filterValue, setFilterValue] = useState<string>('');
+  /** The "Champ" picker is searchable rather than a plain <select> — there
+   *  can be dozens of custom fields once client-defined columns pile up. */
+  const [champQuery, setChampQuery] = useState('');
+  const [champOpen, setChampOpen] = useState(false);
+  /** The values that field actually holds, so "Valeur" is a pick, not a guess. */
+  const [valueOptions, setValueOptions] = useState<string[]>([]);
+  const [valueOpen, setValueOpen] = useState(false);
 
   const limit = 20;
 
@@ -140,6 +152,26 @@ export const ClientsManagement: React.FC = () => {
     }, 300);
     return () => clearTimeout(delayDebounceFn);
   }, [page, searchTerm, activeFilters, statusFilter, sortField, sortDir, selectedClients]);
+
+  // Suggestions for the filter's "Valeur" box. Debounced and server-side, the
+  // same way the client search is — the value set of a free-form custom field
+  // is unbounded, so it is never held in full on the client.
+  useEffect(() => {
+    if (!isFilterOpen || !filterKey || ['status', 'type'].includes(filterKey)) {
+      setValueOptions([]);
+      return;
+    }
+    let cancelled = false;
+    const h = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ field: filterKey, q: filterValue });
+        const res = await fetch(`/api/clients/field-values?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+        const body = await res.json();
+        if (!cancelled) setValueOptions(Array.isArray(body) ? body : []);
+      } catch { if (!cancelled) setValueOptions([]); }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(h); };
+  }, [isFilterOpen, filterKey, filterValue, token]);
 
   const fetchAvailableFields = async () => {
     try {
@@ -248,12 +280,17 @@ export const ClientsManagement: React.FC = () => {
     { key: 'country', label: 'Pays' },
     { key: 'status', label: 'Statut' },
     ...availableFields.map(f => ({ key: f, label: f }))
-  ];
+  ].sort((a, b) => a.label.localeCompare(b.label));
 
   const allTableColumns = [
     ...standardColumns,
     ...availableFields.map(f => ({ key: f, label: f, isCustom: true }))
   ];
+
+  // The "Affichage des colonnes" picker lists choices alphabetically for easy
+  // scanning, but the table's own column order (name first, actions last)
+  // is unrelated and stays exactly as defined in allTableColumns above.
+  const columnsPickerList = [...allTableColumns].sort((a, b) => a.label.localeCompare(b.label));
 
   const filteredClients = clients;
 
@@ -366,7 +403,7 @@ export const ClientsManagement: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex flex-col space-y-6 max-w-[1200px] w-full mx-auto p-6 lg:p-8">
+    <div className="flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1200px] w-full mx-auto p-4 sm:p-6 lg:p-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -418,7 +455,14 @@ export const ClientsManagement: React.FC = () => {
           <div className="flex gap-2 relative">
             <div className="relative">
               <button
-                onClick={() => { setIsFilterOpen(!isFilterOpen); setIsColumnsOpen(false); }}
+                onClick={() => {
+                  const opening = !isFilterOpen;
+                  setIsFilterOpen(opening);
+                  setIsColumnsOpen(false);
+                  // Opens blank so the whole field list is offered — pre-filling
+                  // it with the current field's label filtered everything else out.
+                  if (opening) { setChampQuery(''); setFilterValue(''); }
+                }}
                 className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <Filter className="w-4 h-4" />
@@ -435,17 +479,34 @@ export const ClientsManagement: React.FC = () => {
                   </div>
 
                   <div className="space-y-3">
-                    <div>
+                    <div className="relative">
                       <label className="block text-[12px] font-medium text-gray-700 mb-1">Champ</label>
-                      <select
-                        value={filterKey}
-                        onChange={(e) => setFilterKey(e.target.value)}
+                      <input
+                        type="text"
+                        value={champQuery}
+                        onChange={(e) => { setChampQuery(e.target.value); setChampOpen(true); }}
+                        onFocus={() => setChampOpen(true)}
+                        onBlur={() => setTimeout(() => setChampOpen(false), 150)}
+                        placeholder="Rechercher un champ..."
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-navy"
-                      >
-                        {allFilterableFields.map(f => (
-                          <option key={f.key} value={f.key}>{f.label}</option>
-                        ))}
-                      </select>
+                      />
+                      {champOpen && (
+                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                          {allFilterableFields.filter(f => f.label.toLowerCase().includes(champQuery.toLowerCase())).length === 0 ? (
+                            <div className="px-3 py-2 text-[12px] text-gray-500 italic">Aucun champ trouvé.</div>
+                          ) : allFilterableFields
+                            .filter(f => f.label.toLowerCase().includes(champQuery.toLowerCase()))
+                            .map(f => (
+                              <div
+                                key={f.key}
+                                onMouseDown={(e) => { e.preventDefault(); setFilterKey(f.key); setChampQuery(f.label); setChampOpen(false); setFilterValue(''); }}
+                                className={`px-3 py-2 text-[13px] cursor-pointer hover:bg-gray-50 ${f.key === filterKey ? 'bg-gray-50 font-semibold text-navy' : 'text-gray-700'}`}
+                              >
+                                {f.label}
+                              </div>
+                            ))}
+                        </div>
+                      )}
                     </div>
 
                     <div>
@@ -471,13 +532,33 @@ export const ClientsManagement: React.FC = () => {
                           <option value="Company">Entreprise</option>
                         </select>
                       ) : (
-                        <input
-                          type="text"
-                          value={filterValue}
-                          onChange={(e) => setFilterValue(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-navy"
-                          placeholder="Rechercher..."
-                        />
+                        // Free-text, but suggesting the values this field
+                        // actually holds — typing stays possible for a partial
+                        // match, while the list turns guesswork into a pick.
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={filterValue}
+                            onChange={(e) => { setFilterValue(e.target.value); setValueOpen(true); }}
+                            onFocus={() => setValueOpen(true)}
+                            onBlur={() => setTimeout(() => setValueOpen(false), 150)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none focus:ring-2 focus:ring-navy"
+                            placeholder="Rechercher ou sélectionner..."
+                          />
+                          {valueOpen && valueOptions.length > 0 && (
+                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                              {valueOptions.map(v => (
+                                <div
+                                  key={v}
+                                  onMouseDown={(e) => { e.preventDefault(); setFilterValue(v); setValueOpen(false); }}
+                                  className="px-3 py-2 text-[13px] text-gray-700 cursor-pointer hover:bg-gray-50"
+                                >
+                                  {v}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -511,7 +592,7 @@ export const ClientsManagement: React.FC = () => {
                     </button>
                   </div>
                   <div className="space-y-2">
-                    {allTableColumns.map(col => (
+                    {columnsPickerList.map(col => (
                       <label key={col.key} className="flex items-center gap-3 cursor-pointer group" onClick={(e) => { e.preventDefault(); toggleColumn(col.key); }}>
                         <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${visibleColumns.includes(col.key) ? 'bg-navy border-navy' : 'border-gray-300 bg-white group-hover:border-gray-400'}`}>
                           {visibleColumns.includes(col.key) && <Check className="w-3 h-3 text-white" />}
@@ -571,13 +652,13 @@ export const ClientsManagement: React.FC = () => {
         )}
       </div>
       {/* List */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm flex-1 flex flex-col">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm flex-1 flex flex-col min-h-0">
         {isLoading ? (
           <div className="p-8 flex justify-center">
             <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         ) : (
-          <div className="max-h-[65vh] overflow-y-auto overflow-x-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
               <table className="w-full text-left border-collapse whitespace-nowrap min-w-max">
                 {/* Bloc en-tête figé: column labels + "Total Général" both stay
                     pinned while the body scrolls, so neither the titles nor
@@ -588,9 +669,15 @@ export const ClientsManagement: React.FC = () => {
                       <th
                         key={col.key}
                         onClick={() => handleSort(col.key)}
-                        className="h-11 sticky top-0 z-20 bg-[#F9FAFB] px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors group select-none"
+                        // The name column is pinned left (Actions is pinned
+                        // right) so the row stays identifiable while scrolling
+                        // a wide sheet sideways. z-40 beats the z-30 of the
+                        // right-pinned Actions cell it can slide under.
+                        className={`h-11 sticky top-0 bg-[#F9FAFB] px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors group select-none ${
+                          col.key === 'name' ? 'left-0 z-40 shadow-[1px_0_0_0_theme(colors.gray.200)]' : 'z-20'
+                        } ${FINANCIAL_KEYS.includes(col.key) ? 'bg-emerald-50/60' : ''}`}
                       >
-                        <div className={`flex items-center gap-1 ${['soldeAnterieur', 'encaissements', 'montantFacture', 'resteAPayer'].includes(col.key) ? 'justify-end' : ''}`}>
+                        <div className={`flex items-center gap-1 ${FINANCIAL_KEYS.includes(col.key) ? 'justify-end' : ''}`}>
                           {col.label}
                           <div className={`flex flex-col opacity-0 group-hover:opacity-100 transition-opacity ${sortField === col.key ? '!opacity-100' : ''}`}>
                             <ChevronRight className={`w-3 h-3 -rotate-90 -mb-1.5 ${sortField === col.key && sortDir === 'asc' ? 'text-gray-900' : 'text-gray-400'}`} />
@@ -605,9 +692,14 @@ export const ClientsManagement: React.FC = () => {
                   </tr>
                   <tr className="bg-gray-100 border-b border-gray-200">
                     {allTableColumns.filter(c => visibleColumns.includes(c.key)).map((col, i) => {
-                      const isFinancial = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer'].includes(col.key);
+                      const isFinancial = FINANCIAL_KEYS.includes(col.key);
                       return (
-                        <td key={col.key} className="h-11 sticky top-11 z-20 bg-gray-100 px-5 py-2.5 text-[12px]">
+                        <td
+                          key={col.key}
+                          className={`h-11 sticky top-11 bg-gray-100 px-5 py-2.5 text-[12px] ${
+                            col.key === 'name' ? 'left-0 z-40 shadow-[1px_0_0_0_theme(colors.gray.200)]' : 'z-20'
+                          }`}
+                        >
                           {i === 0 ? (
                             <span className="font-bold text-gray-800">Total Général</span>
                           ) : isFinancial ? (
@@ -631,7 +723,10 @@ export const ClientsManagement: React.FC = () => {
                       {allTableColumns.filter(c => visibleColumns.includes(c.key)).map(col => {
                         if (col.key === 'name') {
                           return (
-                            <td key="name" className="px-5 py-4">
+                            <td
+                              key="name"
+                              className="px-5 py-3 sticky left-0 z-10 bg-white group-hover:bg-gray-50 transition-colors shadow-[1px_0_0_0_theme(colors.gray.200)]"
+                            >
                               <div className="flex items-center gap-3">
                                 <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 ${client.type === 'Company' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
                                   {client.type === 'Company' ? <Building2 className="w-4 h-4" /> : <UserIcon className="w-4 h-4" />}
@@ -668,7 +763,7 @@ export const ClientsManagement: React.FC = () => {
                           const total = sumEncaissements(client.encaissements);
                           const entries = Array.isArray(client.encaissements) ? client.encaissements : [];
                           return (
-                            <td key={col.key} className="px-5 py-4 text-right font-mono text-gray-700">
+                            <td key={col.key} className="px-5 py-3 text-right font-mono text-gray-700 bg-emerald-50/25">
                               {formatCostTND(total)}
                               {entries.length > 0 && (
                                 <div className="text-[10px] text-gray-400 font-sans mt-1 space-y-0.5">
@@ -685,8 +780,16 @@ export const ClientsManagement: React.FC = () => {
                         }
                         if (col.key === 'soldeAnterieur' || col.key === 'montantFacture' || col.key === 'resteAPayer') {
                           const amount = Number(client[col.key as keyof Client]) || 0;
+                          // Reste à payer is the figure that actually gets acted
+                          // on, so it reads darker than its two inputs.
+                          const isBalance = col.key === 'resteAPayer';
                           return (
-                            <td key={col.key} className="px-5 py-4 text-right font-mono text-gray-700">
+                            <td
+                              key={col.key}
+                              className={`px-5 py-3 text-right font-mono bg-emerald-50/25 ${
+                                isBalance ? 'font-semibold text-gray-900' : 'text-gray-700'
+                              }`}
+                            >
                               {formatCostTND(amount)}
                             </td>
                           );
@@ -716,10 +819,11 @@ export const ClientsManagement: React.FC = () => {
                       })}
                       
                       <td className="px-5 py-4 text-right sticky right-0 bg-white group-hover:bg-gray-50 z-10 transition-colors">
-                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex justify-end gap-2">
                           {hasPermission('EDIT_CLIENTS') && (
                             <button
                               onClick={(e) => handleOpenEdit(client, e)}
+                              title="Modifier"
                               className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
                             >
                               <Pencil className="w-4 h-4" />
@@ -728,6 +832,7 @@ export const ClientsManagement: React.FC = () => {
                           {hasPermission('DELETE_CLIENTS') && client.status !== 'Inactive' && (
                             <button
                               onClick={(e) => handleDelete(client.id, e)}
+                              title="Supprimer"
                               className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                             >
                               <Trash2 className="w-4 h-4" />

@@ -137,7 +137,7 @@ export const MyDashboard: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-canvas">
-      <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1400px] w-full mx-auto">
+      <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div>
             <h1 className="text-[20px] font-bold text-gray-900 tracking-tight">Mon tableau de bord</h1>

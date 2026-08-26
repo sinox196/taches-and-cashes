@@ -197,11 +197,13 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
             </section>
 
             <section className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div>
                 <h3 className="text-[11px] font-extrabold text-gray-800 uppercase tracking-[0.05em]">
                   Informations bancaires
                 </h3>
-                <span className="text-[10.5px] text-gray-400">Réglement reçu sur la banque par défaut</span>
+                <p className="text-[11.5px] text-gray-500 mt-1">
+                  Ajoutez vos comptes bancaires et sélectionnez, pour chaque facture, le compte sur lequel vous souhaitez recevoir le règlement.
+                </p>
               </div>
 
               {form.banks.length === 0 && (

@@ -52,6 +52,16 @@ const frDate = (iso: string) => {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
 };
 
+/**
+ * The legal sequence restarts every calendar year, so its own number alone
+ * ("0006") is ambiguous across years — printed as "0006 - 2026". "Autre
+ * document" carries a free reference outside that sequence and is left as-is.
+ */
+const displayNumber = (inv: any) =>
+  inv.documentKind === 'FACTURE_LEGALE' && inv.issueDate
+    ? `${inv.number} - ${String(inv.issueDate).slice(0, 4)}`
+    : inv.number;
+
 /** Filesystem-safe document name, no extension: "Facture-0001-Alpha-SA". */
 export const documentName = (invoice: any) =>
   [invoice.title, invoice.number, invoice.clientName]
@@ -92,7 +102,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   doc.setFont('helvetica', 'bold'); doc.setFontSize(20); setInk(INK);
   text(invoice.title || 'Facture', RIGHT, y + 6, { align: 'right' });
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); setInk(MUTED);
-  text(`N° ${invoice.number || ''}`, RIGHT, y + 12, { align: 'right' });
+  text(`N° ${displayNumber(invoice) || ''}`, RIGHT, y + 12, { align: 'right' });
 
   // Required wording for a suspended-VAT sale, printed right under the
   // document number so it can never be missed or separated from it.
@@ -105,32 +115,32 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     text(`Et bon de commande N°${invoice.bonCommandeNumber || 'xxxxxxxxx'}`, RIGHT, y + 25, { align: 'right' });
   }
 
-  // Logo, top-left, beside the issuer text rather than above it — that keeps
-  // the header's total height unchanged whether or not a logo is configured.
-  const companyX = block?.logo ? M + 28 : M;
+  // Logo, top-left, with the company name stacked underneath it.
+  const LOGO_H = 16;
+  let logoDrawn = false;
   if (block?.logo) {
     try {
       const fmt = /^data:image\/png/.test(block.logo) ? 'PNG'
         : /^data:image\/webp/.test(block.logo) ? 'WEBP' : 'JPEG';
-      doc.addImage(block.logo, fmt, M, y, 24, 16, undefined, 'FAST');
+      doc.addImage(block.logo, fmt, M, y, 24, LOGO_H, undefined, 'FAST');
+      logoDrawn = true;
     } catch {
       /* a corrupt data URL must not take the whole document down */
     }
   }
 
-  // Issuer, top-left, from the settings block.
+  // Issuer: the company name alone, in bold, directly below the logo. Address,
+  // MF and contact details are printed once in the footer instead — repeating
+  // them here made the header heavy for no gain.
   if (block?.company?.name) {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); setInk(INK);
-    text(block.company.name, companyX, y + 5);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setInk(MUTED);
-    let cy = y + 10;
-    for (const line of wrap(block.company.address, 80 - (companyX - M))) { text(line, companyX, cy); cy += 4; }
-    if (block.company.taxId) { text(`MF : ${block.company.taxId}`, companyX, cy); cy += 4; }
-    const contact = [block.company.email, block.company.phone].filter(Boolean).join('  ·  ');
-    if (contact) text(contact, companyX, cy);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); setInk(INK);
+    text(block.company.name, M, y + (logoDrawn ? LOGO_H + 5 : 6));
   }
 
-  y += suspended ? 34 : 24;
+  // Stacking the name under the logo makes the left column taller than the
+  // right one, so the rule below has to clear both.
+  const headerBlockH = logoDrawn && block?.company?.name ? LOGO_H + 9 : 24;
+  y += Math.max(suspended ? 34 : 24, headerBlockH);
   rule(y);
   y += 8;
 
@@ -186,12 +196,19 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   };
   drawHeader();
 
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK);
+  // Désignation is the line's primary content, sized a notch above the other
+  // cells (10pt vs 9pt) for readability — wrapped at that same larger size so
+  // the measured line breaks match what's actually drawn.
+  const DESIGNATION_SIZE = 10;
+  const BODY_SIZE = 9;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(BODY_SIZE); setInk(INK);
   for (const l of invoice.lines || []) {
+    doc.setFontSize(DESIGNATION_SIZE);
     const nameLines = wrap(l.designation || '', cols[0].w - 5);
-    const rowH = Math.max(6.5, nameLines.length * 4.2 + 2.5);
+    doc.setFontSize(BODY_SIZE);
+    const rowH = Math.max(7, nameLines.length * 4.6 + 2.5);
     // New page before a row would run off the sheet, header repeated.
-    if (y + rowH > 250) { doc.addPage(); y = M; drawHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK); }
+    if (y + rowH > 250) { doc.addPage(); y = M; drawHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(BODY_SIZE); setInk(INK); }
     let x = M + 2;
     for (const c of cols) {
       const raw = c.k === 'designation' ? null
@@ -200,8 +217,10 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
         : c.k === 'vat' ? (l.vatExempt ? 'Non soumis' : `${Math.round((l.vatRate || 0) * 100)} %`)
         : money(l.montantHT);
       if (raw === null) {
-        let ny = y + 4.5;
-        for (const line of nameLines) { text(line, x, ny); ny += 4.2; }
+        doc.setFontSize(DESIGNATION_SIZE);
+        let ny = y + 4.8;
+        for (const line of nameLines) { text(line, x, ny); ny += 4.6; }
+        doc.setFontSize(BODY_SIZE);
       } else {
         text(raw, x + c.w - 4, y + 4.5, { align: 'right' });
       }
@@ -331,8 +350,9 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     fy += 4;
 
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); setInk(INK);
-    // Each piece of company info on its own line, not joined into a paragraph
-    // and re-wrapped — a MF or phone number wrapping mid-line elsewhere reads
+    // The full issuer identity lives here, not in the header (which carries
+    // the company name alone). Each piece on its own line, not joined into a
+    // paragraph and re-wrapped — a MF or phone number wrapping mid-line reads
     // as broken data entry.
     const companyLines = [
       block?.company?.name,

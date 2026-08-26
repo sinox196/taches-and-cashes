@@ -25,13 +25,15 @@ export const Header: React.FC<HeaderProps> = ({
   const initials = displayUserName.substring(0, 2).toUpperCase();
 
   return (
-    <header className="h-[60px] bg-white border-b border-gray-200 flex items-center justify-between px-6 md:px-8 sticky top-0 z-20 font-sans">
-      {/* Left section with hamburger menu */}
+    <header className="h-[60px] shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 md:px-8 sticky top-0 z-20 font-sans">
+      {/* Left: drawer toggle. Hidden from `lg` up, where the rail is static
+          and the button would open nothing. */}
       <div className="flex items-center gap-4">
         <button
           onClick={onToggleSidebar}
-          className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors"
+          className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors lg:hidden"
           title="Menu"
+          aria-label="Ouvrir le menu"
         >
           <Menu className="w-5 h-5" />
         </button>

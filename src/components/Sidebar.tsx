@@ -8,7 +8,7 @@ import {
   Receipt,
   Users2,
   ChevronRight,
-  ShieldAlert,
+  X,
   Layers,
   Globe,
   MessageCircle,
@@ -24,12 +24,17 @@ interface SidebarProps {
   collapsed?: boolean;
   /** Unread chat messages, shown as a badge on the Messages nav item. */
   unreadMessages?: number;
+  /** Mobile drawer state. Ignored from `lg` up, where the rail is always shown. */
+  open?: boolean;
+  onClose?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeItem = 'Time Tracking',
   onSelectItem,
   unreadMessages = 0,
+  open = false,
+  onClose,
 }) => {
   const { hasPermission, user } = useAuth();
   const { t, language, setLanguage } = useLanguage();
@@ -39,18 +44,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // (MyDashboard) — the routing decision lives in App.tsx.
   const mainNavItems: { id: string; label: string; icon: any; hasChevron: boolean; badge?: number }[] = [
     { id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false },
+    ...(hasPermission('MANAGE_USERS') ? [{ id: 'Users', label: t('nav.users'), icon: Users2, hasChevron: false }] : []),
+    ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
     ...(hasPermission('VIEW_CLIENTS') ? [{ id: 'Clients', label: t('nav.clients'), icon: Users, hasChevron: false }] : []),
     { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
-    { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
-    ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
     ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Ressources métier', icon: FileCheck2, hasChevron: false }] : []),
+    { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
     ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Cash', icon: Receipt, hasChevron: false }] : []),
-    ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: Users2, hasChevron: true }] : []),
+    // UserCheck, not Users2: Équipe took the plain "group of people" mark, and
+    // two nav items sharing one icon is unreadable at 16px.
+    ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: UserCheck, hasChevron: true }] : []),
   ];
-
-  if (hasPermission('MANAGE_USERS')) {
-    mainNavItems.push({ id: 'Users', label: t('nav.users'), icon: ShieldAlert, hasChevron: false });
-  }
 
   // Orthogonal to any company-scoped permission: runs the platform itself
   // (confirms other companies' payments), not this user's own company.
@@ -59,8 +63,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }
 
   return (
+    <>
+      {/* Scrim — only ever rendered on mobile, where the rail overlays content. */}
+      {open && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm lg:hidden"
+          aria-hidden="true"
+        />
+      )}
     <aside
-      className="w-[212px] min-w-[212px] bg-navy text-white flex flex-col justify-between h-screen sticky top-0 z-30 select-none font-sans flex-shrink-0"
+      className={`w-[212px] min-w-[212px] bg-navy text-white flex flex-col justify-between h-screen select-none font-sans flex-shrink-0
+        fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-out
+        ${open ? 'translate-x-0' : '-translate-x-full'}
+        lg:sticky lg:top-0 lg:z-30 lg:translate-x-0`}
     >
       {/* Top Branding & Nav */}
       <div>
@@ -72,6 +88,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span className="text-[14px] font-extrabold tracking-tight text-white truncate">
             Tâches <span className="text-turquoise">&amp;</span> Cash
           </span>
+          {/* Closing the drawer needs a target inside it too — reaching the
+              scrim behind a full-height rail is awkward on a phone. */}
+          <button
+            onClick={onClose}
+            className="ml-auto p-1 -mr-1 text-white/60 hover:text-white rounded lg:hidden"
+            aria-label="Fermer le menu"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Navigation List */}
@@ -83,7 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
-                onClick={() => onSelectItem?.(item.id)}
+                onClick={() => { onSelectItem?.(item.id); onClose?.(); }}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-[9px] text-[12.5px] transition-all group ${
                   isActive
                     ? 'bg-white/10 text-white font-bold'
@@ -124,5 +149,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
     </aside>
+    </>
   );
 };

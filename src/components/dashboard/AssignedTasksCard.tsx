@@ -86,7 +86,7 @@ export const AssignedTasksCard: React.FC = () => {
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
       <div className="flex items-center gap-2 mb-1">
         <ClipboardCheck className="w-4 h-4 text-blue-600" />
-        <span className="text-[13px] font-semibold text-gray-800">Tâches assignées</span>
+        <span className="text-[13px] font-semibold text-gray-800">Tâches planifiées</span>
         <span className="text-[10px] font-bold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5">{items.length}</span>
       </div>
       <p className="text-[11px] text-gray-500 mb-3">

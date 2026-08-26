@@ -172,10 +172,12 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     <div className="min-h-screen bg-white font-sans antialiased text-gray-900">
       {/* Header */}
       <header className="sticky top-0 z-50 bg-white/[0.88] backdrop-blur-[10px] border-b border-[#E6E9EE]">
-        <div className="max-w-[1280px] mx-auto px-6 sm:px-10 h-[84px] flex items-center justify-between gap-6">
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-10 h-[72px] sm:h-[84px] flex items-center justify-between gap-3 sm:gap-6">
           <button onClick={goHome} className="flex items-center gap-2 shrink-0">
             <Logo size={28} variant="color" />
-            <span className="text-[15px] font-extrabold tracking-tight text-navy whitespace-nowrap">
+            {/* The wordmark is dropped on the narrowest phones to buy back the
+                width the auth buttons need — the mark alone still identifies it. */}
+            <span className="hidden min-[400px]:inline text-[15px] font-extrabold tracking-tight text-navy whitespace-nowrap">
               Tâches <span className="text-turquoise">&amp;</span> Cash
             </span>
           </button>
@@ -187,22 +189,27 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <a href={`mailto:${CONTACT_EMAIL}`} className="text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
           </nav>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            {/* Always visible: an existing user on a phone has no other way in.
+                It used to be hidden below 561px, which locked them out entirely. */}
             <button
               onClick={onLogin}
-              className="hidden min-[561px]:inline-block text-[14px] font-semibold text-navy px-2 whitespace-nowrap"
+              className="text-[13px] sm:text-[14px] font-semibold text-navy px-2 whitespace-nowrap"
             >
               Se connecter
             </button>
+            {/* Dropped on small screens: it opens the same signup modal as
+                "Essai gratuit", just on a different plan, so it's the one of
+                the three that costs nothing to lose. */}
             <button
               onClick={() => setModalPlan('Freelance')}
-              className="px-4 py-2.5 rounded-[10px] text-[14px] font-bold text-navy bg-white border-[1.5px] border-[#E6E9EE] hover:border-navy transition-colors whitespace-nowrap"
+              className="hidden min-[561px]:inline-block px-4 py-2.5 rounded-[10px] text-[14px] font-bold text-navy bg-white border-[1.5px] border-[#E6E9EE] hover:border-navy transition-colors whitespace-nowrap"
             >
               Créer un compte
             </button>
             <button
               onClick={() => setModalPlan('Équipe')}
-              className="px-[18px] py-[11px] rounded-[10px] text-[14px] font-bold text-white bg-navy hover:bg-turquoise transition-colors whitespace-nowrap"
+              className="px-3 sm:px-[18px] py-2.5 sm:py-[11px] rounded-[10px] text-[13px] sm:text-[14px] font-bold text-white bg-navy hover:bg-turquoise transition-colors whitespace-nowrap"
             >
               Essai gratuit
             </button>

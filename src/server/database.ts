@@ -59,7 +59,7 @@ export async function initDb(): Promise<Database> {
  */
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
-  'absenceAuthorizations', 'leaveBalances', 'timeEntries', 'messages',
+  'absenceAuthorizations', 'loans', 'advances', 'leaveBalances', 'timeEntries', 'messages',
   'taskAssignments', 'notifications', 'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
@@ -76,6 +76,8 @@ async function initJsonDb(): Promise<Database> {
     if (!db.invoices) db.invoices = [];
     if (!db.leaveRequests) db.leaveRequests = [];
     if (!db.absenceAuthorizations) db.absenceAuthorizations = [];
+    if (!db.loans) db.loans = [];
+    if (!db.advances) db.advances = [];
     if (!db.leaveBalances) db.leaveBalances = [];
     if (!db.timeEntries) db.timeEntries = [];
     if (!db.messages) db.messages = [];
@@ -104,6 +106,17 @@ async function initJsonDb(): Promise<Database> {
     const legacySettings = db.settingsByCompany.find((s: any) => s.id === LEGACY_COMPANY_ID);
     if (legacySettings && !legacySettings.employerCharges) {
       legacySettings.employerCharges = defaultSettings().employerCharges;
+    }
+
+    // A settings row that predates the per-year invoice sequence has no
+    // invoiceCounterYear yet. Treat an already-in-progress counter as
+    // belonging to the current year rather than letting nextInvoiceNumber()
+    // read the missing year as "stale" and wrongly reset it to 0001 — the
+    // same backfill-not-reset care the Postgres migration takes.
+    for (const row of db.settingsByCompany) {
+      if (row.invoiceCounterYear === undefined && typeof row.invoiceCounter === 'number' && row.invoiceCounter > 0) {
+        row.invoiceCounterYear = new Date().getFullYear();
+      }
     }
 
     // Ensure the legacy cabinet's own company row exists before backfilling —
@@ -299,9 +312,16 @@ async function initJsonDb(): Promise<Database> {
      */
     nextInvoiceNumber: async (companyId: string) => {
       const settingsRow = ensureCompanySettings(companyId);
-      const current = typeof settingsRow.invoiceCounter === 'number' ? settingsRow.invoiceCounter : 0;
+      const year = new Date().getFullYear();
+      // The sequence restarts at 0001 for a new calendar year — a company
+      // whose counter belongs to a past year gets reset rather than carried
+      // forward.
+      const current = settingsRow.invoiceCounterYear === year && typeof settingsRow.invoiceCounter === 'number'
+        ? settingsRow.invoiceCounter
+        : 0;
       const next = current + 1;
       settingsRow.invoiceCounter = next;
+      settingsRow.invoiceCounterYear = year;
       await saveDb();
       return String(next).padStart(4, '0');
     },
@@ -336,6 +356,38 @@ async function initJsonDb(): Promise<Database> {
       db.absenceAuthorizations[index] = { ...db.absenceAuthorizations[index], ...updates };
       await saveDb();
       return db.absenceAuthorizations[index];
+    },
+
+    getAllLoans: async (companyId: string) => scoped(db.loans, companyId),
+    getLoanById: async (companyId: string, id: number) => findScoped(db.loans, companyId, id),
+    createLoan: async (companyId: string, loan: any) => {
+      const row = { ...loan, companyId };
+      db.loans.push(row);
+      await saveDb();
+      return row;
+    },
+    updateLoan: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.loans, companyId, id);
+      if (index === -1) return null;
+      db.loans[index] = { ...db.loans[index], ...updates };
+      await saveDb();
+      return db.loans[index];
+    },
+
+    getAllAdvances: async (companyId: string) => scoped(db.advances, companyId),
+    getAdvanceById: async (companyId: string, id: number) => findScoped(db.advances, companyId, id),
+    createAdvance: async (companyId: string, advance: any) => {
+      const row = { ...advance, companyId };
+      db.advances.push(row);
+      await saveDb();
+      return row;
+    },
+    updateAdvance: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.advances, companyId, id);
+      if (index === -1) return null;
+      db.advances[index] = { ...db.advances[index], ...updates };
+      await saveDb();
+      return db.advances[index];
     },
 
     getAllLeaveBalances: async (companyId: string) => scoped(db.leaveBalances, companyId).map(normalizeBalance),

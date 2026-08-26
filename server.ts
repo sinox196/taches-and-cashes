@@ -989,6 +989,36 @@ async function startServer() {
     }
   });
 
+  /**
+   * The distinct values a given field actually holds, so the Clients filter
+   * can offer real choices instead of a blind free-text box. Works for a
+   * native column or a customFields key — same lookup order the list
+   * endpoint's own filtering uses. Capped: this feeds a picker, not an export.
+   */
+  app.get('/api/clients/field-values', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
+    try {
+      const field = String(req.query.field || '');
+      if (!field) return res.json([]);
+      const q = String(req.query.q || '').toLowerCase();
+      const clients = await db.getAllClients(req.user.companyId);
+
+      const values = new Set<string>();
+      for (const c of clients) {
+        const raw = c[field] !== undefined && c[field] !== null && c[field] !== ''
+          ? c[field]
+          : c.customFields?.[field];
+        if (raw === undefined || raw === null) continue;
+        const value = String(raw).trim();
+        if (!value) continue;
+        if (q && !value.toLowerCase().includes(q)) continue;
+        values.add(value);
+      }
+      res.json(Array.from(values).sort((a, b) => a.localeCompare(b)).slice(0, 50));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET /api/clients/:id
   app.get('/api/clients/:id', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
     try {
@@ -2123,7 +2153,22 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         : all;
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
       const offset = parseInt(req.query.offset, 10) || 0;
-      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset });
+
+      // Sums across the whole filtered set, not just the returned page — this
+      // is what the Cash table's frozen "Total Général" row shows. Grouped by
+      // currency because a document can be issued in USD/EUR: adding those to
+      // dinars would produce a number that means nothing.
+      const totalsByCurrency: Record<string, { totalHT: number; totalNetToPay: number; count: number }> = {};
+      for (const inv of filtered) {
+        const currency = String(inv.currency || 'TND');
+        const acc = totalsByCurrency[currency] || { totalHT: 0, totalNetToPay: 0, count: 0 };
+        acc.totalHT = round3(acc.totalHT + num(Number(inv.totalHT), 0));
+        acc.totalNetToPay = round3(acc.totalNetToPay + num(Number(inv.totalNetToPay), 0));
+        acc.count += 1;
+        totalsByCurrency[currency] = acc;
+      }
+
+      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset, totalsByCurrency });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -2334,6 +2379,21 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       res.json(
         approvers
           .map((u: any) => ({ id: u.id, name: u.username, role: u.role }))
+          .sort((a: any, b: any) => a.name.localeCompare(b.name)),
+      );
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Every employee, for the prêts/avances picker — unlike /api/hr/approvers
+  // (HR_APPROVER_ROLES only), a loan or advance can be granted to anyone.
+  app.get('/api/hr/employees', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const users = await db.getAllUsers(req.user.companyId);
+      res.json(
+        users
+          .map((u: any) => ({ id: u.id, name: u.fullName || u.username, role: u.role }))
           .sort((a: any, b: any) => a.name.localeCompare(b.name)),
       );
     } catch (error) {
@@ -2629,6 +2689,154 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: 'CANCELLED',
         updatedAt: new Date().toISOString()
       });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---- Gestion des prêts et avances --------------------------------------
+  // Employer-managed records, not a collaborator-initiated request/approval
+  // workflow like leaves/absences above: someone with MANAGE_LOANS_ADVANCES
+  // (ADMIN always qualifies) grants and updates a loan/advance for any
+  // employee; anyone with VIEW_HR sees their own.
+
+  app.get('/api/hr/loans', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const perms = JSON.parse(req.user.permissions || '[]');
+      const canManage = req.user.role === 'ADMIN' || perms.includes('MANAGE_LOANS_ADVANCES');
+      let loans = await db.getAllLoans(req.user.companyId);
+      if (!canManage) loans = loans.filter((l: any) => l.userId === req.user.id);
+      const users = await db.getAllUsers(req.user.companyId);
+      res.json(loans.map((l: any) => ({
+        ...l,
+        userName: users.find((u: any) => u.id === l.userId)?.fullName || users.find((u: any) => u.id === l.userId)?.username || 'Inconnu',
+      })));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/loans', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const { userId, amount, monthlyDeduction, reason, dateGranted, notes } = req.body;
+      if (!userId || !(Number(amount) > 0)) {
+        return res.status(400).json({ error: "L'employé et un montant positif sont obligatoires." });
+      }
+      const loan = await db.createLoan(req.user.companyId, {
+        id: Date.now(),
+        userId: Number(userId),
+        amount: Number(amount),
+        monthlyDeduction: Number(monthlyDeduction) || 0,
+        amountRepaid: 0,
+        reason: String(reason || ''),
+        dateGranted: dateGranted || new Date().toISOString().slice(0, 10),
+        status: 'ACTIVE',
+        notes: String(notes || ''),
+        createdBy: req.user.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await notify(
+        req.user.companyId, Number(userId), 'LOAN_GRANTED', 'Prêt accordé',
+        `Un prêt de ${Number(amount).toLocaleString('fr-FR')} DT vous a été accordé.`,
+      );
+      res.status(201).json(loan);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/hr/loans/:id', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = await db.getLoanById(req.user.companyId, id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+
+      const { amount, monthlyDeduction, amountRepaid, reason, dateGranted, status, notes } = req.body;
+      const updates: any = { updatedAt: new Date().toISOString() };
+      if (amount !== undefined) updates.amount = Number(amount);
+      if (monthlyDeduction !== undefined) updates.monthlyDeduction = Number(monthlyDeduction);
+      if (amountRepaid !== undefined) updates.amountRepaid = Number(amountRepaid);
+      if (reason !== undefined) updates.reason = String(reason);
+      if (dateGranted !== undefined) updates.dateGranted = dateGranted;
+      if (notes !== undefined) updates.notes = String(notes);
+      if (status !== undefined) updates.status = status;
+
+      // A repayment that reaches the full amount closes the loan on its own —
+      // still overridable by an explicit status (e.g. a manual cancellation).
+      const nextAmount = updates.amount ?? existing.amount;
+      const nextRepaid = updates.amountRepaid ?? existing.amountRepaid;
+      if (status === undefined && nextAmount > 0 && nextRepaid >= nextAmount) {
+        updates.status = 'REPAID';
+      }
+
+      const updated = await db.updateLoan(req.user.companyId, id, updates);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/hr/advances', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const perms = JSON.parse(req.user.permissions || '[]');
+      const canManage = req.user.role === 'ADMIN' || perms.includes('MANAGE_LOANS_ADVANCES');
+      let advances = await db.getAllAdvances(req.user.companyId);
+      if (!canManage) advances = advances.filter((a: any) => a.userId === req.user.id);
+      const users = await db.getAllUsers(req.user.companyId);
+      res.json(advances.map((a: any) => ({
+        ...a,
+        userName: users.find((u: any) => u.id === a.userId)?.fullName || users.find((u: any) => u.id === a.userId)?.username || 'Inconnu',
+      })));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/advances', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const { userId, amount, reason, dateGranted, notes } = req.body;
+      if (!userId || !(Number(amount) > 0)) {
+        return res.status(400).json({ error: "L'employé et un montant positif sont obligatoires." });
+      }
+      const advance = await db.createAdvance(req.user.companyId, {
+        id: Date.now(),
+        userId: Number(userId),
+        amount: Number(amount),
+        reason: String(reason || ''),
+        dateGranted: dateGranted || new Date().toISOString().slice(0, 10),
+        status: 'ACTIVE',
+        notes: String(notes || ''),
+        createdBy: req.user.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await notify(
+        req.user.companyId, Number(userId), 'ADVANCE_GRANTED', 'Avance accordée',
+        `Une avance de ${Number(amount).toLocaleString('fr-FR')} DT vous a été accordée.`,
+      );
+      res.status(201).json(advance);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/hr/advances/:id', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = await db.getAdvanceById(req.user.companyId, id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+
+      const { amount, reason, dateGranted, status, notes } = req.body;
+      const updates: any = { updatedAt: new Date().toISOString() };
+      if (amount !== undefined) updates.amount = Number(amount);
+      if (reason !== undefined) updates.reason = String(reason);
+      if (dateGranted !== undefined) updates.dateGranted = dateGranted;
+      if (notes !== undefined) updates.notes = String(notes);
+      if (status !== undefined) updates.status = status;
+
+      const updated = await db.updateAdvance(req.user.companyId, id, updates);
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

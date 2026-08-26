@@ -44,6 +44,7 @@ const PERMISSIONS_GROUPED = [
       { id: 'MANAGE_LEAVE_REQUESTS', label: 'Gérer congés', desc: 'Peut approuver/refuser les congés' },
       { id: 'CREATE_ABSENCE_AUTHORIZATION', label: 'Demander autorisation', desc: 'Peut soumettre une demande d\'absence' },
       { id: 'MANAGE_ABSENCE_AUTHORIZATIONS', label: 'Gérer autorisations', desc: 'Peut approuver/refuser les autorisations' },
+      { id: 'MANAGE_LOANS_ADVANCES', label: 'Gérer prêts & avances', desc: 'Peut accorder et suivre les prêts et avances des collaborateurs' },
     ]
   },
   {
@@ -279,7 +280,7 @@ export const UsersManagement: React.FC = () => {
   const coutHoraireEmployeur = heuresMensuelles > 0 ? coutTotalEmployeur / heuresMensuelles : 0;
 
   return (
-    <div className="flex-1 flex flex-col space-y-6 max-w-[1000px] w-full mx-auto p-6 lg:p-8">
+    <div className="flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1000px] w-full mx-auto p-4 sm:p-6 lg:p-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">

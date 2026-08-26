@@ -16,6 +16,16 @@ const frDate = (iso: string) => {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
 };
 
+/**
+ * The legal sequence restarts every calendar year, so its own number alone
+ * ("0006") is ambiguous across years — shown as "0006 - 2026". "Autre
+ * document" carries a free reference outside that sequence and is left as-is.
+ */
+const displayNumber = (inv: any) =>
+  inv.documentKind === 'FACTURE_LEGALE' && inv.issueDate
+    ? `${inv.number} - ${String(inv.issueDate).slice(0, 4)}`
+    : inv.number;
+
 /** Module scope: see the note in InvoiceEditor about remounting. */
 const Row: React.FC<{ label: string; value: string; strong?: boolean; muted?: boolean }> = ({ label, value, strong, muted }) => (
   <div className={`flex justify-between px-4 py-2 ${strong ? 'bg-gray-50' : ''}`}>
@@ -59,7 +69,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
       <div id="invoice-print" className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-4">
         <div className="no-print px-5 py-3 border-b border-gray-100 flex flex-wrap gap-2 justify-between items-center">
           <h2 className="text-[14px] font-bold text-gray-900">
-            {invoice.title} {invoice.number}
+            {invoice.title} {displayNumber(invoice)}
           </h2>
           <div className="flex items-center gap-2">
             {onEdit && (
@@ -100,17 +110,23 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
 
         <div className="p-8 space-y-6">
           <div className="flex items-start justify-between gap-6">
-            <div className="text-[11px] text-gray-400">
+            {/* Header carries the company name alone, in bold, stacked under
+                the logo — address, MF and contact details are printed once in
+                the footer below. */}
+            <div className="text-[11px] text-gray-400 flex flex-col items-start gap-2">
               {block?.logo ? (
                 <img src={block.logo} alt="Logo" className="max-h-16 max-w-40 object-contain" />
               ) : (
-                <div className="w-24 h-16 border border-dashed border-gray-200 rounded flex items-center justify-center">Logo</div>
+                <div className="w-24 h-16 border border-dashed border-gray-200 rounded flex items-center justify-center shrink-0">Logo</div>
+              )}
+              {block?.company?.name && (
+                <div className="text-[15px] font-bold text-gray-900">{block.company.name}</div>
               )}
             </div>
             <div className="text-right">
               <div className="text-[24px] font-bold text-gray-900 tracking-tight">{invoice.title}</div>
               <div className="text-[13px] text-gray-500 mt-0.5">
-                N° <span className="font-mono font-bold text-gray-900">{invoice.number}</span>
+                N° <span className="font-mono font-bold text-gray-900">{displayNumber(invoice)}</span>
               </div>
               {suspended && (
                 <div className="text-[11px] text-gray-500 mt-2 leading-snug">
@@ -155,7 +171,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               <tbody className="divide-y divide-gray-100">
                 {(invoice.lines || []).map((l: any, i: number) => (
                   <tr key={i}>
-                    <td className="px-3 py-2 text-gray-900 whitespace-pre-wrap break-words">{l.designation}</td>
+                    <td className="px-3 py-2 text-[13.5px] text-gray-900 whitespace-pre-wrap break-words">{l.designation}</td>
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{l.quantity}</td>}
                     {detailed && <td className="px-3 py-2 text-right font-mono text-gray-600">{money(l.unitPrice)}</td>}
                     <td className="px-3 py-2 text-right text-gray-600">{l.vatExempt ? 'Non soumis' : `${(l.vatRate * 100).toFixed(0)} %`}</td>

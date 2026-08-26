@@ -128,7 +128,7 @@ export const PlatformAdmin: React.FC = () => {
   }
 
   return (
-    <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1200px] w-full mx-auto">
+    <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1200px] w-full mx-auto">
       <div>
         <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">Plateforme — entreprises clientes</h1>
         <p className="text-[11.5px] text-gray-500 mt-0.5">

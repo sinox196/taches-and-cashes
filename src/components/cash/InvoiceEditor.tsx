@@ -19,7 +19,7 @@ const BILLING_MODES = [
 ];
 const VAT_REGIMES = [
   { id: 'DROIT_COMMUN', label: 'Régime de Droit Commun (Facture avec TVA)' },
-  { id: 'SUSPENSION', label: 'Suspension de TVA' },
+  { id: 'SUSPENSION', label: 'Vente en suspension de la TVA' },
   { id: 'EXPORT', label: 'Vente à l’export' },
 ];
 const VAT_RATES = [0, 0.07, 0.13, 0.19];
@@ -163,6 +163,8 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   const detailed = billingMode === 'DETAILLEE';
   /** Only a legal invoice is bound to the sequence — both "Autre" kinds type their own number. */
   const freeNumber = documentKind !== 'FACTURE_LEGALE';
+  /** The sequence restarts every year, so its number alone is ambiguous across years. */
+  const numberDisplay = !freeNumber && issueDate ? `${number} - ${issueDate.slice(0, 4)}` : number;
 
   useEffect(() => {
     if (isEdit) return; // an issued document keeps its number
@@ -318,7 +320,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
       <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl my-4 flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center shrink-0 sticky top-0 bg-white z-10 rounded-t-xl">
           <h2 className="text-[16px] font-bold text-gray-900">
-            {isEdit ? `Modifier ${invoice.title} ${invoice.number}` : 'Nouveau document'}
+            {isEdit ? `Modifier ${invoice.title} ${numberDisplay}` : 'Nouveau document'}
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100">
             <X className="w-5 h-5" />
@@ -444,7 +446,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               ) : (
                 <>
                   <div className="text-[13px] text-gray-500 mt-1">
-                    Numéro <span className="font-mono font-bold text-gray-900">{number}</span>
+                    Numéro <span className="font-mono font-bold text-gray-900">{numberDisplay}</span>
                   </div>
                   <p className="text-[10.5px] text-gray-400">Généré automatiquement, séquentiel</p>
                 </>
@@ -650,7 +652,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                           onChange={e => setLine(i, { designation: e.target.value })}
                           placeholder="Ex: Mission de conseil"
                           rows={2}
-                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-[12.5px] resize-y"
+                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-[13.5px] resize-y"
                         />
                       </td>
                       {detailed && (

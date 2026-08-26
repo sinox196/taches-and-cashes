@@ -6,9 +6,9 @@ export const translations: Translations = {
   fr: {
     // Nav
     'nav.dashboard': 'Tableau de bord',
-    'nav.users': 'Utilisateurs',
+    'nav.users': 'Équipe',
     'nav.clients': 'Clients',
-    'nav.timeTracking': 'Pointage',
+    'nav.timeTracking': 'Tâches',
     'nav.invoicing': 'Facturation',
     'nav.hr': 'RH',
     'nav.logout': 'Déconnexion',
@@ -66,9 +66,9 @@ export const translations: Translations = {
   en: {
     // Nav
     'nav.dashboard': 'Dashboard',
-    'nav.users': 'Users',
+    'nav.users': 'Team',
     'nav.clients': 'Clients',
-    'nav.timeTracking': 'Time Tracking',
+    'nav.timeTracking': 'Tasks',
     'nav.invoicing': 'Invoicing',
     'nav.hr': 'HR',
     'nav.logout': 'Logout',

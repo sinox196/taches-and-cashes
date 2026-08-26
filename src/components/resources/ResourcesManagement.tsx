@@ -95,7 +95,7 @@ export const ResourcesManagement: React.FC = () => {
   ];
 
   return (
-    <div className={`flex-1 flex flex-col space-y-6 w-full mx-auto p-6 lg:p-8 ${tab === 'deadlines' ? 'max-w-full' : 'max-w-[1200px]'}`}>
+    <div className={`flex-1 flex flex-col space-y-6 w-full mx-auto p-4 sm:p-6 lg:p-8 ${tab === 'deadlines' ? 'max-w-full' : 'max-w-[1200px]'}`}>
       <div>
         <h1 className="text-[20px] font-bold text-gray-800 tracking-tight flex items-center gap-2">
           <FileCheck2 className="w-5 h-5" />

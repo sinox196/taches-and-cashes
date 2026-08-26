@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check } from 'lucide-react';
+import { Bell, BellRing, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check, Wallet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import {
+  initOsNotifications,
+  notificationPermission,
+  requestNotificationPermission,
+  showOsNotification,
+} from '../utils/osNotifications';
 
 /**
  * The one notification surface in the app: unread messages (from the same
@@ -23,6 +29,8 @@ const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClas
   LEAVE_DECISION: { icon: CalendarDays, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
   ABSENCE_REQUEST: { icon: Clock4, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },
   ABSENCE_DECISION: { icon: Clock4, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
+  LOAN_GRANTED: { icon: Wallet, nav: 'HR', iconClass: 'bg-teal-50 text-teal-600' },
+  ADVANCE_GRANTED: { icon: Wallet, nav: 'HR', iconClass: 'bg-teal-50 text-teal-600' },
 };
 
 /** "il y a 5 min" — coarse on purpose, this is a notification list, not a log. */
@@ -44,6 +52,39 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
   const [unreadCount, setUnreadCount] = useState(0);
   const [contacts, setContacts] = useState<any[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [permission, setPermission] = useState<NotificationPermission>(notificationPermission());
+
+  // Ids already surfaced as an OS toast. Seeded on the first poll rather than
+  // starting empty, so opening the app doesn't replay every unread
+  // notification as a burst of toasts.
+  const notifiedIds = useRef<Set<string>>(new Set());
+  const seededOsNotifications = useRef(false);
+  /** Per-contact unread counts, to toast only when a count actually grows. */
+  const lastUnreadByContact = useRef<Record<string, number>>({});
+
+  useEffect(() => { initOsNotifications(); }, []);
+
+  // Clicking a toast focuses this tab; the worker forwards the section to open.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'notification-click' && event.data.nav) onNavigate(event.data.nav);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [onNavigate]);
+
+  const enableNotifications = async () => {
+    const result = await requestNotificationPermission();
+    setPermission(result);
+    if (result === 'granted') {
+      showOsNotification({
+        title: 'Notifications activées',
+        body: 'Vous serez prévenu ici des nouvelles tâches, demandes et messages.',
+        tag: 'notifications-enabled',
+      });
+    }
+  };
 
   const refresh = useCallback(async () => {
     if (!token) return;
@@ -53,12 +94,58 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
         fetch('/api/notifications', { headers }),
         fetch('/api/messages/contacts', { headers }),
       ]);
-      if (notifRes.ok) {
-        const body = await notifRes.json();
-        setItems(body.items ?? []);
-        setUnreadCount(body.unreadCount ?? 0);
+      const nextItems = notifRes.ok ? ((await notifRes.json()) as any) : null;
+      const nextContacts = contactsRes.ok ? await contactsRes.json() : null;
+
+      if (nextItems) {
+        setItems(nextItems.items ?? []);
+        setUnreadCount(nextItems.unreadCount ?? 0);
       }
-      if (contactsRes.ok) setContacts(await contactsRes.json());
+      if (nextContacts) setContacts(nextContacts);
+
+      // --- OS toasts for anything that arrived since the last poll ---------
+      const unread = (nextItems?.items ?? []).filter((n: any) => !n.readAt);
+      const contactRows = (nextContacts ?? []).filter((c: any) => c.unreadCount > 0);
+
+      if (!seededOsNotifications.current) {
+        // First poll of the session: record what already exists without
+        // announcing it. Only genuinely new arrivals should interrupt.
+        unread.forEach((n: any) => notifiedIds.current.add(String(n.id)));
+        (nextContacts ?? []).forEach((c: any) => { lastUnreadByContact.current[String(c.id)] = c.unreadCount || 0; });
+        seededOsNotifications.current = true;
+        return;
+      }
+
+      for (const n of unread) {
+        const key = String(n.id);
+        if (notifiedIds.current.has(key)) continue;
+        notifiedIds.current.add(key);
+        showOsNotification({
+          title: n.title || 'Tâches & Cash',
+          body: n.body || '',
+          nav: TYPE_META[n.type]?.nav ?? 'Dashboard',
+          tag: `notif-${key}`,
+        });
+      }
+
+      for (const c of contactRows) {
+        const key = String(c.id);
+        const previous = lastUnreadByContact.current[key] ?? 0;
+        if (c.unreadCount > previous) {
+          showOsNotification({
+            title: `Nouveau message — ${c.name || c.username || 'Collaborateur'}`,
+            body: c.unreadCount > 1 ? `${c.unreadCount} messages non lus` : 'Vous avez reçu un message.',
+            nav: 'Messages',
+            // Per contact, so a second message replaces the first toast
+            // instead of stacking one per message.
+            tag: `msg-${key}`,
+          });
+        }
+      }
+      // Rebuild from the current list so a read-elsewhere contact can notify
+      // again later.
+      lastUnreadByContact.current = {};
+      (nextContacts ?? []).forEach((c: any) => { lastUnreadByContact.current[String(c.id)] = c.unreadCount || 0; });
     } catch {
       /* a missed poll just delays the badge, never worth surfacing */
     }
@@ -118,7 +205,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+        <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-1.5rem)] bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="text-[13px] font-bold text-gray-900">Notifications</span>
             {badgeTotal > 0 && (
@@ -130,6 +217,25 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
               </button>
             )}
           </div>
+
+          {/* Permission has to be asked for on a real click to be reliable
+              (Safari refuses otherwise), so it's a button, not an on-load prompt. */}
+          {permission === 'default' && (
+            <button
+              onClick={enableNotifications}
+              className="w-full flex items-center gap-2 px-4 py-2.5 bg-blue-50/60 hover:bg-blue-50 text-left border-b border-blue-100 transition-colors"
+            >
+              <BellRing className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span className="text-[11.5px] text-blue-800 font-medium">
+                Activer les notifications sur cet appareil
+              </span>
+            </button>
+          )}
+          {permission === 'denied' && (
+            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-[11px] text-gray-500">
+              Notifications bloquées par le navigateur. Autorisez-les dans les réglages du site pour les recevoir.
+            </div>
+          )}
 
           <div className="max-h-96 overflow-y-auto divide-y divide-gray-50">
             {unreadMessageContacts.map((c) => (

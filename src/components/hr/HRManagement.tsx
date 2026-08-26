@@ -4,12 +4,14 @@ import { useLanguage } from '../../context/LanguageContext';
 import { CalendarRange, Clock, AlertCircle, CheckCircle2, User } from 'lucide-react';
 import { LeavesTab } from './LeavesTab';
 import { AbsencesTab } from './AbsencesTab';
+import { LoansTab } from './LoansTab';
+import { AdvancesTab } from './AdvancesTab';
 import { LeaveBalance } from '../../types';
 
 export const HRManagement: React.FC = () => {
   const { hasPermission, token } = useAuth();
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'leaves' | 'absences'>('leaves');
+  const [activeTab, setActiveTab] = useState<'leaves' | 'absences' | 'loans' | 'advances'>('leaves');
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
 
   const loadBalance = () => {
@@ -38,7 +40,7 @@ export const HRManagement: React.FC = () => {
   }
 
   return (
-    <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1400px] w-full mx-auto">
+    <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t('hr.title')}</h1>
@@ -81,10 +83,25 @@ export const HRManagement: React.FC = () => {
           >
             {t('hr.tabs.absences')}
           </button>
+          <button
+            onClick={() => setActiveTab('loans')}
+            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'loans' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Prêts
+          </button>
+          <button
+            onClick={() => setActiveTab('advances')}
+            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'advances' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Avances
+          </button>
         </div>
 
         <div className="p-4 flex-1 overflow-auto">
-          {activeTab === 'leaves' ? <LeavesTab /> : <AbsencesTab />}
+          {activeTab === 'leaves' ? <LeavesTab />
+            : activeTab === 'absences' ? <AbsencesTab />
+            : activeTab === 'loans' ? <LoansTab />
+            : <AdvancesTab />}
         </div>
       </div>
     </main>

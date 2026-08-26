@@ -61,6 +61,8 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   invoices: { desc: true },
   leave_requests: { desc: false },
   absence_authorizations: { desc: false },
+  loans: { desc: false },
+  advances: { desc: false },
   time_entries: { desc: true },
   messages: { desc: false },
   task_assignments: { desc: true },
@@ -89,6 +91,8 @@ const TABLE_FOR: Record<string, string> = {
   invoices: 'invoices',
   leaveRequests: 'leave_requests',
   absenceAuthorizations: 'absence_authorizations',
+  loans: 'loans',
+  advances: 'advances',
   timeEntries: 'time_entries',
   messages: 'messages',
   taskAssignments: 'task_assignments',
@@ -186,6 +190,12 @@ async function ensureSchema(pool: pg.Pool) {
         ALTER TABLE settings DROP COLUMN IF EXISTS only_row;
       END IF;
     END $$;`);
+  // The legal sequence restarts at 0001 every calendar year. A row that
+  // already exists (this app's own production included) must backfill the
+  // *current* year here, not 0 — defaulting to 0 would make the very next
+  // invoice think the year had changed and wrongly reset an in-progress
+  // sequence back to 0001.
+  await q(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_counter_year INT NOT NULL DEFAULT EXTRACT(YEAR FROM CURRENT_DATE)::INT`);
   await q(`INSERT INTO settings (company_id, data) VALUES ($1, $2)
            ON CONFLICT (company_id) DO NOTHING`, [LEGACY_COMPANY_ID, JSON.stringify(defaultSettings())]);
 
@@ -316,6 +326,8 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const invoices = tenantCollection('invoices');
   const leaveRequests = tenantCollection('leave_requests');
   const absences = tenantCollection('absence_authorizations');
+  const loans = tenantCollection('loans');
+  const advances = tenantCollection('advances');
   const timeEntries = tenantCollection('time_entries');
   const messages = tenantCollection('messages');
   const taskAssignments = tenantCollection('task_assignments');
@@ -397,9 +409,17 @@ export async function initPostgres(connectionString: string): Promise<Database> 
         `INSERT INTO settings (company_id, data, invoice_counter) VALUES ($1, $2, 0) ON CONFLICT (company_id) DO NOTHING`,
         [companyId, JSON.stringify(defaultSettings())],
       );
+      // The sequence restarts at 0001 for a new calendar year — a single
+      // atomic statement, so a company whose stored year has fallen behind
+      // resets exactly once, with no race between the check and the write.
+      const year = new Date().getFullYear();
       const rows = await q(
-        `UPDATE settings SET invoice_counter = invoice_counter + 1 WHERE company_id = $1 RETURNING invoice_counter`,
-        [companyId],
+        `UPDATE settings
+         SET invoice_counter = CASE WHEN invoice_counter_year = $2 THEN invoice_counter + 1 ELSE 1 END,
+             invoice_counter_year = $2
+         WHERE company_id = $1
+         RETURNING invoice_counter`,
+        [companyId, year],
       );
       return String(rows[0].invoice_counter).padStart(4, '0');
     },
@@ -413,6 +433,16 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAbsenceAuthorizationById: absences.byId,
     createAbsenceAuthorization: absences.create,
     updateAbsenceAuthorization: absences.update,
+
+    getAllLoans: loans.all,
+    getLoanById: loans.byId,
+    createLoan: loans.create,
+    updateLoan: loans.update,
+
+    getAllAdvances: advances.all,
+    getAdvanceById: advances.byId,
+    createAdvance: advances.create,
+    updateAdvance: advances.update,
 
     // `available` stays derived — it is never a column.
     getAllLeaveBalances: async (companyId: string) =>

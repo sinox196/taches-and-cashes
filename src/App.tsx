@@ -190,6 +190,8 @@ export default function App() {
     };
   }, [token, activeSidebarItem, fetchTimeEntries]);
 
+  /** Mobile nav drawer. Has no effect from `lg` up, where the rail is static. */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [isAssignTaskOpen, setIsAssignTaskOpen] = useState(false);
   const [isPlanTaskOpen, setIsPlanTaskOpen] = useState(false);
@@ -218,6 +220,59 @@ export default function App() {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Overtime alert: every full 2h a task runs continuously, ask the
+  // collaborator whether they're still on it. Responding keeps it running;
+  // ignoring it for the grace period below pauses it automatically. Re-fires
+  // at every subsequent 2h boundary (4h, 6h, …), not just once, since a task
+  // left running for a whole afternoon is exactly the case this exists for.
+  const OVERTIME_THRESHOLD_SECONDS = 2 * 3600;
+  const OVERTIME_GRACE_MS = 2 * 60 * 1000;
+  const [overtimeAlert, setOvertimeAlert] = useState<{ entryId: string; deadline: number } | null>(null);
+  const [overtimeSecondsLeft, setOvertimeSecondsLeft] = useState(0);
+  const acknowledgedOvertimeRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    const myRunning = timeEntries.find(e => e.userId === user?.id && e.statut === 'RUNNING');
+    if (!myRunning) { setOvertimeAlert(null); return; }
+    const cycles = Math.floor(myRunning.dureeSeconds / OVERTIME_THRESHOLD_SECONDS);
+    if (cycles < 1) return;
+    const acknowledged = acknowledgedOvertimeRef.current[myRunning.id] || 0;
+    if (cycles > acknowledged && !overtimeAlert) {
+      setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
+    }
+  }, [timeEntries, user?.id]);
+
+  useEffect(() => {
+    if (!overtimeAlert) return;
+    const tick = () => setOvertimeSecondsLeft(Math.max(0, Math.ceil((overtimeAlert.deadline - Date.now()) / 1000)));
+    tick();
+    const countdown = setInterval(tick, 1000);
+    const timeout = setTimeout(() => {
+      const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
+      acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
+      updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
+      setOvertimeAlert(null);
+      showToast('Tâche mise en pause automatiquement — aucune réponse à l’alerte de 2h.');
+    }, Math.max(0, overtimeAlert.deadline - Date.now()));
+    return () => { clearInterval(countdown); clearTimeout(timeout); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overtimeAlert]);
+
+  const acknowledgeOvertimeAlert = () => {
+    if (!overtimeAlert) return;
+    const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
+    acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
+    setOvertimeAlert(null);
+  };
+
+  const pauseFromOvertimeAlert = () => {
+    if (!overtimeAlert) return;
+    const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
+    acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
+    updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
+    setOvertimeAlert(null);
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -415,15 +470,27 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
+    // h-screen, not min-h-screen: the shell must have a *definite* height for
+    // the content column's own overflow-y-auto to become the single scroll
+    // container. With min-h-screen the column just grew past the viewport, so
+    // a page that pins its own footer (the Clients pagination bar) had that
+    // footer pushed off-screen and reachable only by scrolling the whole page.
+    <div className="h-screen bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
       <Sidebar
         activeItem={activeSidebarItem}
         onSelectItem={(item) => setActiveSidebarItem(item)}
         unreadMessages={unreadMessages}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
-      
+
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <Header userCode="ABA01" userName="Alexandre Dupont" onNavigate={setActiveSidebarItem} />
+        <Header
+          userCode="ABA01"
+          userName="Alexandre Dupont"
+          onNavigate={setActiveSidebarItem}
+          onToggleSidebar={() => setSidebarOpen(o => !o)}
+        />
         
         
         {activeSidebarItem === 'Plateforme' && user?.isPlatformAdmin ? (
@@ -448,7 +515,7 @@ export default function App() {
         ) : activeSidebarItem === 'HR' && hasPermission('VIEW_HR') ? (
           <HRManagement />
         ) : activeSidebarItem === 'Time Tracking' ? (
-          <main className="p-6 lg:p-8 flex-1 flex flex-col space-y-6 max-w-[1400px] w-full mx-auto">
+          <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
             
             
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -573,6 +640,39 @@ export default function App() {
           onPlanned={() => showToast('Tâche planifiée.')}
         />
       )}
+
+      {overtimeAlert && (() => {
+        const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
+        const hours = entry ? Math.floor(entry.dureeSeconds / OVERTIME_THRESHOLD_SECONDS) * 2 : 2;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+              <h3 className="text-[15px] font-bold text-gray-900 mb-1">Toujours sur cette tâche ?</h3>
+              <p className="text-[13px] text-gray-600 mb-3">
+                Vous travaillez sur <span className="font-semibold">{entry?.pole || 'cette tâche'}</span>
+                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h sans interruption.
+              </p>
+              <p className="text-[12px] text-gray-400 mb-4">
+                Sans réponse, la tâche sera mise en pause automatiquement dans {overtimeSecondsLeft}s.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={pauseFromOvertimeAlert}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Mettre en pause
+                </button>
+                <button
+                  onClick={acknowledgeOvertimeAlert}
+                  className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover"
+                >
+                  Oui, je continue
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {toastMessage && (
         <div className="fixed bottom-5 right-5 bg-navy text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl z-50 flex items-center gap-2">
