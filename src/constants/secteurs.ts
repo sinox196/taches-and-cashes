@@ -8,7 +8,7 @@ export type Secteur = 'CABINET' | 'AUTRE';
 
 export const SECTEURS: { id: Secteur; label: string }[] = [
   { id: 'CABINET', label: 'Comptabilité, Fiscalité, Audit & Conseil aux entreprises' },
-  { id: 'AUTRE', label: 'Autre' },
+  { id: 'AUTRE', label: 'Autres professions de services' },
 ];
 
 /**

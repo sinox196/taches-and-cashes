@@ -4400,9 +4400,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
               JWT_SECRET, { expiresIn: '1h' },
             );
             const link = `https://taches-and-cash.com/?reset=${resetToken}`;
+            // No `from` override here — the SMTP account is only authorized
+            // to send as whatever SMTP_FROM/SMTP_USER is configured with
+            // (support@taches-and-cash.com was rejected by the relay with a
+            // 550 "sender address rejected"); every other transactional
+            // email in this app already relies on that same default.
             await sendMail({
               to: company.contactEmail,
-              from: '"Tâches & Cash — Support" <support@taches-and-cash.com>',
+              fromName: 'Tâches & Cash — Support',
+              replyTo: 'support@taches-and-cash.com',
               subject: 'Réinitialisation de votre mot de passe',
               html: `
                 <p>Bonjour ${escapeHtml(company.contactName || '')},</p>

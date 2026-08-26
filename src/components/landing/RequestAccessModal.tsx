@@ -148,13 +148,13 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
             )}
 
             <div>
-              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Nom</label>
+              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Prénom &amp; nom</label>
               <input
                 required
                 value={contactName}
                 onChange={e => setContactName(e.target.value)}
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                placeholder="Votre nom"
+                placeholder="Votre prénom et nom"
               />
             </div>
             <div>
