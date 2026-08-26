@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Role } from '../constants/roles';
+import { RESOURCES_PERMISSIONS, companyHasResourcesModule } from '../constants/secteurs';
 
 export interface User {
   id: number;
@@ -21,8 +22,8 @@ export interface User {
   congesRestants?: number;
   /** Runs the platform itself (confirms other companies' payments) — orthogonal to `role`, which is scoped to this user's own company. */
   isPlatformAdmin?: boolean;
-  /** This user's own company — trial status, plan, deadline. Absent for a pre-migration /api/login response shape. */
-  company?: { id: string; name: string; status: string; plan: string; trialEndsAt: string | null } | null;
+  /** This user's own company — trial status, plan, deadline, secteur. Absent for a pre-migration /api/login response shape. */
+  company?: { id: string; name: string; status: string; plan: string; trialEndsAt: string | null; secteur?: string | null } | null;
 }
 
 interface AuthContextType {
@@ -100,6 +101,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasPermission = (permission: string) => {
     if (!user) return false;
+    // Ressources Métier is gated by the company's own secteur, ahead of the
+    // ADMIN bypass below — mirrors requirePermission in server.ts.
+    if (RESOURCES_PERMISSIONS.has(permission) && !companyHasResourcesModule(user.company?.secteur)) return false;
     if (user.role === 'ADMIN') return true;
     return user.permissions.includes(permission);
   };

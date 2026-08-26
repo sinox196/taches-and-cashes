@@ -3,6 +3,7 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { X, Loader2, Mail, CheckCircle2, Lock, User, Phone, Building2 } from 'lucide-react';
 import { friendlyError } from '../../utils/errors';
 import { useAuth } from '../../context/AuthContext';
+import { SECTEURS, type Secteur } from '../../constants/secteurs';
 
 interface RequestAccessModalProps {
   plan: string;
@@ -39,6 +40,7 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
   const [contactEmail, setContactEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [username, setUsername] = useState('');
+  const [secteur, setSecteur] = useState<Secteur>('CABINET');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -65,7 +67,7 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             companyName, contactName, contactEmail, phone, username, password, confirmPassword,
-            plan: PLAN_CODES[plan], website,
+            plan: PLAN_CODES[plan], website, secteur,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -201,6 +203,18 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
 
             {isSignup ? (
               <>
+                <div>
+                  <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Secteur d'activité</label>
+                  <select
+                    value={secteur}
+                    onChange={e => setSecteur(e.target.value as Secteur)}
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                  >
+                    {SECTEURS.map(s => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Nom d'utilisateur</label>
                   <div className="relative">

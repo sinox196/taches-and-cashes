@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
 import { LEGACY_COMPANY_ID, TRIAL_DAYS, PLAN_SEAT_LIMITS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
 import { STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
+import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
 import {
   DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
 } from './src/constants/presence.js';
@@ -424,7 +425,7 @@ async function startServer() {
         salaireBrut: user.salaireBrut,
         regimeHoraire: user.regimeHoraire,
         isPlatformAdmin: !!user.isPlatformAdmin,
-        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt } : null,
+        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null } : null,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -439,7 +440,7 @@ async function startServer() {
       }
 
       // We should check the database to get the freshest permissions
-      db.getUserById(req.user.companyId, req.user.id).then((user: any) => {
+      db.getUserById(req.user.companyId, req.user.id).then(async (user: any) => {
         if (!user) {
           return res.status(401).json({ error: 'Unauthorized' });
         }
@@ -448,6 +449,19 @@ async function startServer() {
         if (!hasPerm) {
           return res.status(403).json({ error: 'Forbidden: Missing permission ' + permission });
         }
+
+        // Ressources Métier is gated by the company's own secteur, ahead of
+        // the ADMIN bypass above: its seed content (SARL formation
+        // checklists, CNSS échéances...) is specific to accounting/tax
+        // cabinets, so a company outside that secteur never gets it, admin
+        // included.
+        if (RESOURCES_PERMISSIONS.has(permission)) {
+          const company = await db.getCompanyById(req.user.companyId);
+          if (!companyHasResourcesModule(company?.secteur)) {
+            return res.status(403).json({ error: 'Module Ressources Métier non disponible pour ce secteur' });
+          }
+        }
+
         next();
       }).catch(() => {
         res.status(500).json({ error: 'Internal server error' });
@@ -4276,6 +4290,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const password = String(req.body?.password ?? '');
       const confirmPassword = String(req.body?.confirmPassword ?? '');
       const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : 'FREELANCE';
+      const secteur: Secteur = SECTEURS.some(s => s.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
 
       if (!companyName || !contactName || !contactEmail || !phone || !username) {
         return res.status(400).json({ error: 'Tous les champs sont requis' });
@@ -4300,6 +4315,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: 'TRIAL',
         plan,
         seatLimit: PLAN_SEAT_LIMITS[plan] || 1,
+        secteur,
         createdAt: new Date().toISOString(),
         trialEndsAt,
         contactName, contactEmail, phone,
