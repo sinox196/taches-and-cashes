@@ -3323,6 +3323,30 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   });
 
   /**
+   * The caller's own current task — the RUNNING one, or failing that their
+   * most recent PAUSED one so it can be resumed. Exists for the floating
+   * chronometer, which is mounted on every page: the SSE stream only runs
+   * while Pointage is open (it pushes a whole page of every user's entries,
+   * far too much to hold open everywhere), so the widget polls this instead.
+   * One row, own rows only — bounded no matter how large the history is.
+   */
+  app.get('/api/time-entries/active', authenticate, async (req: any, res: any) => {
+    try {
+      const mine = (await db.getAllTimeEntries(req.user.companyId))
+        .filter((e: any) => e.userId === req.user.id);
+      // Newest-first ordering is load-bearing here: createTimeEntry prepends,
+      // so the first PAUSED row is the most recent one.
+      const entry = mine.find((e: any) => e.statut === 'RUNNING')
+        || mine.find((e: any) => e.statut === 'PAUSED');
+      if (!entry) return res.json({ entry: null });
+      const [enriched] = await enrichEntries(req.user.companyId, [entry], req.user.role === 'ADMIN');
+      res.json({ entry: enriched });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * The one place a time entry is actually created — used by the normal
    * "démarrer une tâche" POST below and by starting an assigned task, so the
    * historical-rate snapshot, server-owned timestamps and the one-running-

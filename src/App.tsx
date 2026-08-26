@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ActiveTimerCard } from './components/ActiveTimerCard';
+import { FloatingTimer } from './components/FloatingTimer';
 import { NewTaskCard } from './components/NewTaskCard';
 import { TimeTrackingTable } from './components/TimeTrackingTable';
 import { PausedTasksList } from './components/PausedTasksList';
@@ -199,6 +200,60 @@ export default function App() {
     };
   }, [token, activeSidebarItem, fetchTimeEntries]);
 
+  /**
+   * Off Pointage there is no SSE stream (it pushes a whole page of every
+   * user's entries — far too much to hold open on every screen), so the
+   * floating chronometer keeps itself fresh from the one-row
+   * /api/time-entries/active instead. The local 1s tick below does the
+   * counting; this poll only has to catch changes made elsewhere (another
+   * device, or an admin pausing your task), hence 30s rather than a
+   * second-by-second refresh.
+   */
+  useEffect(() => {
+    if (!token || activeSidebarItem === 'Time Tracking') return;
+
+    let cancelled = false;
+    const syncActive = async () => {
+      try {
+        const res = await fetch('/api/time-entries/active', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) return;
+        const { entry } = await res.json();
+        if (cancelled) return;
+        setTimeEntries(prev => {
+          // Nothing of mine is running or paused any more: drop my stale rows
+          // so the widget can't keep counting a task that has been stopped.
+          if (!entry) return prev.filter(e => !(e.userId === user?.id && e.statut !== 'COMPLETED'));
+          const local = prev.find(e => e.id === entry.id);
+          // Same <5s drift rule the SSE handler uses: keep the local count
+          // when it broadly agrees, so the display doesn't visibly stutter.
+          const merged =
+            local && local.statut === 'RUNNING' && entry.statut === 'RUNNING'
+              && Math.abs(local.dureeSeconds - entry.dureeSeconds) < 5
+              ? { ...entry, dureeSeconds: local.dureeSeconds, duree: local.duree, coutCalcule: local.coutCalcule }
+              : decorate(entry);
+          return local
+            ? prev.map(e => (e.id === merged.id ? merged : e))
+            : [merged, ...prev];
+        });
+      } catch {
+        // A failed poll is not worth surfacing: the next one is 30s away and
+        // the tick keeps the display alive in the meantime.
+      }
+    };
+
+    syncActive();
+    const interval = setInterval(syncActive, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [token, activeSidebarItem, user?.id]);
+
+  /**
+   * The task the user paused during this session — what keeps the floating
+   * chronometer on screen (in paused state) after a pause, so resuming stays
+   * one click away. Session-scoped on purpose: a reload starts clean rather
+   * than resurrecting an old paused task into the corner of every page.
+   */
+  const [justPausedId, setJustPausedId] = useState<string | null>(null);
+
   /** Mobile nav drawer. Has no effect from `lg` up, where the rail is static. */
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
@@ -356,9 +411,42 @@ export default function App() {
 
   const handlePauseTimer = () => {
     if (myRunningEntry) {
+      setJustPausedId(myRunningEntry.id);
       updateTimeEntryApi(myRunningEntry.id, { statut: 'PAUSED' });
       showToast('Chronomètre en pause.');
     }
+  };
+
+  /**
+   * The floating chronometer follows the running task; with none running it
+   * falls back to one paused *in this session*, so pausing from it doesn't
+   * make it vanish and strand the user with no way to resume without walking
+   * back to Pointage. Deliberately not "the most recent paused entry": that
+   * would park a task paused days ago in the corner of every page forever.
+   */
+  const floatingEntry =
+    myRunningEntry || (justPausedId ? myPausedEntries.find(e => e.id === justPausedId) : undefined);
+
+  const handleFloatingPause = () => {
+    if (!floatingEntry) return;
+    setJustPausedId(floatingEntry.id);
+    updateTimeEntryApi(floatingEntry.id, { statut: 'PAUSED' });
+    showToast('Chronomètre en pause.');
+  };
+
+  const handleFloatingResume = () => {
+    if (!floatingEntry) return;
+    setJustPausedId(null);
+    updateTimeEntryApi(floatingEntry.id, { statut: 'RUNNING' });
+    showToast('Chronomètre repris.');
+  };
+
+  const handleFloatingStop = () => {
+    if (!floatingEntry) return;
+    if (!confirm('Voulez-vous vraiment arrêter cette tâche ? Le temps déjà enregistré sera conservé.')) return;
+    setJustPausedId(null);
+    updateTimeEntryApi(floatingEntry.id, { statut: 'COMPLETED' });
+    showToast('Chronomètre arrêté et enregistré.');
   };
 
   const handleStartNewTask = async (
@@ -635,6 +723,17 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Mounted outside the page switch above so the clock and its controls
+          survive navigation — the whole point of it. */}
+      {hasPermission('VIEW') && floatingEntry && (
+        <FloatingTimer
+          entry={floatingEntry}
+          onResume={handleFloatingResume}
+          onPause={handleFloatingPause}
+          onStop={handleFloatingStop}
+        />
+      )}
 
       <EditTaskModal
         entry={editingEntry}

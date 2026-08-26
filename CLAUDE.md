@@ -91,6 +91,10 @@ Two invariants keep that tick honest, both of which were previously broken and a
 
 Admins get per-row pause / resume / stop controls on *any* collaborator's task (`onChangeStatus` in [TimeTrackingTable.tsx](src/components/TimeTrackingTable.tsx)). That path deliberately bypasses `handleSelectAsActive`, which is about adopting a task into *your own* timer.
 
+**The chronometer is reachable from every page**, not just Pointage — [FloatingTimer.tsx](src/components/FloatingTimer.tsx), a corner card mounted in App.tsx *outside* the page switch, carrying the clock plus pause / resume / stop. It does **not** open an SSE stream to stay fresh: that broadcast carries a whole page of every user's entries and holding it open on every screen is exactly the payload the scale rules forbid. Off Pointage it polls `GET /api/time-entries/active` every 30 s instead — one row, the caller's own, so it stays bounded however large the history grows — and merges it into the same `timeEntries` state, which is why the existing local 1s tick, `updateTimeEntryApi` and the overtime alert all keep working unchanged. The 30 s cadence only has to catch changes made *elsewhere* (another device, an admin pausing your task); the tick does the counting.
+
+With nothing running it falls back to a task paused **in this session only** (`justPausedId`), so pausing from the card doesn't make it vanish and strand you with no way to resume without walking back to Pointage. Deliberately not "the most recent paused entry" — that would park a task paused days ago in the corner of every page forever.
+
 ### Employer cost
 
 ```
