@@ -4286,13 +4286,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const contactName = text(req.body?.contactName, 120);
       const contactEmail = text(req.body?.contactEmail, 160);
       const phone = text(req.body?.phone, 40);
-      const username = text(req.body?.username, 60);
       const password = String(req.body?.password ?? '');
       const confirmPassword = String(req.body?.confirmPassword ?? '');
       const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : 'FREELANCE';
       const secteur: Secteur = SECTEURS.some(s => s.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
 
-      if (!companyName || !contactName || !contactEmail || !phone || !username) {
+      if (!companyName || !contactName || !contactEmail || !phone) {
         return res.status(400).json({ error: 'Tous les champs sont requis' });
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
@@ -4304,8 +4303,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (password !== confirmPassword) {
         return res.status(400).json({ error: 'Les mots de passe ne correspondent pas' });
       }
+
+      // No separate username at signup — the email itself is the login
+      // identifier, lowercased so a differently-cased retype at login still
+      // matches (usernames are otherwise compared as typed everywhere else
+      // in this app, but those are hand-picked short names, not emails).
+      const username = contactEmail.toLowerCase();
       if (await db.getUserByUsername(username)) {
-        return res.status(400).json({ error: "Ce nom d'utilisateur est déjà pris" });
+        return res.status(400).json({ error: 'Cette adresse email est déjà utilisée' });
       }
 
       const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();

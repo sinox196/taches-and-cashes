@@ -174,7 +174,11 @@ async function initJsonDb(): Promise<Database> {
   };
 
   const impl: Database = {
-    getUserByUsername: async (username: string) => db.users.find((u: any) => u.username === username),
+    // Case-insensitive: a self-serve signup's username is its email
+    // (lowercased when stored), and login must still match it however the
+    // visitor happens to capitalize it when typing it back in.
+    getUserByUsername: async (username: string) =>
+      db.users.find((u: any) => String(u.username).toLowerCase() === String(username).toLowerCase()),
     getUserById: async (companyId: string, id: number) => findScoped(db.users, companyId, id),
 
     getAllCompanies: async () => db.companies,

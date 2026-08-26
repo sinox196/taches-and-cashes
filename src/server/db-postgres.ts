@@ -342,8 +342,11 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const echeanceStatusOptions = tenantCollection('echeance_status_options');
 
   const db: Database = {
+    // Case-insensitive: a self-serve signup's username is its email
+    // (lowercased when stored), and login must still match it however the
+    // visitor happens to capitalize it when typing it back in.
     getUserByUsername: async (username: string) => {
-      const rows = await q(`SELECT data FROM users WHERE data->>'username' = $1`, [String(username)]);
+      const rows = await q(`SELECT data FROM users WHERE LOWER(data->>'username') = LOWER($1)`, [String(username)]);
       return rows.length ? rows[0].data : undefined;
     },
     getUserById: users.byId,
