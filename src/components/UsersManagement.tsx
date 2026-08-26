@@ -65,6 +65,25 @@ const PERMISSIONS_GROUPED = [
   }
 ];
 
+const ALL_PERMISSION_IDS = PERMISSIONS_GROUPED.flatMap(group => group.permissions.map(perm => perm.id));
+
+type Secteur = 'CABINET' | 'AUTRE';
+
+const SECTEURS: { id: Secteur; label: string }[] = [
+  { id: 'CABINET', label: 'Comptabilité, Fiscalité, Audit & Conseil aux entreprises' },
+  { id: 'AUTRE', label: 'Autre' },
+];
+
+/** New account preset: the cabinet's own sector gets full access; any other
+ * sector gets everything except Ressources Métier, which is specific to the
+ * cabinet's own document/échéance tracking. This only seeds the checkboxes
+ * below — the admin can still tick/untick anything by hand afterwards. */
+function permissionsForSecteur(secteur: Secteur): string[] {
+  return secteur === 'AUTRE'
+    ? ALL_PERMISSION_IDS.filter(id => id !== 'VIEW_RESOURCES')
+    : ALL_PERMISSION_IDS;
+}
+
 export const UsersManagement: React.FC = () => {
   const { token, hasPermission, logout } = useAuth();
   const { presenceOf } = usePresence();
@@ -86,6 +105,7 @@ export const UsersManagement: React.FC = () => {
   const [formPassword, setFormPassword] = useState('');
   const [formRole, setFormRole] = useState<Role>('COLLABORATOR');
   const [formPermissions, setFormPermissions] = useState<string[]>([]);
+  const [formSecteur, setFormSecteur] = useState<Secteur>('CABINET');
   const [formSalaireBrut, setFormSalaireBrut] = useState<number | ''>('');
   const [formRegimeHoraire, setFormRegimeHoraire] = useState<number | ''>(48);
   const [formCnss, setFormCnss] = useState<number | ''>('');
@@ -140,7 +160,8 @@ export const UsersManagement: React.FC = () => {
     setFormUsername('');
     setFormPassword('');
     setFormRole('COLLABORATOR');
-    setFormPermissions([]);
+    setFormSecteur('CABINET');
+    setFormPermissions(permissionsForSecteur('CABINET'));
     setFormSalaireBrut('');
     setFormRegimeHoraire(48);
     setFormCnss(globalSettings?.cnss ?? 16.57);
@@ -629,6 +650,30 @@ export const UsersManagement: React.FC = () => {
                     ))}
                   </select>
                 </div>
+
+                {!editingUserId && (
+                  <div className="pt-4 border-t border-gray-200 mt-4">
+                    <label className="block text-[12px] font-semibold text-gray-700 mb-1">Secteur d'activité</label>
+                    <select
+                      value={formSecteur}
+                      onChange={e => {
+                        const secteur = e.target.value as Secteur;
+                        setFormSecteur(secteur);
+                        setFormPermissions(permissionsForSecteur(secteur));
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
+                    >
+                      {SECTEURS.map(s => (
+                        <option key={s.id} value={s.id}>{s.label}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {formSecteur === 'AUTRE'
+                        ? "Accès complet, à l'exception de Ressources Métier."
+                        : 'Accès complet.'}
+                    </p>
+                  </div>
+                )}
 
                 {formRole !== 'ADMIN' && (
                   <div>
