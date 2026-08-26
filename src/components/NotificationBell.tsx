@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bell, BellRing, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check, Wallet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast, type ToastVariant } from '../context/ToastContext';
 import {
   initOsNotifications,
   notificationPermission,
@@ -33,6 +34,28 @@ const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClas
   ADVANCE_GRANTED: { icon: Wallet, nav: 'HR', iconClass: 'bg-teal-50 text-teal-600' },
 };
 
+/**
+ * Which status colour the in-app toast wears.
+ *
+ * The two *_DECISION types deliberately map to a neutral `info`: the server
+ * sends approvals and refusals under the same type (see the `LEAVE_DECISION`
+ * pair in server.ts), so the type cannot tell them apart and only the French
+ * wording of the title does. Sniffing that string would put a refusal in
+ * green the moment anyone rephrases it, which is worse than being neutral.
+ * Giving them distinct colours needs an explicit outcome field on the
+ * notification row, not a heuristic here.
+ */
+const TOAST_VARIANT: Record<string, ToastVariant> = {
+  TASK_ASSIGNED: 'info',
+  TASK_REMINDER: 'warning',
+  LEAVE_REQUEST: 'warning',
+  LEAVE_DECISION: 'info',
+  ABSENCE_REQUEST: 'warning',
+  ABSENCE_DECISION: 'info',
+  LOAN_GRANTED: 'success',
+  ADVANCE_GRANTED: 'success',
+};
+
 /** "il y a 5 min" — coarse on purpose, this is a notification list, not a log. */
 const relativeTime = (iso: string) => {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -47,11 +70,19 @@ const relativeTime = (iso: string) => {
 
 export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }) => {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [contacts, setContacts] = useState<any[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
+  /**
+   * Header passes a fresh arrow every render, so depending on `onNavigate`
+   * directly would give `refresh` a new identity each render and reset the
+   * 20s poll interval every time. Read it through a ref instead.
+   */
+  const navigateRef = useRef(onNavigate);
+  navigateRef.current = onNavigate;
   const [permission, setPermission] = useState<NotificationPermission>(notificationPermission());
 
   // Ids already surfaced as an OS toast. Seeded on the first poll rather than
@@ -68,11 +99,11 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     const onMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'notification-click' && event.data.nav) onNavigate(event.data.nav);
+      if (event.data?.type === 'notification-click' && event.data.nav) navigateRef.current(event.data.nav);
     };
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
-  }, [onNavigate]);
+  }, []);
 
   const enableNotifications = async () => {
     const result = await requestNotificationPermission();
@@ -81,6 +112,22 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
       showOsNotification({
         title: 'Notifications activées',
         body: 'Vous serez prévenu ici des nouvelles tâches, demandes et messages.',
+        tag: 'notifications-enabled',
+      });
+      showToast({
+        title: 'Notifications activées',
+        body: 'Vous serez prévenu des nouvelles tâches, demandes et messages.',
+        variant: 'success',
+        tag: 'notifications-enabled',
+      });
+    }
+    if (result === 'denied') {
+      // The browser only asks once, so say plainly that the in-app pop-ups
+      // keep working rather than leaving the click looking like it failed.
+      showToast({
+        title: 'Notifications système refusées',
+        body: "Les pop-ups resteront affichés dans l'application.",
+        variant: 'warning',
         tag: 'notifications-enabled',
       });
     }
@@ -120,11 +167,21 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
         const key = String(n.id);
         if (notifiedIds.current.has(key)) continue;
         notifiedIds.current.add(key);
+        const nav = TYPE_META[n.type]?.nav ?? 'Dashboard';
+        // Both surfaces, same event: the OS toast is dropped when permission
+        // was never granted, the in-app one has no permission to be refused.
         showOsNotification({
           title: n.title || 'Tâches & Cash',
           body: n.body || '',
-          nav: TYPE_META[n.type]?.nav ?? 'Dashboard',
+          nav,
           tag: `notif-${key}`,
+        });
+        showToast({
+          title: n.title || 'Tâches & Cash',
+          body: n.body || '',
+          variant: TOAST_VARIANT[n.type] ?? 'info',
+          tag: `notif-${key}`,
+          onClick: () => navigateRef.current(nav),
         });
       }
 
@@ -132,13 +189,17 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
         const key = String(c.id);
         const previous = lastUnreadByContact.current[key] ?? 0;
         if (c.unreadCount > previous) {
-          showOsNotification({
-            title: `Nouveau message — ${c.name || c.username || 'Collaborateur'}`,
-            body: c.unreadCount > 1 ? `${c.unreadCount} messages non lus` : 'Vous avez reçu un message.',
-            nav: 'Messages',
-            // Per contact, so a second message replaces the first toast
-            // instead of stacking one per message.
+          const title = `Nouveau message — ${c.fullName || c.name || c.username || 'Collaborateur'}`;
+          const body = c.unreadCount > 1 ? `${c.unreadCount} messages non lus` : 'Vous avez reçu un message.';
+          // Per contact, so a second message replaces the first toast
+          // instead of stacking one per message.
+          showOsNotification({ title, body, nav: 'Messages', tag: `msg-${key}` });
+          showToast({
+            title,
+            body,
+            variant: 'info',
             tag: `msg-${key}`,
+            onClick: () => navigateRef.current('Messages'),
           });
         }
       }
@@ -149,7 +210,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
     } catch {
       /* a missed poll just delays the badge, never worth surfacing */
     }
-  }, [token]);
+  }, [token, showToast]);
 
   useEffect(() => {
     refresh();
