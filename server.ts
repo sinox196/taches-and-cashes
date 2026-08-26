@@ -3,7 +3,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
 import { LEGACY_COMPANY_ID, TRIAL_DAYS, PLAN_SEAT_LIMITS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
-import { STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
+import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
 import {
   DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
@@ -4368,11 +4368,100 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
+  /**
+   * Forgot password. The only email attached to a company is its own
+   * `contactEmail` — the address entered once at signup; individual
+   * collaborator accounts have no email of their own — so this always
+   * resets that company's ADMIN account. Always responds the same way
+   * whether or not the email matched anything, so it can't be used to
+   * probe which addresses have an account.
+   */
+  app.post('/api/auth/forgot-password', async (req: any, res: any) => {
+    try {
+      const email = String(req.body?.email ?? '').trim().toLowerCase();
+      if (email) {
+        const companies = await db.getAllCompanies();
+        const company = companies.find((c: any) => (c.contactEmail || '').toLowerCase() === email);
+        if (company) {
+          const users = await db.getAllUsers(company.id);
+          const admin = users.find((u: any) => u.role === 'ADMIN');
+          if (admin) {
+            // `pwd` pins the token to the password hash it was issued against —
+            // once the reset actually happens (or the password changes any
+            // other way) the hash moves on and the same emailed link can't be
+            // replayed for the rest of its 1h validity.
+            const resetToken = jwt.sign(
+              { purpose: 'password_reset', userId: admin.id, companyId: company.id, pwd: admin.password },
+              JWT_SECRET, { expiresIn: '1h' },
+            );
+            const link = `https://taches-and-cash.com/?reset=${resetToken}`;
+            await sendMail({
+              to: company.contactEmail,
+              from: '"Tâches & Cash — Support" <support@taches-and-cash.com>',
+              subject: 'Réinitialisation de votre mot de passe',
+              html: `
+                <p>Bonjour ${escapeHtml(company.contactName || '')},</p>
+                <p>Vous avez demandé la réinitialisation de votre mot de passe Tâches &amp; Cash.</p>
+                <p><a href="${link}">Cliquez ici pour choisir un nouveau mot de passe</a></p>
+                <p>Ce lien expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>
+                <p style="margin-top:24px;padding-top:16px;border-top:1px solid #E6E9EE;color:#8A93A0;font-size:12px;">
+                  Tâches &amp; Cash — <a href="mailto:support@taches-and-cash.com">support@taches-and-cash.com</a>
+                </p>
+              `,
+            }).catch(() => {});
+          }
+        }
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/auth/reset-password', async (req: any, res: any) => {
+    try {
+      const token = String(req.body?.token ?? '');
+      const password = String(req.body?.password ?? '');
+      const confirmPassword = String(req.body?.confirmPassword ?? '');
+
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+      }
+      if (password !== confirmPassword) {
+        return res.status(400).json({ error: 'Les mots de passe ne correspondent pas' });
+      }
+
+      let payload: any;
+      try {
+        payload = jwt.verify(token, JWT_SECRET);
+      } catch {
+        return res.status(400).json({ error: 'Lien invalide ou expiré. Demandez un nouveau lien.' });
+      }
+      if (payload?.purpose !== 'password_reset') {
+        return res.status(400).json({ error: 'Lien invalide ou expiré. Demandez un nouveau lien.' });
+      }
+
+      const user = await db.getUserById(payload.companyId, payload.userId);
+      if (!user || payload.pwd !== user.password) {
+        return res.status(400).json({ error: 'Lien invalide ou expiré. Demandez un nouveau lien.' });
+      }
+
+      const hashed = await bcrypt.hash(password, 10);
+      await db.updateUser(payload.companyId, payload.userId, { password: hashed });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // ---------------------------------------------------------
   // Platform admin — cross-tenant. Confirming a company's payment, sending
-  // the platform's own RIB, and editing that RIB are the only actions here;
-  // everything else about a company's own data stays reachable only through
-  // its own scoped routes above.
+  // the platform's own RIB, editing that RIB, and managing a company's own
+  // users are the only actions here; everything else about a company's own
+  // data stays reachable only through its own scoped routes above.
   // ---------------------------------------------------------
 
   /** Every real customer company (the legacy cabinet itself is excluded — it isn't one). */
@@ -4493,6 +4582,63 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       res.json({ company: updated, emailSent: sent });
     } catch (error) {
       console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Every user of one customer company — cross-tenant, so scoped through :id rather than the caller's own companyId. */
+  app.get('/api/platform/companies/:id/users', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.params.id);
+      if (!company) return res.status(404).json({ error: 'Not found' });
+      const users = await db.getAllUsers(company.id);
+      res.json(users.map(publicUser).sort((a: any, b: any) => a.username.localeCompare(b.username)));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/platform/companies/:id/users/:userId', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const userId = parseInt(req.params.userId, 10);
+      const user = await db.getUserById(req.params.id, userId);
+      if (!user) return res.status(404).json({ error: 'Not found' });
+
+      const updates: any = {};
+
+      const username = typeof req.body?.username === 'string' ? req.body.username.trim() : undefined;
+      if (username && username !== user.username) {
+        const existing = await db.getUserByUsername(username);
+        if (existing) return res.status(400).json({ error: "Ce nom d'utilisateur est déjà pris" });
+        updates.username = username;
+      }
+
+      if (typeof req.body?.role === 'string' && ROLES.some(r => r.id === req.body.role)) {
+        updates.role = req.body.role;
+      }
+
+      if (typeof req.body?.password === 'string' && req.body.password) {
+        if (req.body.password.length < 6) {
+          return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+        }
+        updates.password = await bcrypt.hash(req.body.password, 10);
+      }
+
+      const updated = await db.updateUser(req.params.id, userId, updates);
+      res.json(publicUser(updated));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/platform/companies/:id/users/:userId', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const userId = parseInt(req.params.userId, 10);
+      const success = await db.deleteUser(req.params.id, userId);
+      if (!success) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });

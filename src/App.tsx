@@ -22,6 +22,7 @@ import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
+import { ResetPassword } from './pages/ResetPassword';
 import { Loader2, ClipboardCheck, CalendarClock } from 'lucide-react';
 
 import {
@@ -42,6 +43,14 @@ export default function App() {
   // login form reached from it via "Se connecter". Distinct from
   // activeSidebarItem, which only ever applies to the authenticated shell.
   const [publicScreen, setPublicScreen] = useState<'landing' | 'login'>('landing');
+
+  // The app has no router, but the "mot de passe oublié" email links back to
+  // this same URL with ?reset=<token> — read once at mount, ahead of the
+  // normal logged-in/logged-out split, since this screen applies regardless
+  // of whether a session already exists in this browser.
+  const [resetToken, setResetToken] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('reset')
+  );
 
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
@@ -454,6 +463,18 @@ export default function App() {
     await updateTimeEntryApi(entry.id, { statut: 'RUNNING' });
     showToast(`Chronomètre actif basculé sur "${entry.description}"`);
   };
+
+  if (resetToken) {
+    return (
+      <ResetPassword
+        token={resetToken}
+        onDone={() => {
+          window.history.replaceState({}, '', window.location.pathname);
+          setResetToken(null);
+        }}
+      />
+    );
+  }
 
   if (isLoading) {
     return (

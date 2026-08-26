@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Lock, User, Loader2, Globe, ArrowLeft } from 'lucide-react';
+import { Lock, User, Loader2, Globe, ArrowLeft, Mail, CheckCircle2 } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { friendlyError } from '../utils/errors';
 
@@ -16,6 +16,15 @@ export const Login: React.FC<LoginProps> = ({ onBack }) => {
   const [isLoading, setIsLoading] = useState(false);
   const { login, authMessage } = useAuth();
   const { t, language, setLanguage } = useLanguage();
+
+  // 'login' is the normal form; 'forgot' asks for the account's email;
+  // 'forgotSent' is the generic confirmation — always shown regardless of
+  // whether the email matched anything, so this can't be used to probe
+  // which addresses have an account.
+  const [mode, setMode] = useState<'login' | 'forgot' | 'forgotSent'>('login');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,6 +49,24 @@ export const Login: React.FC<LoginProps> = ({ onBack }) => {
       setError(friendlyError(err));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotLoading(true);
+    try {
+      await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail }),
+      });
+      setMode('forgotSent');
+    } catch (err) {
+      setForgotError(friendlyError(err));
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -84,6 +111,70 @@ export const Login: React.FC<LoginProps> = ({ onBack }) => {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow-xl shadow-gray-200/50 sm:rounded-xl sm:px-10 border border-gray-100">
+          {mode === 'forgotSent' ? (
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-full bg-turquoise/10 text-turquoise flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <p className="text-[14.5px] font-semibold text-gray-900 mb-1.5">Email envoyé</p>
+              <p className="text-[13.5px] text-gray-600 leading-relaxed mb-6">
+                Si un compte existe avec cette adresse, un lien de réinitialisation vient de lui être envoyé.
+              </p>
+              <button
+                onClick={() => { setMode('login'); setForgotEmail(''); }}
+                className="w-full py-2.5 rounded-lg text-[13.5px] font-bold text-white bg-navy hover:bg-navy-hover transition-colors"
+              >
+                Retour à la connexion
+              </button>
+            </div>
+          ) : mode === 'forgot' ? (
+            <form className="space-y-6" onSubmit={handleForgotSubmit}>
+              <p className="text-[13px] text-gray-600 leading-relaxed">
+                Indiquez l'adresse email utilisée à la création de votre compte — nous vous enverrons un lien pour
+                choisir un nouveau mot de passe.
+              </p>
+
+              {forgotError && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md">
+                  <p className="text-sm text-red-700 font-medium">{forgotError}</p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[13px] font-semibold text-gray-700 mb-1">Email</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Mail className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <input
+                    type="email"
+                    required
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-[14px] transition-colors"
+                    placeholder="vous@entreprise.com"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setMode('login'); setForgotError(''); }}
+                  className="flex-1 py-2.5 px-4 border border-gray-300 rounded-lg text-[14px] font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={forgotLoading}
+                  className="flex-1 flex justify-center py-2.5 px-4 rounded-lg shadow-sm text-[14px] font-bold text-white bg-navy hover:bg-navy-hover transition-colors disabled:opacity-70"
+                >
+                  {forgotLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Envoyer le lien'}
+                </button>
+              </div>
+            </form>
+          ) : (
           <form className="space-y-6" onSubmit={handleSubmit}>
             {!error && authMessage && (
               <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-md">
@@ -133,6 +224,15 @@ export const Login: React.FC<LoginProps> = ({ onBack }) => {
                   placeholder="••••••••"
                 />
               </div>
+              <div className="flex justify-end mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setMode('forgot'); setError(''); }}
+                  className="text-[12.5px] font-medium text-navy hover:underline"
+                >
+                  Mot de passe oublié ?
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center justify-between mt-2">
@@ -153,6 +253,7 @@ export const Login: React.FC<LoginProps> = ({ onBack }) => {
               </button>
             </div>
           </form>
+          )}
         </div>
       </div>
     </div>

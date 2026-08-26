@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark } from 'lucide-react';
+import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
+import { PlatformUsersModal } from '../components/platform/PlatformUsersModal';
 
 interface Company {
   id: string;
@@ -42,6 +43,8 @@ export const PlatformAdmin: React.FC = () => {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [planPick, setPlanPick] = useState<Record<string, string>>({});
+
+  const [usersCompany, setUsersCompany] = useState<Company | null>(null);
 
   const [bank, setBank] = useState({ bankName: '', iban: '', rib: '', swift: '', instructions: '' });
   const [bankSaving, setBankSaving] = useState(false);
@@ -244,6 +247,13 @@ export const PlatformAdmin: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setUsersCompany(c)}
+                          title="Gérer les utilisateurs"
+                          className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-[11.5px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                        >
+                          <Users className="w-3.5 h-3.5" /> Utilisateurs
+                        </button>
                         {c.status !== 'ACTIVE' && (
                           <>
                             <button
@@ -273,6 +283,14 @@ export const PlatformAdmin: React.FC = () => {
             </tbody>
           </table>
         </div>
+      )}
+
+      {usersCompany && (
+        <PlatformUsersModal
+          companyId={usersCompany.id}
+          companyName={usersCompany.name}
+          onClose={() => setUsersCompany(null)}
+        />
       )}
     </main>
   );
