@@ -14,12 +14,41 @@ const frDate = (iso: string) => {
 
 const PAYMENT_METHODS = ['Espèces', 'Chèque', 'Virement', 'Carte', 'Traite'];
 
+/**
+ * The categories the cabinet's own journal already uses. Suggestions, not a
+ * closed list — the field accepts anything typed, so a new one never needs a
+ * code change. "Encaissement règlement de facture" is the one that normally
+ * carries a client, and so becomes that client's encaissement.
+ */
+const CATEGORIES = [
+  'Solde de départ',
+  'Encaissement règlement de facture',
+  'Alimentation de caisse',
+  'Alimentation',
+  'Transport',
+  'Loyer',
+  'Femme de ménage',
+  'Fournitures de bureau',
+  "Produits d'hygiène",
+  'STEG',
+  'SONEDE',
+  'TELECOM',
+  'OOREDOO',
+  'Autre',
+];
+
+const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+/** The sheet's own "Mois" column — derived from the date, never stored. */
+const monthOf = (iso: string) => Number(String(iso || '').slice(5, 7)) || 0;
+
 export interface JournalRow {
   id: string;
   date: string;
   label: string;
   clientId: number | null;
   clientName: string;
+  category: string;
   paymentMethod: string;
   reference: string;
   entree: number;
@@ -31,6 +60,7 @@ const emptyDraft = (): Omit<JournalRow, 'id'> => ({
   label: '',
   clientId: null,
   clientName: '',
+  category: '',
   paymentMethod: 'Espèces',
   reference: '',
   entree: 0,
@@ -58,6 +88,8 @@ export const CashJournal: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  /** The sheet is read month by month; 0 = every month. */
+  const [month, setMonth] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Omit<JournalRow, 'id'> | null>(null);
@@ -81,11 +113,13 @@ export const CashJournal: React.FC = () => {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(r =>
-      [r.label, r.clientName, r.reference, r.paymentMethod].some(v => String(v || '').toLowerCase().includes(q)),
-    );
-  }, [rows, search]);
+    return rows.filter(r => {
+      if (month && monthOf(r.date) !== month) return false;
+      if (!q) return true;
+      return [r.label, r.clientName, r.category, r.reference, r.paymentMethod]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+  }, [rows, search, month]);
 
   // Running balance follows the *displayed* order, so it always reads as the
   // column the cabinet's own sheet has: each line's solde is everything above
@@ -148,6 +182,8 @@ export const CashJournal: React.FC = () => {
         <input type="date" value={value.date} onChange={e => onChange({ date: e.target.value })}
           className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
       </td>
+      {/* Derived from the date, so it is shown rather than asked for. */}
+      <td className="px-2 py-1.5 text-center text-[12px] text-gray-400">{monthOf(value.date) || '—'}</td>
       <td className="px-2 py-1.5">
         <input value={value.label} onChange={e => onChange({ label: e.target.value })} placeholder="Libellé"
           className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
@@ -157,6 +193,11 @@ export const CashJournal: React.FC = () => {
           value={value.clientName}
           onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
         />
+      </td>
+      <td className="px-2 py-1.5">
+        <input list="caisse-categories" value={value.category} onChange={e => onChange({ category: e.target.value })}
+          placeholder="Catégorie"
+          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[150px]" />
       </td>
       <td className="px-2 py-1.5">
         <select value={value.paymentMethod} onChange={e => onChange({ paymentMethod: e.target.value })}
@@ -183,15 +224,24 @@ export const CashJournal: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-4">
+      {/* Shared by every Catégorie input — suggestions only, free text wins. */}
+      <datalist id="caisse-categories">
+        {CATEGORIES.map(c => <option key={c} value={c} />)}
+      </datalist>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[11.5px] text-gray-500">
           Chaque <span className="font-semibold text-gray-700">entrée</span> rattachée à un client apparaît
           automatiquement dans ses encaissements sur la page Clients.
         </p>
         <div className="flex items-center gap-2">
+          <select value={month} onChange={e => setMonth(Number(e.target.value))}
+            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
+            <option value={0}>Tous les mois</option>
+            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Libellé, client, pièce…"
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Libellé, client, catégorie…"
               className="pl-8 pr-3 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-56" />
           </div>
           {canManage && !draft && (
@@ -215,19 +265,19 @@ export const CashJournal: React.FC = () => {
             <table className="w-full text-left whitespace-nowrap border-collapse">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {['Date', 'Libellé', 'Client', 'Règlement', 'Pièce'].map(h => (
+                  {['Date', 'Mois', 'Libellé', 'Client', 'Catégorie', 'Règlement', 'Pièce'].map(h => (
                     <th key={h} className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">{h}</th>
                   ))}
                   <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Entrée</th>
                   <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Sortie</th>
-                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Solde</th>
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right sticky right-0 bg-gray-50 border-l border-gray-200">Solde</th>
                   <th className="px-3 py-2.5" />
                 </tr>
                 <tr className="bg-white border-b-2 border-gray-200 font-bold text-[12px]">
-                  <td className="px-3 py-2 text-gray-700" colSpan={5}>Total général</td>
+                  <td className="px-3 py-2 text-gray-700" colSpan={7}>Total général</td>
                   <td className="px-3 py-2 text-right font-mono text-done-fg">{money(totals.entree)}</td>
                   <td className="px-3 py-2 text-right font-mono text-late-fg">{money(totals.sortie)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-gray-900">{money(totals.entree - totals.sortie)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(totals.entree - totals.sortie)}</td>
                   <td />
                 </tr>
               </thead>
@@ -251,7 +301,7 @@ export const CashJournal: React.FC = () => {
                 )}
 
                 {withSolde.length === 0 && !draft ? (
-                  <tr><td colSpan={9} className="p-10 text-center">
+                  <tr><td colSpan={11} className="p-10 text-center">
                     <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-3" />
                     <p className="text-[13px] text-gray-500">
                       {search ? `Aucune ligne ne correspond à « ${search} ».` : 'Aucun mouvement de caisse enregistré.'}
@@ -277,13 +327,19 @@ export const CashJournal: React.FC = () => {
                   ) : (
                     <tr key={row.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
                       <td className="px-3 py-2 text-gray-600">{frDate(row.date)}</td>
+                      <td className="px-3 py-2 text-gray-400 text-center">{monthOf(row.date) || '—'}</td>
                       <td className="px-3 py-2 text-gray-800">{row.label || <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-gray-700">{row.clientName || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2">
+                        {row.category
+                          ? <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[11px]">{row.category}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-3 py-2 text-gray-500">{row.paymentMethod || '—'}</td>
                       <td className="px-3 py-2 text-gray-500">{row.reference || '—'}</td>
                       <td className="px-3 py-2 text-right font-mono text-done-fg">{row.entree ? money(row.entree) : ''}</td>
                       <td className="px-3 py-2 text-right font-mono text-late-fg">{row.sortie ? money(row.sortie) : ''}</td>
-                      <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{money(solde)}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(solde)}</td>
                       <td className="px-3 py-2">
                         {canManage && (
                           <div className="flex items-center gap-1 justify-end">

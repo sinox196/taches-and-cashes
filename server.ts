@@ -2255,6 +2255,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // when a row was never linked to one (same rule invoices already use).
       clientId: body?.clientId ? Number(body.clientId) : null,
       clientName: text(body?.clientName, 160),
+      // Free text, not an enum: the cabinet's own sheet already carries a
+      // long, growing list (Transport, Loyer, Femme de ménage, STEG, …) and
+      // a closed list would just mean a code change every time it grows.
+      // The UI offers the known ones as suggestions.
+      category: text(body?.category, 60),
       paymentMethod: text(body?.paymentMethod, 40),
       reference: text(body?.reference, 60),
       entree: entree > 0 ? entree : 0,
@@ -2264,12 +2269,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
   const validateJournalEntry = (row: any): string | null => {
     if (!row.date) return 'La date est obligatoire';
-    if (!row.label && !row.clientName) return 'Un libellé ou un client est obligatoire';
-    // A row that moves no money is not a movement — it would sit in the
-    // journal contributing nothing and quietly break the running balance.
-    if (row.entree <= 0 && row.sortie <= 0) return 'Saisissez un montant en entrée ou en sortie';
-    // Both at once is a data-entry slip, not a real movement: the same line
-    // cannot be a receipt and a payment.
+    if (!row.label && !row.clientName && !row.category) return 'Un libellé, une catégorie ou un client est obligatoire';
+    // A row with no amount is deliberately allowed: the cabinet's own journal
+    // records a bill received (STEG, OOREDOO, loyer…) before it is paid, and
+    // the running balance simply carries through unchanged.
+    // Both amounts at once is a different matter — a data-entry slip, since
+    // one line cannot be a receipt and a payment.
     if (row.entree > 0 && row.sortie > 0) return 'Une ligne ne peut pas être à la fois une entrée et une sortie';
     return null;
   };

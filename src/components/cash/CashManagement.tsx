@@ -123,7 +123,11 @@ export const CashManagement: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1200px] w-full mx-auto p-4 sm:p-6 lg:p-8">
+    <div className={`flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 w-full mx-auto p-4 sm:p-6 lg:p-8 ${
+      // The daybook is a wide sheet by nature — eleven columns — so it gets
+      // more room than the document list, which is comfortable at 1200.
+      tab === 'journal' ? 'max-w-[1500px]' : 'max-w-[1200px]'
+    }`}>
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <h1 className="text-[20px] font-bold text-gray-800 tracking-tight flex items-center gap-2">
