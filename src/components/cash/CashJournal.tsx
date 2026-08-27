@@ -83,15 +83,21 @@ const Fields: React.FC<{
         onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
       />
     </td>
+    {/* w-full, not a fixed width: the column itself is stretched wide by
+        the "MONTANT ENCAISSÉ"/"MONTANT DÉCAISSÉ" headers, and a narrower
+        fixed-width input left-anchors inside that wider cell — visibly
+        offset from the header above it and the right-aligned amounts every
+        other row shows in the same column. Filling the cell and staying
+        text-right keeps the input under the number it's meant to be under. */}
     <td className="px-2 py-1.5">
       <input type="number" step="0.001" min="0" value={value.entree || ''} placeholder="0,000"
         onChange={e => onChange({ entree: Number(e.target.value) || 0, sortie: 0 })}
-        className="w-28 px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
     </td>
     <td className="px-2 py-1.5">
       <input type="number" step="0.001" min="0" value={value.sortie || ''} placeholder="0,000"
         onChange={e => onChange({ sortie: Number(e.target.value) || 0, entree: 0 })}
-        className="w-28 px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
     </td>
   </>
 );
