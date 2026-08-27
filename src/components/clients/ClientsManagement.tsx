@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
+import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet, BookOpen } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
 import { MultiSelectAutocomplete } from '../dashboard/MultiSelectAutocomplete';
 import { formatCostTND } from '../../utils/formatters';
@@ -35,6 +35,10 @@ export interface Client {
   /** A client can be paid in several instalments, so this is a list — the
    *  displayed total is the sum of these entries' amounts. */
   encaissements: EncaissementEntry[];
+  /** Encaissements coming from the Brouillard de caisse (Cash). Attached
+   *  server-side and NOT editable here: the journal owns them, and the
+   *  movement is recorded once, there. */
+  journalEncaissements?: EncaissementEntry[];
   /** Derived server-side: the sum of this client's own invoices' totals. */
   montantFacture?: number;
   /** Derived server-side: soldeAnterieur - sum(encaissements) + montantFacture. */
@@ -762,17 +766,32 @@ export const ClientsManagement: React.FC = () => {
                           );
                         }
                         if (col.key === 'encaissements') {
-                          const total = sumEncaissements(client.encaissements);
                           const entries = Array.isArray(client.encaissements) ? client.encaissements : [];
+                          const journal = client.journalEncaissements || [];
+                          // The displayed total must match the server's own
+                          // resteAPayer, which counts both sources.
+                          const total = sumEncaissements(client.encaissements) + sumEncaissements(journal);
                           return (
                             <td key={col.key} className="px-5 py-3 text-right font-mono text-gray-700 bg-emerald-50/25">
                               {formatCostTND(total)}
-                              {entries.length > 0 && (
+                              {(entries.length > 0 || journal.length > 0) && (
                                 <div className="text-[10px] text-gray-400 font-sans mt-1 space-y-0.5">
                                   {entries.map(entry => (
                                     <div key={entry.id} className="whitespace-nowrap">
                                       {formatCostTND(Number(entry.amount) || 0)}
                                       {entry.date && <> · {new Date(entry.date).toLocaleDateString('fr-FR')}</>}
+                                    </div>
+                                  ))}
+                                  {/* Brouillard de caisse rows carry their own
+                                      mark so the two origins are never confused
+                                      for one another. */}
+                                  {journal.map(entry => (
+                                    <div key={entry.id} className="whitespace-nowrap text-turquoise font-medium">
+                                      {formatCostTND(Number(entry.amount) || 0)}
+                                      {entry.date && <> · {new Date(entry.date).toLocaleDateString('fr-FR')}</>}
+                                      <span className="ml-1 px-1 py-px rounded bg-turquoise/10 text-turquoise text-[9px] font-semibold uppercase tracking-wide">
+                                        caisse
+                                      </span>
                                     </div>
                                   ))}
                                 </div>
@@ -995,6 +1014,34 @@ export const ClientsManagement: React.FC = () => {
                       ))}
                       <p className="text-[11px] text-gray-500 text-right">
                         Total : <span className="font-semibold text-gray-800">{sumEncaissements(formData.encaissements).toLocaleString('fr-FR')} TND</span>
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Encaissements coming from the Brouillard de caisse. Shown
+                      here so the client's real total is visible in one place,
+                      but read-only: the journal is where the movement lives,
+                      and editing it in two places would mean two records of
+                      one payment. */}
+                  {(formData.journalEncaissements || []).length > 0 && (
+                    <div className="mt-3 border border-turquoise/30 bg-turquoise/5 rounded-lg p-3">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <BookOpen className="w-3.5 h-3.5 text-turquoise" />
+                        <span className="text-[11.5px] font-semibold text-gray-700">Depuis le brouillard de caisse</span>
+                      </div>
+                      <div className="space-y-1">
+                        {(formData.journalEncaissements || []).map(entry => (
+                          <div key={entry.id} className="flex items-center justify-between text-[12px] text-gray-700">
+                            <span className="text-gray-500">
+                              {entry.date ? new Date(entry.date).toLocaleDateString('fr-FR') : '—'}
+                              {entry.note && <> · {entry.note}</>}
+                            </span>
+                            <span className="font-mono font-semibold">{(Number(entry.amount) || 0).toLocaleString('fr-FR')} TND</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10.5px] text-gray-500 mt-2">
+                        Modifiables depuis Cash → Brouillard de caisse.
                       </p>
                     </div>
                   )}

@@ -823,6 +823,48 @@ async function startServer() {
   };
 
   /**
+   * Brouillard de caisse rows that are encaissements for a client — an
+   * `entree` on a row tied to one. They are NOT copied onto the client:
+   * the journal stays the single record of the movement, and the client's
+   * encaissements are the manual list *plus* these, merged on read. Copying
+   * would mean two rows to keep in step every time the journal is edited.
+   *
+   * Keyed by the same `clientBucketKey()` the invoice totals use, so a row
+   * tied only by free-text client name still lands on the right client.
+   */
+  const journalEncaissementsByClient = (entries: any[]) => {
+    const byKey = new Map<string, any[]>();
+    for (const row of entries) {
+      const amount = round3(num(Number(row?.entree), 0));
+      if (amount <= 0) continue;
+      if (!row?.clientId && !row?.clientName) continue;
+      const key = clientBucketKey({ clientId: row.clientId, client: row.clientName });
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push({
+        id: row.id,
+        amount,
+        date: String(row.date || '').slice(0, 10),
+        note: String(row.label || '').trim(),
+        // What the Clients view keys off to render these differently from the
+        // ones typed there by hand — and to keep them read-only, since the
+        // journal owns them.
+        source: 'BROUILLARD',
+        paymentMethod: row.paymentMethod || '',
+        reference: row.reference || '',
+      });
+    }
+    for (const list of byKey.values()) list.sort((a, b) => a.date.localeCompare(b.date));
+    return byKey;
+  };
+
+  /** The journal encaissements belonging to one client, from a prepared map. */
+  const journalFor = (byKey: Map<string, any[]>, client: any) =>
+    [...(byKey.get(String(client.id)) || []), ...(byKey.get(`name:${client.name}`) || [])]
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+  const sumAmounts = (rows: any[]) => round3(rows.reduce((s, r) => s + num(Number(r.amount), 0), 0));
+
+  /**
    * The client's running ledger — used by GET (batched, one invoice scan for
    * every returned row) and by POST/PUT below (a single client, so a direct
    * scan is cheap). Both must agree, since editing a client's own soldeAnterieur/
@@ -843,8 +885,17 @@ async function startServer() {
     }
     montantFacture = round3(montantFacture);
     const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
-    const encaissements = sumEncaissements(client);
-    return { ...client, montantFacture, resteAPayer: round3(soldeAnterieur - encaissements + montantFacture) };
+    const journalEncaissements = journalFor(
+      journalEncaissementsByClient(await db.getAllCashJournalEntries(companyId)),
+      client,
+    );
+    const encaissements = round3(sumEncaissements(client) + sumAmounts(journalEncaissements));
+    return {
+      ...client,
+      montantFacture,
+      journalEncaissements,
+      resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
+    };
   };
 
   // GET /api/clients
@@ -958,14 +1009,23 @@ async function startServer() {
       // Enriched over every client matching the current search/filters, not
       // just the current page — the "Total Général" row needs the ledger
       // figures of clients that aren't currently visible too.
+      // Same single-scan treatment as the invoices above: the brouillard is
+      // read once for the whole request, then looked up per client.
+      const journalByClient = journalEncaissementsByClient(await db.getAllCashJournalEntries(req.user.companyId));
       const enrichedAll = clients.map((c: any) => {
         const montantFacture = round3(
           (montantFactureByClient.get(String(c.id)) || 0) +
           (montantFactureByClient.get(`name:${c.name}`) || 0),
         );
         const soldeAnterieur = num(Number(c.soldeAnterieur), 0);
-        const encaissements = sumEncaissements(c);
-        return { ...c, montantFacture, resteAPayer: round3(soldeAnterieur - encaissements + montantFacture) };
+        const journalEncaissements = journalFor(journalByClient, c);
+        const encaissements = round3(sumEncaissements(c) + sumAmounts(journalEncaissements));
+        return {
+          ...c,
+          montantFacture,
+          journalEncaissements,
+          resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
+        };
       });
 
       // If client didn't explicitly request pagination, maybe return array to preserve backward compatibility?
@@ -981,7 +1041,9 @@ async function startServer() {
         const totals = enrichedAll.reduce((acc: any, c: any) => {
           acc.soldeAnterieur = round3(acc.soldeAnterieur + num(Number(c.soldeAnterieur), 0));
           acc.montantFacture = round3(acc.montantFacture + num(Number(c.montantFacture), 0));
-          acc.encaissements = round3(acc.encaissements + sumEncaissements(c));
+          // c.journalEncaissements is already attached above — reuse it rather
+          // than re-deriving, so the total can never drift from the rows.
+          acc.encaissements = round3(acc.encaissements + sumEncaissements(c) + sumAmounts(c.journalEncaissements || []));
           acc.resteAPayer = round3(acc.resteAPayer + num(Number(c.resteAPayer), 0));
           return acc;
         }, { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
@@ -1450,6 +1512,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // name on one side and by id on the other would split into two rows.
     const invoiceBuckets = new Map<string, { netToPay: number; count: number }>();
     const allInvoices = await db.getAllInvoices(req.user.companyId) || [];
+    // One journal scan for the whole request, same as the invoice scan below.
+    const dashboardJournalByClient = journalEncaissementsByClient(await db.getAllCashJournalEntries(req.user.companyId) || []);
     // "Montant de facture" is a lifetime running-balance figure (same one
     // shown on the Clients page), not scoped to the dashboard's date filter —
     // computed here from the unfiltered `allInvoices` fetched above. Keyed
@@ -1516,7 +1580,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // load; the rows below fetch it from /api/kpi/client-tasks on expand.
       const montantFacture = round3(montantFactureByClient.get(key) || 0);
       const soldeAnterieur = num(Number(clientRecord?.soldeAnterieur), 0);
-      const encaissements = sumEncaissements(clientRecord);
+      // Brouillard de caisse entrées count as encaissements on the Clients
+      // page, so they have to count here too — this block promises the same
+      // figures, and a dashboard that quietly disagreed with the ledger it
+      // claims to mirror is worse than one that showed nothing.
+      const encaissements = round3(
+        sumEncaissements(clientRecord) +
+        sumAmounts(clientRecord ? journalFor(dashboardJournalByClient, clientRecord) : (dashboardJournalByClient.get(key) || [])),
+      );
       return {
         id: first.clientId ?? key,
         key,
@@ -2162,6 +2233,102 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
     return null;
   };
+
+  // ---------------------------------------------------------
+  // Brouillard de caisse — the cash daybook. One row per movement:
+  // `entree` (money in) or `sortie` (money out). A row with an `entree`
+  // tied to a client is also that client's encaissement on the Clients
+  // page — merged on read by journalEncaissementsByClient(), never copied
+  // onto the client, so there is exactly one record of the movement.
+  // ---------------------------------------------------------
+
+  /** Shared by create and update, so a row can never be saved two ways. */
+  const normalizeJournalEntry = (body: any) => {
+    const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+    const entree = round3(num(Number(body?.entree), 0));
+    const sortie = round3(num(Number(body?.sortie), 0));
+    return {
+      date: text(body?.date, 10),
+      label: text(body?.label, 200),
+      // Both are kept: the id links to a real client record, the name is what
+      // the cabinet actually typed and is the fallback the ledger matches on
+      // when a row was never linked to one (same rule invoices already use).
+      clientId: body?.clientId ? Number(body.clientId) : null,
+      clientName: text(body?.clientName, 160),
+      paymentMethod: text(body?.paymentMethod, 40),
+      reference: text(body?.reference, 60),
+      entree: entree > 0 ? entree : 0,
+      sortie: sortie > 0 ? sortie : 0,
+    };
+  };
+
+  const validateJournalEntry = (row: any): string | null => {
+    if (!row.date) return 'La date est obligatoire';
+    if (!row.label && !row.clientName) return 'Un libellé ou un client est obligatoire';
+    // A row that moves no money is not a movement — it would sit in the
+    // journal contributing nothing and quietly break the running balance.
+    if (row.entree <= 0 && row.sortie <= 0) return 'Saisissez un montant en entrée ou en sortie';
+    // Both at once is a data-entry slip, not a real movement: the same line
+    // cannot be a receipt and a payment.
+    if (row.entree > 0 && row.sortie > 0) return 'Une ligne ne peut pas être à la fois une entrée et une sortie';
+    return null;
+  };
+
+  app.get('/api/cash-journal', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+    try {
+      const rows = (await db.getAllCashJournalEntries(req.user.companyId))
+        .slice()
+        .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/cash-journal', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const row = normalizeJournalEntry(req.body);
+      const invalid = validateJournalEntry(row);
+      if (invalid) return res.status(400).json({ error: invalid });
+
+      const created = await db.createCashJournalEntry(req.user.companyId, {
+        id: genId('caisse'),
+        ...row,
+        createdBy: req.user.id,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(created);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/cash-journal/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getCashJournalEntryById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+
+      const row = normalizeJournalEntry({ ...existing, ...req.body });
+      const invalid = validateJournalEntry(row);
+      if (invalid) return res.status(400).json({ error: invalid });
+
+      res.json(await db.updateCashJournalEntry(req.user.companyId, req.params.id, row));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/cash-journal/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteCashJournalEntry(req.user.companyId, req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {

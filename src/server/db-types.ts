@@ -109,6 +109,18 @@ export interface Database {
   createPushSubscription(companyId: string, subscription: any): Promise<any>;
   deletePushSubscriptionByEndpoint(endpoint: string): Promise<boolean>;
 
+  /**
+   * Brouillard de caisse — the cash daybook. Each row is one movement:
+   * `entree` (money in) or `sortie` (money out). A row with an `entree` tied
+   * to a client is what feeds that client's encaissements in the Clients
+   * view, so the two are never entered twice.
+   */
+  getAllCashJournalEntries(companyId: string): Promise<any[]>;
+  getCashJournalEntryById(companyId: string, id: string): Promise<any | undefined>;
+  createCashJournalEntry(companyId: string, entry: any): Promise<any>;
+  updateCashJournalEntry(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteCashJournalEntry(companyId: string, id: string): Promise<boolean>;
+
   getAllNotifications(companyId: string): Promise<any[]>;
   createNotification(companyId: string, notification: any): Promise<any>;
   updateNotification(companyId: string, id: string, updates: any): Promise<any | null>;
@@ -239,6 +251,8 @@ export const emptyDb = () => ({
   // Web Push subscriptions, one per device — how a running chronometer
   // reaches a phone whose browser is closed.
   pushSubscriptions: [],
+  // Brouillard de caisse — one row per cash movement (entrée / sortie).
+  cashJournalEntries: [],
   // Ressources Métier — see the interface comments above for what each holds.
   resourceTemplates: [],
   resourceTemplateItems: [],

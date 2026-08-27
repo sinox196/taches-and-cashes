@@ -60,7 +60,8 @@ export async function initDb(): Promise<Database> {
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
   'absenceAuthorizations', 'loans', 'advances', 'leaveBalances', 'timeEntries', 'messages',
-  'taskAssignments', 'notifications', 'pushSubscriptions', 'resourceTemplates', 'resourceTemplateItems',
+  'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries',
+  'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
 ];
@@ -84,6 +85,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.taskAssignments) db.taskAssignments = [];
     if (!db.notifications) db.notifications = [];
     if (!db.pushSubscriptions) db.pushSubscriptions = [];
+    if (!db.cashJournalEntries) db.cashJournalEntries = [];
     if (!db.resourceTemplates) db.resourceTemplates = [];
     if (!db.resourceTemplateItems) db.resourceTemplateItems = [];
     if (!db.clientResourceInstances) db.clientResourceInstances = [];
@@ -508,6 +510,29 @@ async function initJsonDb(): Promise<Database> {
       const before = db.pushSubscriptions.length;
       db.pushSubscriptions = db.pushSubscriptions.filter((s: any) => s.endpoint !== endpoint);
       if (db.pushSubscriptions.length === before) return false;
+      await saveDb();
+      return true;
+    },
+
+    getAllCashJournalEntries: async (companyId: string) => scoped(db.cashJournalEntries, companyId),
+    getCashJournalEntryById: async (companyId: string, id: string) => findScoped(db.cashJournalEntries, companyId, id),
+    createCashJournalEntry: async (companyId: string, entry: any) => {
+      const row = { ...entry, companyId };
+      db.cashJournalEntries.push(row);
+      await saveDb();
+      return row;
+    },
+    updateCashJournalEntry: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.cashJournalEntries, companyId, id);
+      if (index === -1) return null;
+      db.cashJournalEntries[index] = { ...db.cashJournalEntries[index], ...updates };
+      await saveDb();
+      return db.cashJournalEntries[index];
+    },
+    deleteCashJournalEntry: async (companyId: string, id: string) => {
+      const index = indexScoped(db.cashJournalEntries, companyId, id);
+      if (index === -1) return false;
+      db.cashJournalEntries.splice(index, 1);
       await saveDb();
       return true;
     },

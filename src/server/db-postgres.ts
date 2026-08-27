@@ -68,6 +68,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   task_assignments: { desc: true },
   notifications: { desc: true },
   push_subscriptions: { desc: false },
+  cash_journal_entries: { desc: false },
   resource_templates: { desc: false },
   resource_template_items: { desc: false },
   client_resource_instances: { desc: true },
@@ -99,6 +100,7 @@ const TABLE_FOR: Record<string, string> = {
   taskAssignments: 'task_assignments',
   notifications: 'notifications',
   pushSubscriptions: 'push_subscriptions',
+  cashJournalEntries: 'cash_journal_entries',
   resourceTemplates: 'resource_templates',
   resourceTemplateItems: 'resource_template_items',
   clientResourceInstances: 'client_resource_instances',
@@ -339,6 +341,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const taskAssignments = tenantCollection('task_assignments');
   const notifications = tenantCollection('notifications');
   const pushSubscriptions = tenantCollection('push_subscriptions');
+  const cashJournal = tenantCollection('cash_journal_entries');
   const resourceTemplates = tenantCollection('resource_templates');
   const resourceTemplateItems = tenantCollection('resource_template_items');
   const clientResourceInstances = tenantCollection('client_resource_instances');
@@ -537,6 +540,12 @@ export async function initPostgres(connectionString: string): Promise<Database> 
       const res = await pool.query(`DELETE FROM push_subscriptions WHERE data->>'endpoint' = $1`, [String(endpoint)]);
       return (res.rowCount ?? 0) > 0;
     },
+
+    getAllCashJournalEntries: cashJournal.all,
+    getCashJournalEntryById: cashJournal.byId,
+    createCashJournalEntry: cashJournal.create,
+    updateCashJournalEntry: cashJournal.update,
+    deleteCashJournalEntry: cashJournal.remove,
 
     getAllNotifications: notifications.all,
     createNotification: notifications.create,
