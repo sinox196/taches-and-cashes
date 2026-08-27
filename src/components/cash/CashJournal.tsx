@@ -68,6 +68,64 @@ const emptyDraft = (): Omit<JournalRow, 'id'> => ({
 });
 
 /**
+ * The editable cells of one journal row.
+ *
+ * Declared at module scope, NOT inside CashJournal: a component defined
+ * inside another is a brand-new component *type* on every render, so React
+ * unmounts and remounts these inputs after each keystroke. That reads as a
+ * field that closes the instant it is opened — a date picker or the client
+ * dropdown snapping shut, and focus lost on every character typed.
+ */
+const Fields: React.FC<{
+  value: Omit<JournalRow, 'id'>;
+  onChange: (patch: Partial<Omit<JournalRow, 'id'>>) => void;
+}> = ({ value, onChange }) => (
+  <>
+    <td className="px-2 py-1.5">
+      <input type="date" value={value.date} onChange={e => onChange({ date: e.target.value })}
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
+    </td>
+    {/* Derived from the date, so it is shown rather than asked for. */}
+    <td className="px-2 py-1.5 text-center text-[12px] text-gray-400">{monthOf(value.date) || '—'}</td>
+    <td className="px-2 py-1.5">
+      <input value={value.label} onChange={e => onChange({ label: e.target.value })} placeholder="Libellé"
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
+    </td>
+    <td className="px-2 py-1.5 min-w-[190px]">
+      <ClientSearchInput
+        value={value.clientName}
+        onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
+      />
+    </td>
+    <td className="px-2 py-1.5">
+      <input list="caisse-categories" value={value.category} onChange={e => onChange({ category: e.target.value })}
+        placeholder="Catégorie"
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[150px]" />
+    </td>
+    <td className="px-2 py-1.5">
+      <select value={value.paymentMethod} onChange={e => onChange({ paymentMethod: e.target.value })}
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] bg-white">
+        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+      </select>
+    </td>
+    <td className="px-2 py-1.5">
+      <input value={value.reference} onChange={e => onChange({ reference: e.target.value })} placeholder="Pièce"
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] w-24" />
+    </td>
+    <td className="px-2 py-1.5">
+      <input type="number" step="0.001" min="0" value={value.entree || ''} placeholder="0,000"
+        onChange={e => onChange({ entree: Number(e.target.value) || 0, sortie: 0 })}
+        className="w-28 px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
+    </td>
+    <td className="px-2 py-1.5">
+      <input type="number" step="0.001" min="0" value={value.sortie || ''} placeholder="0,000"
+        onChange={e => onChange({ sortie: Number(e.target.value) || 0, entree: 0 })}
+        className="w-28 px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
+    </td>
+  </>
+);
+
+/**
  * Brouillard de caisse — the cabinet's cash daybook, one row per movement.
  *
  * The column that matters beyond this screen is **Entrée**: a row with an
@@ -172,55 +230,6 @@ export const CashJournal: React.FC = () => {
       setBusyId(null);
     }
   };
-
-  const Fields: React.FC<{
-    value: Omit<JournalRow, 'id'>;
-    onChange: (patch: Partial<Omit<JournalRow, 'id'>>) => void;
-  }> = ({ value, onChange }) => (
-    <>
-      <td className="px-2 py-1.5">
-        <input type="date" value={value.date} onChange={e => onChange({ date: e.target.value })}
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
-      </td>
-      {/* Derived from the date, so it is shown rather than asked for. */}
-      <td className="px-2 py-1.5 text-center text-[12px] text-gray-400">{monthOf(value.date) || '—'}</td>
-      <td className="px-2 py-1.5">
-        <input value={value.label} onChange={e => onChange({ label: e.target.value })} placeholder="Libellé"
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
-      </td>
-      <td className="px-2 py-1.5 min-w-[190px]">
-        <ClientSearchInput
-          value={value.clientName}
-          onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
-        />
-      </td>
-      <td className="px-2 py-1.5">
-        <input list="caisse-categories" value={value.category} onChange={e => onChange({ category: e.target.value })}
-          placeholder="Catégorie"
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[150px]" />
-      </td>
-      <td className="px-2 py-1.5">
-        <select value={value.paymentMethod} onChange={e => onChange({ paymentMethod: e.target.value })}
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] bg-white">
-          {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
-      </td>
-      <td className="px-2 py-1.5">
-        <input value={value.reference} onChange={e => onChange({ reference: e.target.value })} placeholder="Pièce"
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] w-24" />
-      </td>
-      <td className="px-2 py-1.5">
-        <input type="number" step="0.001" min="0" value={value.entree || ''} placeholder="0,000"
-          onChange={e => onChange({ entree: Number(e.target.value) || 0, sortie: 0 })}
-          className="w-28 px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
-      </td>
-      <td className="px-2 py-1.5">
-        <input type="number" step="0.001" min="0" value={value.sortie || ''} placeholder="0,000"
-          onChange={e => onChange({ sortie: Number(e.target.value) || 0, entree: 0 })}
-          className="w-28 px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
-      </td>
-    </>
-  );
 
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-4">
