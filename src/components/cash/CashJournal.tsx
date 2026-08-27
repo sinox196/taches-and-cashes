@@ -13,7 +13,6 @@ const frDate = (iso: string) => {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
 };
 
-const PAYMENT_METHODS = ['Espèces', 'Chèque', 'Virement', 'Carte', 'Traite'];
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const PAGE_SIZE = 20;
 
@@ -28,8 +27,6 @@ export interface JournalRow {
   clientId: number | null;
   clientName: string;
   category: string;
-  paymentMethod: string;
-  reference: string;
   entree: number;
   sortie: number;
 }
@@ -40,8 +37,6 @@ const emptyDraft = (): Omit<JournalRow, 'id'> => ({
   clientId: null,
   clientName: '',
   category: '',
-  paymentMethod: 'Espèces',
-  reference: '',
   entree: 0,
   sortie: 0,
 });
@@ -87,16 +82,6 @@ const Fields: React.FC<{
         value={value.clientName}
         onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
       />
-    </td>
-    <td className="px-2 py-1.5">
-      <select value={value.paymentMethod} onChange={e => onChange({ paymentMethod: e.target.value })}
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] bg-white">
-        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-      </select>
-    </td>
-    <td className="px-2 py-1.5">
-      <input value={value.reference} onChange={e => onChange({ reference: e.target.value })} placeholder="Pièce"
-        className="px-2 py-1 border border-gray-300 rounded text-[12px] w-24" />
     </td>
     <td className="px-2 py-1.5">
       <input type="number" step="0.001" min="0" value={value.entree || ''} placeholder="0,000"
@@ -206,7 +191,7 @@ export const CashJournal: React.FC = () => {
       if (year && yearOf(r.date) !== year) return false;
       if (month && monthOf(r.date) !== month) return false;
       if (!q) return true;
-      return [r.label, r.clientName, r.category, r.reference, r.paymentMethod]
+      return [r.label, r.clientName, r.category]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
   }, [rows, search, month, year]);
@@ -315,7 +300,7 @@ export const CashJournal: React.FC = () => {
               <table className="w-full text-left whitespace-nowrap border-collapse">
                 <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    {['Date', 'Objet', 'Description', 'Client', 'Règlement', 'Pièce'].map(h => (
+                    {['Date', 'Objet', 'Description', 'Client'].map(h => (
                       <th key={h} className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">{h}</th>
                     ))}
                     <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Entrée</th>
@@ -324,7 +309,7 @@ export const CashJournal: React.FC = () => {
                     <th className="px-3 py-2.5" />
                   </tr>
                   <tr className="bg-white border-b-2 border-gray-200 font-bold text-[12px]">
-                    <td className="px-3 py-2 text-gray-700" colSpan={6}>Total général</td>
+                    <td className="px-3 py-2 text-gray-700" colSpan={4}>Total général</td>
                     <td className="px-3 py-2 text-right font-mono text-done-fg">{money(totals.entree)}</td>
                     <td className="px-3 py-2 text-right font-mono text-late-fg">{money(totals.sortie)}</td>
                     <td className="px-3 py-2 text-right font-mono text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(totals.entree - totals.sortie)}</td>
@@ -351,7 +336,7 @@ export const CashJournal: React.FC = () => {
                   )}
 
                   {pageRows.length === 0 && !draft ? (
-                    <tr><td colSpan={10} className="p-10 text-center">
+                    <tr><td colSpan={8} className="p-10 text-center">
                       <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-3" />
                       <p className="text-[13px] text-gray-500">
                         {search || month || year ? 'Aucune ligne ne correspond à ce filtre.' : 'Aucun mouvement de caisse enregistré.'}
@@ -384,8 +369,6 @@ export const CashJournal: React.FC = () => {
                         </td>
                         <td className="px-3 py-2 text-gray-800">{row.label || <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2 text-gray-700">{row.clientName || <span className="text-gray-300">—</span>}</td>
-                        <td className="px-3 py-2 text-gray-500">{row.paymentMethod || '—'}</td>
-                        <td className="px-3 py-2 text-gray-500">{row.reference || '—'}</td>
                         <td className="px-3 py-2 text-right font-mono text-done-fg">{row.entree ? money(row.entree) : ''}</td>
                         <td className="px-3 py-2 text-right font-mono text-late-fg">{row.sortie ? money(row.sortie) : ''}</td>
                         <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(solde)}</td>
