@@ -67,6 +67,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   messages: { desc: false },
   task_assignments: { desc: true },
   notifications: { desc: true },
+  push_subscriptions: { desc: false },
   resource_templates: { desc: false },
   resource_template_items: { desc: false },
   client_resource_instances: { desc: true },
@@ -97,6 +98,7 @@ const TABLE_FOR: Record<string, string> = {
   messages: 'messages',
   taskAssignments: 'task_assignments',
   notifications: 'notifications',
+  pushSubscriptions: 'push_subscriptions',
   resourceTemplates: 'resource_templates',
   resourceTemplateItems: 'resource_template_items',
   clientResourceInstances: 'client_resource_instances',
@@ -231,6 +233,10 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`CREATE INDEX IF NOT EXISTS messages_to_idx         ON messages ((data->>'toUserId'))`);
   await q(`CREATE INDEX IF NOT EXISTS task_assignments_to_idx ON task_assignments ((data->>'assignedToUserId'))`);
   await q(`CREATE INDEX IF NOT EXISTS notifications_user_idx  ON notifications ((data->>'userId'))`);
+  // The endpoint identifies a push subscription everywhere: the upsert on
+  // subscribe, the delete when the push service reports it gone, and the
+  // lookup that authenticates a tap on a notification button.
+  await q(`CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions ((data->>'endpoint'))`);
   await q(`CREATE INDEX IF NOT EXISTS resource_template_items_template_idx ON resource_template_items ((data->>'templateId'))`);
   await q(`CREATE INDEX IF NOT EXISTS client_resource_instances_client_idx ON client_resource_instances ((data->>'clientId'))`);
   await q(`CREATE INDEX IF NOT EXISTS client_resource_item_statuses_instance_idx ON client_resource_item_statuses ((data->>'instanceId'))`);
@@ -332,6 +338,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const messages = tenantCollection('messages');
   const taskAssignments = tenantCollection('task_assignments');
   const notifications = tenantCollection('notifications');
+  const pushSubscriptions = tenantCollection('push_subscriptions');
   const resourceTemplates = tenantCollection('resource_templates');
   const resourceTemplateItems = tenantCollection('resource_template_items');
   const clientResourceInstances = tenantCollection('client_resource_instances');
@@ -513,6 +520,23 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     createTaskAssignment: taskAssignments.create,
     updateTaskAssignment: taskAssignments.update,
     deleteTaskAssignment: taskAssignments.remove,
+
+    getAllPushSubscriptionsForCompany: pushSubscriptions.all,
+    getAllPushSubscriptions: async () => (await q(`SELECT data FROM push_subscriptions`)).map(r => r.data),
+    createPushSubscription: async (companyId: string, subscription: any) => {
+      const row = { ...subscription, companyId };
+      // Upsert on the endpoint, not the id — same reason as the JSON backend.
+      await q(
+        `INSERT INTO push_subscriptions (id, data) VALUES ($1, $2)
+         ON CONFLICT ((data->>'endpoint')) DO UPDATE SET data = EXCLUDED.data`,
+        [String(row.id), JSON.stringify(row)],
+      );
+      return row;
+    },
+    deletePushSubscriptionByEndpoint: async (endpoint: string) => {
+      const res = await pool.query(`DELETE FROM push_subscriptions WHERE data->>'endpoint' = $1`, [String(endpoint)]);
+      return (res.rowCount ?? 0) > 0;
+    },
 
     getAllNotifications: notifications.all,
     createNotification: notifications.create,

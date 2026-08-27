@@ -148,6 +148,57 @@ export async function showTimerNotification({ elapsed, client, subtitle, running
   }
 }
 
+/**
+ * Registers this device for Web Push, which is what lets the chronometer
+ * keep showing with the browser fully closed — at that point no page script
+ * runs, so the notification has to come from the server.
+ *
+ * Safe to call repeatedly: an existing subscription is reused, and the
+ * server upserts on the endpoint. Silently does nothing when push is not
+ * configured or the browser refuses — the in-page and hidden-tab paths above
+ * keep working regardless.
+ */
+export async function subscribeToPush(token: string): Promise<boolean> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  if (Notification.permission !== 'granted') return false;
+
+  try {
+    const keyRes = await fetch('/api/push/public-key', { headers: { Authorization: `Bearer ${token}` } });
+    const { key } = await keyRes.json();
+    if (!key) return false; // VAPID not configured on this deployment.
+
+    const registration = await navigator.serviceWorker.ready;
+    const existing = await registration.pushManager.getSubscription();
+    const subscription = existing ?? (await registration.pushManager.subscribe({
+      // Required by every browser: a push that shows nothing to the user is
+      // not allowed, which suits us — every push here draws the clock.
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key),
+    }));
+
+    const raw = subscription.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ endpoint: raw.endpoint, keys: raw.keys }),
+    });
+    return true;
+  } catch {
+    // Push is refused outright in several ordinary situations — private
+    // windows, iOS Safari outside an installed PWA, a blocked push service.
+    return false;
+  }
+}
+
+/** VAPID keys travel as base64url; `applicationServerKey` wants raw bytes. */
+function urlBase64ToUint8Array(base64: string): Uint8Array {
+  const padded = (base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(padded);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+  return output;
+}
+
 export async function closeTimerNotification(): Promise<void> {
   if (!('serviceWorker' in navigator)) return;
   try {

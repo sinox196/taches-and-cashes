@@ -98,6 +98,17 @@ export interface Database {
   deleteTaskAssignment(companyId: string, id: string): Promise<boolean>;
 
   /** Generic per-user notifications — new message, task assigned, HR events. */
+  /**
+   * Web Push subscriptions, one row per device. `getAllPushSubscriptions` is
+   * the one legitimately cross-tenant read in the interface: the chronometer
+   * push job sweeps every company, then fans each push out to that
+   * subscription's own owner.
+   */
+  getAllPushSubscriptionsForCompany(companyId: string): Promise<any[]>;
+  getAllPushSubscriptions(): Promise<any[]>;
+  createPushSubscription(companyId: string, subscription: any): Promise<any>;
+  deletePushSubscriptionByEndpoint(endpoint: string): Promise<boolean>;
+
   getAllNotifications(companyId: string): Promise<any[]>;
   createNotification(companyId: string, notification: any): Promise<any>;
   updateNotification(companyId: string, id: string, updates: any): Promise<any | null>;
@@ -225,6 +236,9 @@ export const emptyDb = () => ({
   taskAssignments: [],
   // Per-user notifications: new message, task assigned, HR events.
   notifications: [],
+  // Web Push subscriptions, one per device — how a running chronometer
+  // reaches a phone whose browser is closed.
+  pushSubscriptions: [],
   // Ressources Métier — see the interface comments above for what each holds.
   resourceTemplates: [],
   resourceTemplateItems: [],

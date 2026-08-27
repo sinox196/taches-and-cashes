@@ -6,6 +6,7 @@ import {
   initOsNotifications,
   notificationPermission,
   requestNotificationPermission,
+  subscribeToPush,
   showOsNotification,
 } from '../utils/osNotifications';
 
@@ -99,6 +100,14 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
 
   useEffect(() => { initOsNotifications(); }, []);
 
+  // Register this device for Web Push whenever permission is already
+  // granted — that is what carries the running chronometer once the browser
+  // is closed. Re-running it is harmless: an existing subscription is reused
+  // and the server upserts on the endpoint.
+  useEffect(() => {
+    if (token && permission === 'granted') subscribeToPush(token);
+  }, [token, permission]);
+
   // Clicking a toast focuses this tab; the worker forwards the section to open.
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
@@ -113,6 +122,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
     const result = await requestNotificationPermission();
     setPermission(result);
     if (result === 'granted') {
+      if (token) subscribeToPush(token);
       showOsNotification({
         title: 'Notifications activées',
         body: 'Vous serez prévenu ici des nouvelles tâches, demandes et messages.',

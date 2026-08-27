@@ -60,7 +60,7 @@ export async function initDb(): Promise<Database> {
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
   'absenceAuthorizations', 'loans', 'advances', 'leaveBalances', 'timeEntries', 'messages',
-  'taskAssignments', 'notifications', 'resourceTemplates', 'resourceTemplateItems',
+  'taskAssignments', 'notifications', 'pushSubscriptions', 'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
 ];
@@ -83,6 +83,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.messages) db.messages = [];
     if (!db.taskAssignments) db.taskAssignments = [];
     if (!db.notifications) db.notifications = [];
+    if (!db.pushSubscriptions) db.pushSubscriptions = [];
     if (!db.resourceTemplates) db.resourceTemplates = [];
     if (!db.resourceTemplateItems) db.resourceTemplateItems = [];
     if (!db.clientResourceInstances) db.clientResourceInstances = [];
@@ -487,6 +488,26 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.taskAssignments, companyId, id);
       if (index === -1) return false;
       db.taskAssignments.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllPushSubscriptionsForCompany: async (companyId: string) => scoped(db.pushSubscriptions, companyId),
+    getAllPushSubscriptions: async () => db.pushSubscriptions,
+    createPushSubscription: async (companyId: string, subscription: any) => {
+      const row = { ...subscription, companyId };
+      // Keyed by endpoint, not id: re-subscribing the same device (permission
+      // re-granted, new login) must replace its row rather than pile up dead
+      // duplicates that every later push then tries and fails to reach.
+      db.pushSubscriptions = db.pushSubscriptions.filter((s: any) => s.endpoint !== row.endpoint);
+      db.pushSubscriptions.push(row);
+      await saveDb();
+      return row;
+    },
+    deletePushSubscriptionByEndpoint: async (endpoint: string) => {
+      const before = db.pushSubscriptions.length;
+      db.pushSubscriptions = db.pushSubscriptions.filter((s: any) => s.endpoint !== endpoint);
+      if (db.pushSubscriptions.length === before) return false;
       await saveDb();
       return true;
     },

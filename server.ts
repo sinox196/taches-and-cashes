@@ -11,6 +11,7 @@ import {
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendMail } from './src/server/email.js';
+import { initPush, pushEnabled, publicKey as pushPublicKey, sendPush } from './src/server/push.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-local-dev';
 
@@ -300,6 +301,7 @@ async function startServer() {
 
   // Initialize SQLite database
   const db = await initDb();
+  initPush();
   await seedResourceLibrary(db, LEGACY_COMPANY_ID);
 
   // The legacy cabinet's own admin doubles as the platform's operator (the
@@ -3346,6 +3348,200 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
+  // ---------------------------------------------------------
+  // Web Push — the running chronometer, delivered by the server so it
+  // survives the browser being closed (nothing client-side runs then).
+  // ---------------------------------------------------------
+
+  const hhmmss = (total: number) => {
+    const s = Math.max(0, Math.floor(total));
+    return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
+      .map(n => String(n).padStart(2, '0')).join(':');
+  };
+
+  /** What the service worker draws on the notification. */
+  const pushPayloadFor = (entry: any) => ({
+    entryId: entry.id,
+    elapsed: hhmmss(accruedSeconds(entry)),
+    client: entry.client || '',
+    subtitle: [entry.pole, entry.taskType].filter((v: any) => v && v !== '-').join(' · '),
+    running: entry.statut === 'RUNNING',
+  });
+
+  /**
+   * Applies a status transition with the *same* rules as
+   * `PUT /api/time-entries/:id` — folding the elapsed time in on the way out
+   * of RUNNING, clearing `lastStartedAt`, stamping `heureFin` only on a real
+   * completion, and enforcing one running task per person. Duplicating those
+   * rules loosely here would let a task stopped from a notification bank a
+   * different duration than the same task stopped from the app.
+   */
+  const applyEntryStatus = async (companyId: string, existing: any, statut: string) => {
+    const updates: any = { statut };
+
+    if (statut === 'RUNNING' && existing.statut !== 'RUNNING') {
+      updates.lastStartedAt = Date.now();
+      updates.heureFin = '';
+    } else if (statut !== 'RUNNING' && existing.statut === 'RUNNING') {
+      if (existing.lastStartedAt) {
+        updates.dureeSeconds = (existing.dureeSeconds || 0) + Math.floor((Date.now() - existing.lastStartedAt) / 1000);
+      }
+      updates.lastStartedAt = null;
+    }
+
+    if (statut === 'COMPLETED' && existing.statut !== 'COMPLETED') {
+      updates.heureFin = formatTimeFR(new Date());
+    } else if (statut === 'PAUSED') {
+      updates.heureFin = '';
+    }
+
+    if (statut === 'RUNNING' && existing.statut !== 'RUNNING') {
+      await pauseOtherRunningEntries(companyId, existing.userId, existing.id);
+    }
+
+    const updated = await db.updateTimeEntry(companyId, existing.id, updates);
+    broadcastTimeEntries();
+    return updated;
+  };
+
+  /**
+   * Redraws (or takes down) the pushed notification on one user's devices.
+   * Called on every transition as well as from the interval below, so a task
+   * stopped from the app doesn't leave a phone showing "en cours" forever.
+   */
+  const syncChronoPush = async (companyId: string, userId: number) => {
+    if (!pushEnabled()) return;
+    try {
+      const subs = (await db.getAllPushSubscriptions()).filter((s: any) => s.userId === userId && s.companyId === companyId);
+      if (!subs.length) return;
+      const running = (await db.getAllTimeEntries(companyId))
+        .find((e: any) => e.userId === userId && e.statut === 'RUNNING');
+      const payload = running ? pushPayloadFor(running) : { closed: true };
+      for (const sub of subs) {
+        const { expired } = await sendPush(sub, payload);
+        if (expired) await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+      }
+    } catch (error) {
+      // Never let a push failure break the mutation that triggered it.
+      console.error('[push] sync failed:', error);
+    }
+  };
+
+  /**
+   * Every 15 minutes, refresh the notification on the devices of everyone
+   * with a task running. This is the only thing keeping the figure current
+   * once the browser is closed — so between two sweeps the displayed time is
+   * simply up to 15 minutes stale, by design (see push.ts).
+   *
+   * Reads are grouped per company rather than per subscription, so this is
+   * one entries scan per company with any subscribed device, not one per
+   * device.
+   */
+  const CHRONO_PUSH_INTERVAL_MS = 15 * 60 * 1000;
+  const pushRunningChronometers = async () => {
+    if (!pushEnabled()) return;
+    try {
+      const subs = await db.getAllPushSubscriptions();
+      if (!subs.length) return;
+
+      const byCompany = new Map<string, any[]>();
+      for (const sub of subs) {
+        if (!byCompany.has(sub.companyId)) byCompany.set(sub.companyId, []);
+        byCompany.get(sub.companyId)!.push(sub);
+      }
+
+      for (const [companyId, companySubs] of byCompany) {
+        const runningByUser = new Map<number, any>();
+        for (const entry of await db.getAllTimeEntries(companyId)) {
+          if (entry.statut === 'RUNNING' && !runningByUser.has(entry.userId)) runningByUser.set(entry.userId, entry);
+        }
+        for (const sub of companySubs) {
+          const entry = runningByUser.get(sub.userId);
+          // Nothing running: stay silent rather than pushing "closed" on a
+          // 15-minute drumbeat to every idle device.
+          if (!entry) continue;
+          const { expired } = await sendPush(sub, pushPayloadFor(entry));
+          if (expired) await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+        }
+      }
+    } catch (error) {
+      console.error('[push] sweep failed:', error);
+    }
+  };
+  setInterval(pushRunningChronometers, CHRONO_PUSH_INTERVAL_MS);
+
+  /** Readable by any authenticated user: the browser needs it to subscribe. */
+  app.get('/api/push/public-key', authenticate, (_req: any, res: any) => {
+    res.json({ key: pushEnabled() ? pushPublicKey() : null });
+  });
+
+  app.post('/api/push/subscribe', authenticate, async (req: any, res: any) => {
+    try {
+      const { endpoint, keys } = req.body || {};
+      if (!endpoint || !keys?.p256dh || !keys?.auth) {
+        return res.status(400).json({ error: 'Abonnement invalide' });
+      }
+      await db.createPushSubscription(req.user.companyId, {
+        id: genId('push'),
+        userId: req.user.id,
+        endpoint: String(endpoint),
+        keys: { p256dh: String(keys.p256dh), auth: String(keys.auth) },
+        createdAt: new Date().toISOString(),
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/push/unsubscribe', authenticate, async (req: any, res: any) => {
+    try {
+      await db.deletePushSubscriptionByEndpoint(String(req.body?.endpoint || ''));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Pause / Reprendre / Arrêter tapped on the pushed notification.
+   *
+   * Deliberately not behind `authenticate`: this is called by the service
+   * worker, and with the browser closed there is no page and therefore no
+   * access to the JWT in localStorage. The subscription endpoint is the
+   * credential instead — a long unguessable URL minted by the push service,
+   * known only to that one browser and to us, and revoked the moment the
+   * subscription is dropped. It identifies the user; it can only ever act on
+   * that user's own current task.
+   */
+  app.post('/api/push/timer-action', async (req: any, res: any) => {
+    try {
+      const endpoint = String(req.body?.endpoint || '');
+      const action = String(req.body?.action || '');
+      if (!['pause', 'resume', 'stop'].includes(action)) {
+        return res.status(400).json({ error: 'Action inconnue' });
+      }
+
+      const subscription = (await db.getAllPushSubscriptions()).find((s: any) => s.endpoint === endpoint);
+      if (!subscription) return res.status(404).json({ error: 'Abonnement introuvable' });
+
+      const mine = (await db.getAllTimeEntries(subscription.companyId))
+        .filter((e: any) => e.userId === subscription.userId);
+      const entry = mine.find((e: any) => e.statut === 'RUNNING')
+        || (action === 'resume' ? mine.find((e: any) => e.statut === 'PAUSED') : undefined);
+      if (!entry) return res.json({ entry: null });
+
+      const updated = await applyEntryStatus(subscription.companyId, entry, action === 'pause' ? 'PAUSED' : action === 'resume' ? 'RUNNING' : 'COMPLETED');
+      // Answer with the new state so the worker can redraw the notification
+      // immediately instead of waiting up to 15 minutes for the next sweep.
+      res.json({ entry: updated && updated.statut !== 'COMPLETED' ? pushPayloadFor(updated) : null });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   /**
    * The one place a time entry is actually created — used by the normal
    * "démarrer une tâche" POST below and by starting an assigned task, so the
@@ -3438,6 +3634,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const updated = await db.updateTimeEntry(req.user.companyId, entryId, updates);
       res.json(updated);
       broadcastTimeEntries(); // Broadcast update
+      // Keep a closed browser's notification honest: stopping a task in the
+      // app must take it down, not leave a phone showing "en cours".
+      if (req.body.statut) syncChronoPush(req.user.companyId, existing.userId);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
