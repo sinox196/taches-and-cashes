@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
 import { ClientSearchInput } from './ClientSearchInput';
 import { CategoryPicker, CashCategory } from './CategoryPicker';
+import { isCashMode } from '../../constants/paymentModes';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -29,6 +30,9 @@ export interface JournalRow {
   category: string;
   entree: number;
   sortie: number;
+  /** Mode de règlement, set from the Règlements clients tab. Empty on the
+   *  daybook's own movements, which reads as cash. */
+  paymentMethod?: string;
 }
 
 const emptyDraft = (): Omit<JournalRow, 'id'> => ({
@@ -194,6 +198,14 @@ export const CashJournal: React.FC = () => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter(r => {
+      // The daybook is a *cash* book. A règlement client settled by virement,
+      // chèque or lettre de change is recorded in Cash and counts towards the
+      // client's encaissements, but it never passes through the till, so it
+      // has no place here — and leaving it in would put money in the running
+      // solde that the caisse never held. Rows with no mode at all (loyer,
+      // STEG, alimentation de caisse, and everything entered before the field
+      // existed) read as cash; see isCashMode().
+      if (!isCashMode(r.paymentMethod)) return false;
       if (year && yearOf(r.date) !== year) return false;
       if (month && monthOf(r.date) !== month) return false;
       if (!q) return true;
@@ -266,7 +278,9 @@ export const CashJournal: React.FC = () => {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[11.5px] text-gray-500">
           Chaque <span className="font-semibold text-gray-700">entrée</span> rattachée à un client apparaît
-          automatiquement dans ses encaissements sur la page Clients.
+          automatiquement dans ses encaissements sur la page Clients. Les règlements clients en{' '}
+          <span className="font-semibold text-gray-700">espèce</span> y figurent d'office ; les autres modes
+          restent hors caisse.
         </p>
         <div className="flex items-center gap-2">
           <select value={year} onChange={e => setYear(Number(e.target.value))}

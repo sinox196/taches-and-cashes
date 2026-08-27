@@ -11,6 +11,7 @@ import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
 import { LEGACY_COMPANY_ID, TRIAL_DAYS, PLAN_SEAT_LIMITS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
+import { toPaymentMode, isCashMode } from './src/constants/paymentModes.js';
 import {
   DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
 } from './src/constants/presence.js';
@@ -850,7 +851,14 @@ async function startServer() {
         // journal owns them.
         source: 'BROUILLARD',
         paymentMethod: row.paymentMethod || '',
+        bankAccount: row.bankAccount || '',
         reference: row.reference || '',
+        // Whether this encaissement actually passed through the till. The
+        // Clients view badges on this rather than on `source`: since the
+        // mode de règlement exists, a virement is recorded in Cash exactly
+        // like an espèce but never reaches the caisse, and badging every
+        // journal-sourced row "caisse" would have mislabelled it.
+        isCaisse: isCashMode(row.paymentMethod),
       });
     }
     for (const list of byKey.values()) list.sort((a, b) => a.date.localeCompare(b.date));
@@ -2260,7 +2268,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // a closed list would just mean a code change every time it grows.
       // The UI offers the known ones as suggestions.
       category: text(body?.category, 60),
-      paymentMethod: text(body?.paymentMethod, 40),
+      // Mode de règlement. Normalised to one of the known ids so the caisse
+      // rule below can rely on it; a row saved before the field existed, or
+      // one carrying free text from an older client, normalises to '' and
+      // reads as cash — see isCashMode().
+      paymentMethod: toPaymentMode(body?.paymentMethod),
+      // Only meaningful for a non-cash mode: an Espèce règlement goes to the
+      // till, not to an account, so the field is blanked rather than kept as
+      // a stale value from before the mode was switched.
+      bankAccount: isCashMode(toPaymentMode(body?.paymentMethod)) ? '' : text(body?.bankAccount, 80),
       reference: text(body?.reference, 60),
       entree: entree > 0 ? entree : 0,
       sortie: sortie > 0 ? sortie : 0,

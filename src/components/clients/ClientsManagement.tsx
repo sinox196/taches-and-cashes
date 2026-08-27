@@ -5,6 +5,7 @@ import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Bui
 import { ImportClientsModal } from './ImportClientsModal';
 import { MultiSelectAutocomplete } from '../dashboard/MultiSelectAutocomplete';
 import { formatCostTND } from '../../utils/formatters';
+import { paymentModeLabel } from '../../constants/paymentModes';
 
 export interface EncaissementEntry {
   id: string;
@@ -13,6 +14,11 @@ export interface EncaissementEntry {
   note?: string;
   /** Present only on entries merged in from the Brouillard de caisse. */
   source?: 'BROUILLARD';
+  /** Mode de règlement, on entries recorded in Cash. */
+  paymentMethod?: string;
+  /** Whether the money actually passed through the till. Set server-side from
+   *  the mode: a virement is an encaissement but not a caisse movement. */
+  isCaisse?: boolean;
 }
 
 export interface Client {
@@ -774,12 +780,17 @@ export const ClientsManagement: React.FC = () => {
                           // The displayed total must match the server's own
                           // resteAPayer, which counts both sources.
                           const total = sumEncaissements(client.encaissements) + sumEncaissements(journal);
-                          // A row-height that grows with how many encaissements a
-                          // client happens to have breaks the table as a whole —
-                          // one client with fifty small versements used to stretch
-                          // its row far past every other. The cell now stays a
-                          // fixed height regardless of count; the full dated list
-                          // lives one click away in the detail drawer instead.
+                          // The cell shows the **total encaissé and nothing
+                          // else** — not a count of versements, which said
+                          // nothing about how much the client has actually
+                          // paid and competed with the figure that does. It
+                          // is read-only here: encaissements are recorded in
+                          // Cash (Règlements clients), never typed into this
+                          // table. Clicking opens the drawer, the one place
+                          // the dated list is shown, each entry marked caisse
+                          // or not — a fixed-height cell, so one client with
+                          // fifty small versements can't stretch its row past
+                          // every other.
                           return (
                             <td
                               key={col.key}
@@ -788,14 +799,6 @@ export const ClientsManagement: React.FC = () => {
                               className={`px-5 py-3 text-right font-mono text-gray-700 bg-emerald-50/25 ${count > 0 ? 'cursor-pointer hover:bg-emerald-50/50' : ''}`}
                             >
                               {formatCostTND(total)}
-                              {count > 0 && (
-                                <div className="mt-0.5 font-sans">
-                                  <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600">
-                                    {count} {count > 1 ? 'versements' : 'versement'}
-                                    <ChevronRight className="w-2.5 h-2.5" />
-                                  </span>
-                                </div>
-                              )}
                             </td>
                           );
                         }
@@ -1384,10 +1387,21 @@ export const ClientsManagement: React.FC = () => {
                           <div className="flex items-center gap-2 text-gray-500">
                             <span>{entry.date ? new Date(entry.date).toLocaleDateString('fr-FR') : '—'}</span>
                             {entry.note && <span className="text-gray-400 italic truncate max-w-[140px]">{entry.note}</span>}
+                            {/* Says whether this encaissement went through
+                                the caisse or not — a virement is recorded in
+                                Cash exactly like an espèce but never reaches
+                                the till, so badging every Cash-sourced entry
+                                "caisse" would have mislabelled it. */}
                             {entry.source === 'BROUILLARD' && (
-                              <span className="px-1.5 py-0.5 rounded bg-turquoise/10 text-turquoise text-[9px] font-semibold uppercase tracking-wide shrink-0">
-                                caisse
-                              </span>
+                              entry.isCaisse === false ? (
+                                <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-[9px] font-semibold uppercase tracking-wide shrink-0">
+                                  {paymentModeLabel(entry.paymentMethod) || 'hors caisse'}
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-turquoise/10 text-turquoise text-[9px] font-semibold uppercase tracking-wide shrink-0">
+                                  caisse
+                                </span>
+                              )
                             )}
                           </div>
                           <span className="font-mono font-semibold text-gray-800 shrink-0">

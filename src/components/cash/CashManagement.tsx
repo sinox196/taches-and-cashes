@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
 import { CompanySettings } from './CompanySettings';
 import { CashJournal } from './CashJournal';
+import { ClientPayments } from './ClientPayments';
 import { friendlyError } from '../../utils/errors';
 
 const money = (v: number) =>
@@ -52,9 +53,10 @@ export const CashManagement: React.FC = () => {
   const { token, hasPermission } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
-  /** Two independent screens under one nav item: the documents issued, and
-   *  the cash daybook that feeds the clients' encaissements. */
-  const [tab, setTab] = useState<'documents' | 'journal'>('documents');
+  /** Three screens under one nav item: the documents issued, the règlements
+   *  clients that feed the clients' encaissements, and the cash daybook the
+   *  espèce ones land in. */
+  const [tab, setTab] = useState<'documents' | 'reglements' | 'journal'>('documents');
   const [invoices, setInvoices] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -126,7 +128,7 @@ export const CashManagement: React.FC = () => {
     <div className={`flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 w-full mx-auto p-4 sm:p-6 lg:p-8 ${
       // The daybook is a wide sheet by nature — eleven columns — so it gets
       // more room than the document list, which is comfortable at 1200.
-      tab === 'journal' ? 'max-w-[1500px]' : 'max-w-[1200px]'
+      tab === 'documents' ? 'max-w-[1200px]' : 'max-w-[1500px]'
     }`}>
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
@@ -137,10 +139,12 @@ export const CashManagement: React.FC = () => {
           <p className="text-[12px] text-gray-500 mt-1">
             {tab === 'documents'
               ? 'Factures légales et autres documents émis aux clients.'
-              : 'Mouvements de caisse — entrées et sorties, jour par jour.'}
+              : tab === 'reglements'
+                ? 'Ce que chaque client a réglé, et par quel moyen.'
+                : 'Mouvements de caisse — entrées et sorties, jour par jour.'}
           </p>
         </div>
-        <div className={`flex items-center gap-2 flex-wrap w-full sm:w-auto ${tab === 'journal' ? 'hidden' : ''}`}>
+        <div className={`flex items-center gap-2 flex-wrap w-full sm:w-auto ${tab === 'documents' ? '' : 'hidden'}`}>
           <div className="relative flex-1 min-w-[160px] sm:flex-none">
             <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
@@ -174,7 +178,8 @@ export const CashManagement: React.FC = () => {
 
       <div className="flex items-center gap-1 border-b border-gray-200">
         {([
-          { id: 'documents', label: 'Documents', icon: FileText },
+          { id: 'documents', label: 'Facturation', icon: FileText },
+          { id: 'reglements', label: 'Règlements clients', icon: Wallet },
           { id: 'journal', label: 'Brouillard de caisse', icon: BookOpen },
         ] as const).map(t => (
           <button
@@ -191,7 +196,7 @@ export const CashManagement: React.FC = () => {
         ))}
       </div>
 
-      {tab === 'journal' ? <CashJournal /> : <>
+      {tab === 'journal' ? <CashJournal /> : tab === 'reglements' ? <ClientPayments /> : <>
 
       {error && (
         <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
