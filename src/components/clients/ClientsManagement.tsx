@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet, BookOpen } from 'lucide-react';
+import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
 import { MultiSelectAutocomplete } from '../dashboard/MultiSelectAutocomplete';
 import { formatCostTND } from '../../utils/formatters';
@@ -341,21 +341,17 @@ export const ClientsManagement: React.FC = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const addEncaissement = () => setFormData(prev => ({
-    ...prev,
-    encaissements: [
-      ...(prev.encaissements || []),
-      { id: `local-${Date.now()}`, amount: '' as any, date: new Date().toISOString().slice(0, 10), note: '' },
-    ],
-  }));
-  const updateEncaissement = (id: string, patch: Partial<EncaissementEntry>) => setFormData(prev => ({
-    ...prev,
-    encaissements: (prev.encaissements || []).map(e => (e.id === id ? { ...e, ...patch } : e)),
-  }));
-  const removeEncaissement = (id: string) => setFormData(prev => ({
-    ...prev,
-    encaissements: (prev.encaissements || []).filter(e => e.id !== id),
-  }));
+  /**
+   * What the form shows for Encaissements — a read-only total and nothing
+   * else, covering both the entries stored on the client and the ones merged
+   * in from Cash. The manual
+   * editor that used to sit here is gone: encaissements are recorded in Cash
+   * (Règlements clients), so there is one place to enter a payment and one
+   * record of it. Entries already stored on a client are still counted, still
+   * listed in the drawer, and still round-trip through save untouched.
+   */
+  const totalEncaissements =
+    sumEncaissements(formData.encaissements) + sumEncaissements(formData.journalEncaissements);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -966,88 +962,22 @@ export const ClientsManagement: React.FC = () => {
                   />
                 </div>
 
+                {/* Encaissements are recorded in Cash (Règlements clients),
+                    never typed in here: the movement lives in one place, and a
+                    second entry point would mean two records of one payment.
+                    This is the read-only total, which is all this form needs
+                    to show. */}
                 <div className="md:col-span-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[12px] font-semibold text-gray-700">Encaissements</label>
-                    <button
-                      type="button"
-                      onClick={addEncaissement}
-                      className="text-[11px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" /> Ajouter un versement
-                    </button>
+                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Encaissements</label>
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5 border border-gray-200 bg-gray-50 rounded-lg">
+                    <span className="text-[12px] text-gray-500">Total encaissé</span>
+                    <span className="text-[13px] font-mono font-semibold text-gray-800">
+                      {formatCostTND(totalEncaissements)}
+                    </span>
                   </div>
-                  {(formData.encaissements || []).length === 0 ? (
-                    <p className="text-[12px] text-gray-400 italic border border-dashed border-gray-200 rounded-lg px-3 py-2.5">
-                      Aucun encaissement enregistré.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {(formData.encaissements || []).map(entry => (
-                        <div key={entry.id} className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            step="0.001"
-                            value={entry.amount === 0 ? '' : entry.amount}
-                            onChange={e => updateEncaissement(entry.id, { amount: e.target.value === '' ? ('' as any) : parseFloat(e.target.value) })}
-                            className="w-1/3 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                            placeholder="Montant"
-                          />
-                          <input
-                            type="date"
-                            value={entry.date || ''}
-                            onChange={e => updateEncaissement(entry.id, { date: e.target.value })}
-                            className="w-1/3 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                          />
-                          <input
-                            type="text"
-                            value={entry.note || ''}
-                            onChange={e => updateEncaissement(entry.id, { note: e.target.value })}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                            placeholder="Référence (facultatif)"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeEncaissement(entry.id)}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                      <p className="text-[11px] text-gray-500 text-right">
-                        Total : <span className="font-semibold text-gray-800">{sumEncaissements(formData.encaissements).toLocaleString('fr-FR')} TND</span>
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Encaissements coming from the Brouillard de caisse. Shown
-                      here so the client's real total is visible in one place,
-                      but read-only: the journal is where the movement lives,
-                      and editing it in two places would mean two records of
-                      one payment. */}
-                  {(formData.journalEncaissements || []).length > 0 && (
-                    <div className="mt-3 border border-turquoise/30 bg-turquoise/5 rounded-lg p-3">
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <BookOpen className="w-3.5 h-3.5 text-turquoise" />
-                        <span className="text-[11.5px] font-semibold text-gray-700">Depuis le brouillard de caisse</span>
-                      </div>
-                      <div className="space-y-1">
-                        {(formData.journalEncaissements || []).map(entry => (
-                          <div key={entry.id} className="flex items-center justify-between text-[12px] text-gray-700">
-                            <span className="text-gray-500">
-                              {entry.date ? new Date(entry.date).toLocaleDateString('fr-FR') : '—'}
-                              {entry.note && <> · {entry.note}</>}
-                            </span>
-                            <span className="font-mono font-semibold">{(Number(entry.amount) || 0).toLocaleString('fr-FR')} TND</span>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="text-[10.5px] text-gray-500 mt-2">
-                        Modifiables depuis Cash → Brouillard de caisse.
-                      </p>
-                    </div>
-                  )}
+                  <p className="text-[10.5px] text-gray-500 mt-1.5">
+                    Les encaissements se saisissent dans Cash → Règlements clients.
+                  </p>
                 </div>
 
                 <div>

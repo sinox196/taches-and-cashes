@@ -14,7 +14,9 @@ const frDate = (iso: string) => {
 };
 
 const PAGE_SIZE = 20;
+const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const yearOf = (iso: string) => Number(String(iso || '').slice(0, 4)) || 0;
+const monthOf = (iso: string) => Number(String(iso || '').slice(5, 7)) || 0;
 
 /**
  * The objet carried into the brouillard by a règlement. The picklist there is
@@ -144,6 +146,7 @@ export const ClientPayments: React.FC = () => {
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState<'' | PaymentMode>('');
   const [year, setYear] = useState(0);
+  const [month, setMonth] = useState(0);
   const [page, setPage] = useState(1);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -165,7 +168,7 @@ export const ClientPayments: React.FC = () => {
   };
 
   useEffect(() => { load(); }, []);
-  useEffect(() => { setPage(1); }, [search, mode, year]);
+  useEffect(() => { setPage(1); }, [search, mode, year, month]);
 
   /**
    * A règlement client is a journal row that is money in from a named client.
@@ -187,6 +190,7 @@ export const ClientPayments: React.FC = () => {
     const q = search.trim().toLowerCase();
     return payments.filter(r => {
       if (year && yearOf(r.date) !== year) return false;
+      if (month && monthOf(r.date) !== month) return false;
       // An older row carries no mode and reads as espèce, so the Espèce
       // filter has to match it too — the same rule isCashMode() applies.
       if (mode && (r.paymentMethod || (isCashMode(r.paymentMethod) ? 'ESPECE' : '')) !== mode) return false;
@@ -194,7 +198,7 @@ export const ClientPayments: React.FC = () => {
       return [r.clientName, r.label, r.reference, r.bankAccount]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
-  }, [payments, search, mode, year]);
+  }, [payments, search, mode, year, month]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -292,9 +296,14 @@ export const ClientPayments: React.FC = () => {
             {PAYMENT_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
           <select value={year} onChange={e => setYear(Number(e.target.value))}
-            className="px-2 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400">
+            className="px-2 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
             <option value={0}>Toutes les années</option>
             {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <select value={month} onChange={e => setMonth(Number(e.target.value))}
+            className="px-2 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
+            <option value={0}>Tous les mois</option>
+            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
           </select>
           {canManage && (
             <button
@@ -442,19 +451,39 @@ export const ClientPayments: React.FC = () => {
           </table>
         </div>
 
-        {/* Outside the scrolling area and shrink-0, so it stays on screen
-            however long the list gets — same treatment as the journal. */}
-        {!isLoading && totalPages > 1 && (
-          <div className="shrink-0 flex items-center justify-between px-3 py-2 border-t border-gray-200 bg-white text-[12px]">
-            <span className="text-gray-500">
-              {filtered.length} règlement{filtered.length > 1 ? 's' : ''}
-            </span>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="px-2.5 py-1 border border-gray-200 rounded disabled:opacity-40 hover:bg-gray-50">Précédent</button>
-              <span className="text-gray-500">{page} / {totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="px-2.5 py-1 border border-gray-200 rounded disabled:opacity-40 hover:bg-gray-50">Suivant</button>
+        {/* Outside the scrolling area and `shrink-0`, so it stays on screen
+            however long the list gets — no scrolling to reach it. Rendered
+            unconditionally, not only past one page: it also carries the
+            "showing X to Y of Z" count, which is worth seeing on a short
+            list too, and a bar that appears and disappears makes the table
+            jump. Same treatment as the journal. */}
+        {!isLoading && (
+          <div className="p-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between text-[13px] shrink-0">
+            <div className="text-gray-500">
+              {filtered.length === 0
+                ? 'Aucun règlement'
+                : `Affichage de ${((page - 1) * PAGE_SIZE) + 1} à ${Math.min(page * PAGE_SIZE, filtered.length)} sur ${filtered.length} règlement${filtered.length > 1 ? 's' : ''}`}
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1.5 border border-gray-200 rounded text-gray-600 disabled:opacity-50 hover:bg-gray-100 bg-white"
+              >
+                Précédent
+              </button>
+              <div className="flex items-center gap-1 px-2">
+                <span className="font-medium text-gray-900">{page}</span>
+                <span className="text-gray-500">/</span>
+                <span className="text-gray-500">{totalPages}</span>
+              </div>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-3 py-1.5 border border-gray-200 rounded text-gray-600 disabled:opacity-50 hover:bg-gray-100 bg-white"
+              >
+                Suivant
+              </button>
             </div>
           </div>
         )}
