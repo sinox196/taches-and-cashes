@@ -23,7 +23,7 @@ const VAT_REGIMES = [
   { id: 'EXPORT', label: 'Vente à l’export' },
 ];
 const VAT_RATES = [0, 0.07, 0.13, 0.19];
-const WITHHOLDING_RATES = [0, 0.005, 0.01, 0.015, 0.05, 0.1];
+const WITHHOLDING_RATES = [0, 0.005, 0.01, 0.015, 0.03, 0.05, 0.1];
 /** Any other currency is free text, not a fixed list — typed by the user. */
 const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT' };
 /** Suggested titles; "Autre document" allows a free one. */
