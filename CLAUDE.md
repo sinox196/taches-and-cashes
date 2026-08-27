@@ -95,6 +95,12 @@ Admins get per-row pause / resume / stop controls on *any* collaborator's task (
 
 With nothing running it falls back to a task paused **in this session only** (`justPausedId`), so pausing from the card doesn't make it vanish and strand you with no way to resume without walking back to Pointage. Deliberately not "the most recent paused entry" — that would park a task paused days ago in the corner of every page forever.
 
+**Off the app entirely, the clock has two more carriers**, both in App.tsx: the **tab title** (`⏱ HH:MM:SS · CLIENT`, RUNNING only — a frozen time in the title reads as a stuck page), and an **ongoing OS notification** (`showTimerNotification` in [osNotifications.ts](src/utils/osNotifications.ts)) carrying Pause / Reprendre / Arrêter buttons. The notification is shown *only while `document.visibilityState === 'hidden'`* and taken down on return, so it never duplicates the floating card, and it is redrawn on the 30 s interval from a **ref** rather than an effect keyed on `dureeSeconds` — the latter would redraw it once a second.
+
+The worker cannot apply those buttons itself: the JWT lives in the page's `localStorage`, which a service worker cannot read. So `sw.js` posts `{type:'timer-action'}` to an open window and the app applies it through the same `updateTimeEntryApi` path (no `confirm()` on stop — a dialog on a hidden page is never seen, and the tap on Arrêter *is* the confirmation). With no window open it opens the app instead of dropping the tap. `pagehide` closes the notification, since `requireInteraction` otherwise leaves it up after the tab is gone, showing a frozen time above buttons nothing can apply.
+
+Two limits worth knowing before "fixing" them: a backgrounded page's timers are clamped to roughly **one tick a minute**, so the notification's time lags by up to a minute (it answers "still running, roughly how long", not a live second hand); and with the browser **fully closed** no page script runs at all, so nothing refreshes it — a live clock there would need Web Push or a native app, neither of which is built here.
+
 ### Employer cost
 
 ```

@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ActiveTimerCard } from './components/ActiveTimerCard';
 import { FloatingTimer } from './components/FloatingTimer';
+import { showTimerNotification, closeTimerNotification } from './utils/osNotifications';
 import { NewTaskCard } from './components/NewTaskCard';
 import { TimeTrackingTable } from './components/TimeTrackingTable';
 import { PausedTasksList } from './components/PausedTasksList';
@@ -448,6 +449,109 @@ export default function App() {
     updateTimeEntryApi(floatingEntry.id, { statut: 'COMPLETED' });
     showToast('Chronomètre arrêté et enregistré.');
   };
+
+  /* ---- The chronometer once the app is no longer on screen ---- */
+
+  // Kept in refs so the service-worker message listener below can stay
+  // subscribed once instead of tearing down and re-adding itself on every
+  // tick of the entries list.
+  const timeEntriesRef = useRef(timeEntries);
+  timeEntriesRef.current = timeEntries;
+  const justPausedIdRef = useRef(justPausedId);
+  justPausedIdRef.current = justPausedId;
+
+  // The tab title carries the clock, so switching to another tab still
+  // answers "is it running, and for how long" from the tab strip alone.
+  // Only while RUNNING: a paused task is not a clock, and leaving a frozen
+  // time in the title reads as a stuck page.
+  useEffect(() => {
+    const base = 'Tâches & Cash';
+    document.title =
+      floatingEntry && floatingEntry.statut === 'RUNNING'
+        ? `⏱ ${formatHHMMSS(floatingEntry.dureeSeconds)} · ${floatingEntry.client} — ${base}`
+        : base;
+  }, [floatingEntry?.statut, floatingEntry?.dureeSeconds, floatingEntry?.client]);
+
+  useEffect(() => () => { document.title = 'Tâches & Cash'; }, []);
+
+  /**
+   * Read by the interval below rather than depending on the entry directly:
+   * `dureeSeconds` changes every second, and an effect keyed on it would
+   * redraw the OS notification once a second instead of once every 30s.
+   */
+  const timerNotifRef = useRef<{ elapsed: string; client: string; subtitle: string; running: boolean } | null>(null);
+  timerNotifRef.current = floatingEntry
+    ? {
+        elapsed: formatHHMMSS(floatingEntry.dureeSeconds),
+        client: floatingEntry.client,
+        subtitle: [floatingEntry.pole, floatingEntry.taskType].filter(v => v && v !== '-').join(' · '),
+        running: floatingEntry.statut === 'RUNNING',
+      }
+    : null;
+
+  const [pageHidden, setPageHidden] = useState(() => document.visibilityState === 'hidden');
+  useEffect(() => {
+    const onVisibility = () => setPageHidden(document.visibilityState === 'hidden');
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  // Ongoing notification, shown only while the app is off screen — on screen
+  // the floating card already says all of this, and a permanent OS toast
+  // over it would just be noise. Keyed on id/statut (not the seconds) so a
+  // state change redraws it at once while the clock refreshes on the timer.
+  useEffect(() => {
+    if (!pageHidden || !floatingEntry) {
+      closeTimerNotification();
+      return;
+    }
+    const push = () => {
+      const snapshot = timerNotifRef.current;
+      if (snapshot) showTimerNotification(snapshot);
+    };
+    push();
+    const interval = setInterval(push, 30000);
+    return () => clearInterval(interval);
+  }, [pageHidden, floatingEntry?.id, floatingEntry?.statut]);
+
+  useEffect(() => () => { closeTimerNotification(); }, []);
+
+  // `requireInteraction` keeps the notification up until something takes it
+  // down — including after the tab is gone, where React cleanup does not
+  // reliably run. Left behind it would show a frozen time above buttons the
+  // (now dead) page can no longer apply, so drop it as the page goes away.
+  useEffect(() => {
+    const onPageHide = () => closeTimerNotification();
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, []);
+
+  // Pause / Reprendre / Arrêter pressed on that notification. The worker
+  // can't call the API itself (no access to the token), so it posts the
+  // action here. No confirm() on stop: the tap on "Arrêter" *is* the
+  // confirmation, and a dialog on a hidden page would never be seen.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'timer-action') return;
+      const entry = timeEntriesRef.current.find(
+        e => e.userId === user?.id && (e.statut === 'RUNNING' || e.id === justPausedIdRef.current),
+      );
+      if (!entry) return;
+      if (event.data.action === 'pause') {
+        setJustPausedId(entry.id);
+        updateTimeEntryApi(entry.id, { statut: 'PAUSED' });
+      } else if (event.data.action === 'resume') {
+        setJustPausedId(null);
+        updateTimeEntryApi(entry.id, { statut: 'RUNNING' });
+      } else if (event.data.action === 'stop') {
+        setJustPausedId(null);
+        updateTimeEntryApi(entry.id, { statut: 'COMPLETED' });
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [user?.id]);
 
   const handleStartNewTask = async (
     client: string,
