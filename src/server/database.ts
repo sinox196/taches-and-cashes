@@ -60,7 +60,7 @@ export async function initDb(): Promise<Database> {
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
   'absenceAuthorizations', 'loans', 'advances', 'leaveBalances', 'timeEntries', 'messages',
-  'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries',
+  'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories',
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
@@ -86,6 +86,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.notifications) db.notifications = [];
     if (!db.pushSubscriptions) db.pushSubscriptions = [];
     if (!db.cashJournalEntries) db.cashJournalEntries = [];
+    if (!db.cashCategories) db.cashCategories = [];
     if (!db.resourceTemplates) db.resourceTemplates = [];
     if (!db.resourceTemplateItems) db.resourceTemplateItems = [];
     if (!db.clientResourceInstances) db.clientResourceInstances = [];
@@ -533,6 +534,21 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.cashJournalEntries, companyId, id);
       if (index === -1) return false;
       db.cashJournalEntries.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllCashCategories: async (companyId: string) => scoped(db.cashCategories, companyId),
+    createCashCategory: async (companyId: string, category: any) => {
+      const row = { ...category, companyId };
+      db.cashCategories.push(row);
+      await saveDb();
+      return row;
+    },
+    deleteCashCategory: async (companyId: string, id: string) => {
+      const index = indexScoped(db.cashCategories, companyId, id);
+      if (index === -1) return false;
+      db.cashCategories.splice(index, 1);
       await saveDb();
       return true;
     },

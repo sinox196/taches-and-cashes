@@ -121,6 +121,15 @@ export interface Database {
   updateCashJournalEntry(companyId: string, id: string, updates: any): Promise<any | null>;
   deleteCashJournalEntry(companyId: string, id: string): Promise<boolean>;
 
+  /**
+   * The picklist of "objets" in the brouillard (Transport, Loyer, STEG…).
+   * A collection rather than a hardcoded array because the cabinet adds its
+   * own — the same reason `echeanceStatusOption` is admin-editable.
+   */
+  getAllCashCategories(companyId: string): Promise<any[]>;
+  createCashCategory(companyId: string, category: any): Promise<any>;
+  deleteCashCategory(companyId: string, id: string): Promise<boolean>;
+
   getAllNotifications(companyId: string): Promise<any[]>;
   createNotification(companyId: string, notification: any): Promise<any>;
   updateNotification(companyId: string, id: string, updates: any): Promise<any | null>;
@@ -253,6 +262,8 @@ export const emptyDb = () => ({
   pushSubscriptions: [],
   // Brouillard de caisse — one row per cash movement (entrée / sortie).
   cashJournalEntries: [],
+  // The picklist of objets used by those rows.
+  cashCategories: [],
   // Ressources Métier — see the interface comments above for what each holds.
   resourceTemplates: [],
   resourceTemplateItems: [],

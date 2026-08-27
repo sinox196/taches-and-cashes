@@ -69,6 +69,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   notifications: { desc: true },
   push_subscriptions: { desc: false },
   cash_journal_entries: { desc: false },
+  cash_categories: { desc: false },
   resource_templates: { desc: false },
   resource_template_items: { desc: false },
   client_resource_instances: { desc: true },
@@ -101,6 +102,7 @@ const TABLE_FOR: Record<string, string> = {
   notifications: 'notifications',
   pushSubscriptions: 'push_subscriptions',
   cashJournalEntries: 'cash_journal_entries',
+  cashCategories: 'cash_categories',
   resourceTemplates: 'resource_templates',
   resourceTemplateItems: 'resource_template_items',
   clientResourceInstances: 'client_resource_instances',
@@ -342,6 +344,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const notifications = tenantCollection('notifications');
   const pushSubscriptions = tenantCollection('push_subscriptions');
   const cashJournal = tenantCollection('cash_journal_entries');
+  const cashCategories = tenantCollection('cash_categories');
   const resourceTemplates = tenantCollection('resource_templates');
   const resourceTemplateItems = tenantCollection('resource_template_items');
   const clientResourceInstances = tenantCollection('client_resource_instances');
@@ -546,6 +549,10 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     createCashJournalEntry: cashJournal.create,
     updateCashJournalEntry: cashJournal.update,
     deleteCashJournalEntry: cashJournal.remove,
+
+    getAllCashCategories: cashCategories.all,
+    createCashCategory: cashCategories.create,
+    deleteCashCategory: cashCategories.remove,
 
     getAllNotifications: notifications.all,
     createNotification: notifications.create,

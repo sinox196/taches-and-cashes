@@ -2279,6 +2279,77 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     return null;
   };
 
+  /**
+   * The objets a journal row can carry. Seeded on first read with the
+   * cabinet's own list and extended by them from the picker — held as rows,
+   * not a constant, precisely so adding one never needs a code change.
+   */
+  const SEED_CASH_CATEGORIES = [
+    'Encaissement client',
+    'Alimentation de caisse',
+    'Femme de ménage',
+    'Loyer',
+    "Produits d'hygiène",
+    'Fournitures de bureau',
+    'Transport',
+    'STEG',
+    'SONEDE',
+    'Télécommunications',
+    'OOREDOO',
+    'TELECOM',
+    'Dépannage client',
+    'Remboursement dépannage client',
+    'Autres',
+  ];
+
+  app.get('/api/cash-categories', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+    try {
+      let rows = await db.getAllCashCategories(req.user.companyId);
+      if (rows.length === 0) {
+        for (const label of SEED_CASH_CATEGORIES) {
+          await db.createCashCategory(req.user.companyId, { id: genId('cashcat'), label });
+        }
+        rows = await db.getAllCashCategories(req.user.companyId);
+      }
+      // Alphabetical, accent-aware — the picker shows them in this order.
+      res.json(rows.slice().sort((a: any, b: any) => String(a.label).localeCompare(String(b.label), 'fr')));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/cash-categories', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const label = String(req.body?.label ?? '').trim().slice(0, 60);
+      if (!label) return res.status(400).json({ error: "L'objet ne peut pas être vide" });
+
+      const existing = await db.getAllCashCategories(req.user.companyId);
+      // Case-insensitive: "transport" and "Transport" are one objet, not two
+      // near-identical entries cluttering the list.
+      const clash = existing.find((c: any) => String(c.label).toLowerCase() === label.toLowerCase());
+      if (clash) return res.json(clash);
+
+      res.status(201).json(await db.createCashCategory(req.user.companyId, { id: genId('cashcat'), label }));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/cash-categories/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteCashCategory(req.user.companyId, req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      // Rows already carrying the deleted objet keep it: the label is stored
+      // on the row, so history stays readable. Same rule as a deleted
+      // échéance status option.
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.get('/api/cash-journal', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
       const rows = (await db.getAllCashJournalEntries(req.user.companyId))

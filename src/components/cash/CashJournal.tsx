@@ -3,6 +3,7 @@ import { Plus, Loader2, Trash2, Pencil, Check, X, BookOpen, Search } from 'lucid
 import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
 import { ClientSearchInput } from './ClientSearchInput';
+import { CategoryPicker, CashCategory } from './CategoryPicker';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -13,38 +14,16 @@ const frDate = (iso: string) => {
 };
 
 const PAYMENT_METHODS = ['Espèces', 'Chèque', 'Virement', 'Carte', 'Traite'];
-
-/**
- * The categories the cabinet's own journal already uses. Suggestions, not a
- * closed list — the field accepts anything typed, so a new one never needs a
- * code change. "Encaissement règlement de facture" is the one that normally
- * carries a client, and so becomes that client's encaissement.
- */
-const CATEGORIES = [
-  'Solde de départ',
-  'Encaissement règlement de facture',
-  'Alimentation de caisse',
-  'Alimentation',
-  'Transport',
-  'Loyer',
-  'Femme de ménage',
-  'Fournitures de bureau',
-  "Produits d'hygiène",
-  'STEG',
-  'SONEDE',
-  'TELECOM',
-  'OOREDOO',
-  'Autre',
-];
-
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+const PAGE_SIZE = 20;
 
-/** The sheet's own "Mois" column — derived from the date, never stored. */
 const monthOf = (iso: string) => Number(String(iso || '').slice(5, 7)) || 0;
+const yearOf = (iso: string) => Number(String(iso || '').slice(0, 4)) || 0;
 
 export interface JournalRow {
   id: string;
   date: string;
+  /** Stored as `label`; shown as the Description column. */
   label: string;
   clientId: number | null;
   clientName: string;
@@ -79,28 +58,35 @@ const emptyDraft = (): Omit<JournalRow, 'id'> => ({
 const Fields: React.FC<{
   value: Omit<JournalRow, 'id'>;
   onChange: (patch: Partial<Omit<JournalRow, 'id'>>) => void;
-}> = ({ value, onChange }) => (
+  categories: CashCategory[];
+  onCreateCategory: (label: string) => Promise<CashCategory | null>;
+  onDeleteCategory: (c: CashCategory) => void;
+  canManage: boolean;
+}> = ({ value, onChange, categories, onCreateCategory, onDeleteCategory, canManage }) => (
   <>
     <td className="px-2 py-1.5">
       <input type="date" value={value.date} onChange={e => onChange({ date: e.target.value })}
         className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
     </td>
-    {/* Derived from the date, so it is shown rather than asked for. */}
-    <td className="px-2 py-1.5 text-center text-[12px] text-gray-400">{monthOf(value.date) || '—'}</td>
     <td className="px-2 py-1.5">
-      <input value={value.label} onChange={e => onChange({ label: e.target.value })} placeholder="Libellé"
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
+      <CategoryPicker
+        value={value.category}
+        onChange={label => onChange({ category: label })}
+        categories={categories}
+        onCreate={onCreateCategory}
+        onDelete={onDeleteCategory}
+        canManage={canManage}
+      />
     </td>
-    <td className="px-2 py-1.5 min-w-[190px]">
+    <td className="px-2 py-1.5">
+      <input value={value.label} onChange={e => onChange({ label: e.target.value })} placeholder="Description"
+        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[180px]" />
+    </td>
+    <td className="px-2 py-1.5 min-w-[180px]">
       <ClientSearchInput
         value={value.clientName}
         onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
       />
-    </td>
-    <td className="px-2 py-1.5">
-      <input list="caisse-categories" value={value.category} onChange={e => onChange({ category: e.target.value })}
-        placeholder="Catégorie"
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[150px]" />
     </td>
     <td className="px-2 py-1.5">
       <select value={value.paymentMethod} onChange={e => onChange({ paymentMethod: e.target.value })}
@@ -110,7 +96,7 @@ const Fields: React.FC<{
     </td>
     <td className="px-2 py-1.5">
       <input value={value.reference} onChange={e => onChange({ reference: e.target.value })} placeholder="Pièce"
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] w-24" />
+        className="px-2 py-1 border border-gray-300 rounded text-[12px] w-24" />
     </td>
     <td className="px-2 py-1.5">
       <input type="number" step="0.001" min="0" value={value.entree || ''} placeholder="0,000"
@@ -133,9 +119,9 @@ const Fields: React.FC<{
  * page. It is never copied there — the server merges the two on read — so
  * the movement is recorded once and editing it here updates the client.
  *
- * The running "Solde" column is computed here rather than stored: it is
- * purely a function of the rows above it in date order, and storing it would
- * be a second copy to keep correct on every insert in the middle.
+ * The running "Solde" is computed rather than stored, and deliberately over
+ * the whole filtered set *before* paging: a balance that restarted at zero on
+ * page 2 would be worse than no balance at all.
  */
 export const CashJournal: React.FC = () => {
   const { token, hasPermission } = useAuth();
@@ -143,11 +129,13 @@ export const CashJournal: React.FC = () => {
   const canManage = hasPermission('MANAGE_CASH');
 
   const [rows, setRows] = useState<JournalRow[]>([]);
+  const [categories, setCategories] = useState<CashCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  /** The sheet is read month by month; 0 = every month. */
   const [month, setMonth] = useState(0);
+  const [year, setYear] = useState(0);
+  const [page, setPage] = useState(1);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Omit<JournalRow, 'id'> | null>(null);
@@ -156,10 +144,15 @@ export const CashJournal: React.FC = () => {
 
   const load = async () => {
     try {
-      const res = await fetch('/api/cash-journal', { headers: authHeaders });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Chargement impossible.');
+      const [jRes, cRes] = await Promise.all([
+        fetch('/api/cash-journal', { headers: authHeaders }),
+        fetch('/api/cash-categories', { headers: authHeaders }),
+      ]);
+      const data = await jRes.json();
+      if (!jRes.ok) throw new Error(data.error || 'Chargement impossible.');
       setRows(Array.isArray(data) ? data : []);
+      const cats = await cRes.json();
+      if (cRes.ok && Array.isArray(cats)) setCategories(cats);
     } catch (e) {
       setError(friendlyError(e, 'Impossible de charger le brouillard de caisse.'));
     } finally {
@@ -168,20 +161,58 @@ export const CashJournal: React.FC = () => {
   };
 
   useEffect(() => { load(); }, []);
+  // Any narrowing can leave the current page past the end of the results.
+  useEffect(() => { setPage(1); }, [search, month, year]);
+
+  const createCategory = async (label: string): Promise<CashCategory | null> => {
+    try {
+      const res = await fetch('/api/cash-categories', {
+        method: 'POST', headers: authHeaders, body: JSON.stringify({ label }),
+      });
+      const made = await res.json();
+      if (!res.ok) throw new Error(made.error || "Ajout impossible.");
+      setCategories(prev =>
+        prev.some(c => c.id === made.id)
+          ? prev
+          : [...prev, made].sort((a, b) => a.label.localeCompare(b.label, 'fr')));
+      return made;
+    } catch (e) {
+      setError(friendlyError(e, "Impossible d'ajouter cet objet."));
+      return null;
+    }
+  };
+
+  const deleteCategory = async (c: CashCategory) => {
+    if (!confirm(`Retirer « ${c.label} » de la liste des objets ?\n\nLes lignes déjà enregistrées le conservent.`)) return;
+    try {
+      const res = await fetch(`/api/cash-categories/${c.id}`, { method: 'DELETE', headers: authHeaders });
+      if (!res.ok) throw new Error('Suppression impossible.');
+      setCategories(prev => prev.filter(x => x.id !== c.id));
+    } catch (e) {
+      setError(friendlyError(e, 'Suppression impossible.'));
+    }
+  };
+
+  /** Years present in the journal, plus the current one so a new year is pickable. */
+  const years = useMemo(() => {
+    const set = new Set<number>(rows.map(r => yearOf(r.date)).filter(Boolean));
+    set.add(new Date().getFullYear());
+    return [...set].sort((a, b) => b - a);
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter(r => {
+      if (year && yearOf(r.date) !== year) return false;
       if (month && monthOf(r.date) !== month) return false;
       if (!q) return true;
       return [r.label, r.clientName, r.category, r.reference, r.paymentMethod]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
-  }, [rows, search, month]);
+  }, [rows, search, month, year]);
 
-  // Running balance follows the *displayed* order, so it always reads as the
-  // column the cabinet's own sheet has: each line's solde is everything above
-  // it plus itself.
+  // Balance over the whole filtered set, then paged — so page 2 continues
+  // from page 1 instead of restarting.
   const withSolde = useMemo(() => {
     let solde = 0;
     return filtered.map(r => {
@@ -189,6 +220,9 @@ export const CashJournal: React.FC = () => {
       return { row: r, solde };
     });
   }, [filtered]);
+
+  const totalPages = Math.max(1, Math.ceil(withSolde.length / PAGE_SIZE));
+  const pageRows = withSolde.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const totals = useMemo(() => ({
     entree: filtered.reduce((s, r) => s + (Number(r.entree) || 0), 0),
@@ -200,9 +234,7 @@ export const CashJournal: React.FC = () => {
     setBusyId(id || 'new');
     try {
       const res = await fetch(id ? `/api/cash-journal/${id}` : '/api/cash-journal', {
-        method: id ? 'PUT' : 'POST',
-        headers: authHeaders,
-        body: JSON.stringify(body),
+        method: id ? 'PUT' : 'POST', headers: authHeaders, body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Enregistrement impossible.');
@@ -231,18 +263,26 @@ export const CashJournal: React.FC = () => {
     }
   };
 
+  const fieldProps = {
+    categories,
+    onCreateCategory: createCategory,
+    onDeleteCategory: deleteCategory,
+    canManage,
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-4">
-      {/* Shared by every Catégorie input — suggestions only, free text wins. */}
-      <datalist id="caisse-categories">
-        {CATEGORIES.map(c => <option key={c} value={c} />)}
-      </datalist>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[11.5px] text-gray-500">
           Chaque <span className="font-semibold text-gray-700">entrée</span> rattachée à un client apparaît
           automatiquement dans ses encaissements sur la page Clients.
         </p>
         <div className="flex items-center gap-2">
+          <select value={year} onChange={e => setYear(Number(e.target.value))}
+            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
+            <option value={0}>Toutes les années</option>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
           <select value={month} onChange={e => setMonth(Number(e.target.value))}
             className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
             <option value={0}>Tous les mois</option>
@@ -250,11 +290,11 @@ export const CashJournal: React.FC = () => {
           </select>
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Libellé, client, catégorie…"
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Description, client, objet…"
               className="pl-8 pr-3 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-56" />
           </div>
           {canManage && !draft && (
-            <button onClick={() => setDraft(emptyDraft())}
+            <button onClick={() => { setDraft(emptyDraft()); setPage(1); }}
               className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2">
               <Plus className="w-4 h-4" /> Nouvelle ligne
             </button>
@@ -270,104 +310,136 @@ export const CashJournal: React.FC = () => {
         {isLoading ? (
           <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
         ) : (
-          <div className="flex-1 min-h-0 overflow-auto">
-            <table className="w-full text-left whitespace-nowrap border-collapse">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  {['Date', 'Mois', 'Libellé', 'Client', 'Catégorie', 'Règlement', 'Pièce'].map(h => (
-                    <th key={h} className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">{h}</th>
-                  ))}
-                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Entrée</th>
-                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Sortie</th>
-                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right sticky right-0 bg-gray-50 border-l border-gray-200">Solde</th>
-                  <th className="px-3 py-2.5" />
-                </tr>
-                <tr className="bg-white border-b-2 border-gray-200 font-bold text-[12px]">
-                  <td className="px-3 py-2 text-gray-700" colSpan={7}>Total général</td>
-                  <td className="px-3 py-2 text-right font-mono text-done-fg">{money(totals.entree)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-late-fg">{money(totals.sortie)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(totals.entree - totals.sortie)}</td>
-                  <td />
-                </tr>
-              </thead>
-              <tbody className="text-[12.5px]">
-                {canManage && draft && (
-                  <tr className="bg-blue-50/40 border-b border-gray-100">
-                    <Fields value={draft} onChange={patch => setDraft(d => ({ ...(d as any), ...patch }))} />
-                    <td />
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center gap-1 justify-end">
-                        <button title="Enregistrer" disabled={busyId === 'new'}
-                          onClick={async () => { if (await save(draft)) setDraft(null); }}
-                          className="p-1.5 rounded-lg text-white bg-navy hover:bg-navy-hover disabled:opacity-50">
-                          {busyId === 'new' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                        </button>
-                        <button title="Annuler" onClick={() => setDraft(null)}
-                          className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
-                      </div>
-                    </td>
+          <>
+            <div className="flex-1 min-h-0 overflow-auto">
+              <table className="w-full text-left whitespace-nowrap border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    {['Date', 'Objet', 'Description', 'Client', 'Règlement', 'Pièce'].map(h => (
+                      <th key={h} className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">{h}</th>
+                    ))}
+                    <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Entrée</th>
+                    <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Sortie</th>
+                    <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right sticky right-0 bg-gray-50 border-l border-gray-200">Solde</th>
+                    <th className="px-3 py-2.5" />
                   </tr>
-                )}
-
-                {withSolde.length === 0 && !draft ? (
-                  <tr><td colSpan={11} className="p-10 text-center">
-                    <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-                    <p className="text-[13px] text-gray-500">
-                      {search ? `Aucune ligne ne correspond à « ${search} ».` : 'Aucun mouvement de caisse enregistré.'}
-                    </p>
-                  </td></tr>
-                ) : withSolde.map(({ row, solde }) => (
-                  editingId === row.id && editDraft ? (
-                    <tr key={row.id} className="bg-blue-50/40 border-b border-gray-100">
-                      <Fields value={editDraft} onChange={patch => setEditDraft(d => ({ ...(d as any), ...patch }))} />
+                  <tr className="bg-white border-b-2 border-gray-200 font-bold text-[12px]">
+                    <td className="px-3 py-2 text-gray-700" colSpan={6}>Total général</td>
+                    <td className="px-3 py-2 text-right font-mono text-done-fg">{money(totals.entree)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-late-fg">{money(totals.sortie)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(totals.entree - totals.sortie)}</td>
+                    <td />
+                  </tr>
+                </thead>
+                <tbody className="text-[12.5px]">
+                  {canManage && draft && (
+                    <tr className="bg-blue-50/40 border-b border-gray-100">
+                      <Fields value={draft} onChange={patch => setDraft(d => ({ ...(d as any), ...patch }))} {...fieldProps} />
                       <td />
                       <td className="px-2 py-1.5">
                         <div className="flex items-center gap-1 justify-end">
-                          <button title="Enregistrer" disabled={busyId === row.id}
-                            onClick={async () => { if (await save(editDraft, row.id)) { setEditingId(null); setEditDraft(null); } }}
+                          <button title="Enregistrer" disabled={busyId === 'new'}
+                            onClick={async () => { if (await save(draft)) setDraft(null); }}
                             className="p-1.5 rounded-lg text-white bg-navy hover:bg-navy-hover disabled:opacity-50">
-                            {busyId === row.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                            {busyId === 'new' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                           </button>
-                          <button title="Annuler" onClick={() => { setEditingId(null); setEditDraft(null); }}
+                          <button title="Annuler" onClick={() => setDraft(null)}
                             className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
-                  ) : (
-                    <tr key={row.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
-                      <td className="px-3 py-2 text-gray-600">{frDate(row.date)}</td>
-                      <td className="px-3 py-2 text-gray-400 text-center">{monthOf(row.date) || '—'}</td>
-                      <td className="px-3 py-2 text-gray-800">{row.label || <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2 text-gray-700">{row.clientName || <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2">
-                        {row.category
-                          ? <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[11px]">{row.category}</span>
-                          : <span className="text-gray-300">—</span>}
-                      </td>
-                      <td className="px-3 py-2 text-gray-500">{row.paymentMethod || '—'}</td>
-                      <td className="px-3 py-2 text-gray-500">{row.reference || '—'}</td>
-                      <td className="px-3 py-2 text-right font-mono text-done-fg">{row.entree ? money(row.entree) : ''}</td>
-                      <td className="px-3 py-2 text-right font-mono text-late-fg">{row.sortie ? money(row.sortie) : ''}</td>
-                      <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(solde)}</td>
-                      <td className="px-3 py-2">
-                        {canManage && (
+                  )}
+
+                  {pageRows.length === 0 && !draft ? (
+                    <tr><td colSpan={10} className="p-10 text-center">
+                      <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+                      <p className="text-[13px] text-gray-500">
+                        {search || month || year ? 'Aucune ligne ne correspond à ce filtre.' : 'Aucun mouvement de caisse enregistré.'}
+                      </p>
+                    </td></tr>
+                  ) : pageRows.map(({ row, solde }) => (
+                    editingId === row.id && editDraft ? (
+                      <tr key={row.id} className="bg-blue-50/40 border-b border-gray-100">
+                        <Fields value={editDraft} onChange={patch => setEditDraft(d => ({ ...(d as any), ...patch }))} {...fieldProps} />
+                        <td />
+                        <td className="px-2 py-1.5">
                           <div className="flex items-center gap-1 justify-end">
-                            <button title="Modifier"
-                              onClick={() => { setEditingId(row.id); setEditDraft({ ...row }); setDraft(null); }}
-                              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-navy"><Pencil className="w-3.5 h-3.5" /></button>
-                            <button title="Supprimer" disabled={busyId === row.id} onClick={() => remove(row)}
-                              className="p-1.5 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
-                              {busyId === row.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                            <button title="Enregistrer" disabled={busyId === row.id}
+                              onClick={async () => { if (await save(editDraft, row.id)) { setEditingId(null); setEditDraft(null); } }}
+                              className="p-1.5 rounded-lg text-white bg-navy hover:bg-navy-hover disabled:opacity-50">
+                              {busyId === row.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                             </button>
+                            <button title="Annuler" onClick={() => { setEditingId(null); setEditDraft(null); }}
+                              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
                           </div>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={row.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
+                        <td className="px-3 py-2 text-gray-600">{frDate(row.date)}</td>
+                        <td className="px-3 py-2">
+                          {row.category
+                            ? <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[11px]">{row.category}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-gray-800">{row.label || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2 text-gray-700">{row.clientName || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2 text-gray-500">{row.paymentMethod || '—'}</td>
+                        <td className="px-3 py-2 text-gray-500">{row.reference || '—'}</td>
+                        <td className="px-3 py-2 text-right font-mono text-done-fg">{row.entree ? money(row.entree) : ''}</td>
+                        <td className="px-3 py-2 text-right font-mono text-late-fg">{row.sortie ? money(row.sortie) : ''}</td>
+                        <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(solde)}</td>
+                        <td className="px-3 py-2">
+                          {canManage && (
+                            <div className="flex items-center gap-1 justify-end">
+                              <button title="Modifier"
+                                onClick={() => { setEditingId(row.id); setEditDraft({ ...row }); setDraft(null); }}
+                                className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-navy"><Pencil className="w-3.5 h-3.5" /></button>
+                              <button title="Supprimer" disabled={busyId === row.id} onClick={() => remove(row)}
+                                className="p-1.5 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                                {busyId === row.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Outside the scrolling area and `shrink-0`, so it stays on screen
+                however long the journal gets — no scrolling to reach it. */}
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between text-[13px] shrink-0">
+              <div className="text-gray-500">
+                {withSolde.length === 0
+                  ? 'Aucune ligne'
+                  : `Affichage de ${((page - 1) * PAGE_SIZE) + 1} à ${Math.min(page * PAGE_SIZE, withSolde.length)} sur ${withSolde.length} lignes`}
+              </div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 border border-gray-200 rounded text-gray-600 disabled:opacity-50 hover:bg-gray-100 bg-white"
+                >
+                  Précédent
+                </button>
+                <div className="flex items-center gap-1 px-2">
+                  <span className="font-medium text-gray-900">{page}</span>
+                  <span className="text-gray-500">/</span>
+                  <span className="text-gray-500">{totalPages}</span>
+                </div>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-3 py-1.5 border border-gray-200 rounded text-gray-600 disabled:opacity-50 hover:bg-gray-100 bg-white"
+                >
+                  Suivant
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>
