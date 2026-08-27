@@ -303,8 +303,8 @@ export const CashJournal: React.FC = () => {
                     {['Date', 'Objet', 'Description', 'Client'].map(h => (
                       <th key={h} className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">{h}</th>
                     ))}
-                    <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Entrée</th>
-                    <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Sortie</th>
+                    <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Montant encaissé</th>
+                    <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Montant décaissé</th>
                     <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right sticky right-0 bg-gray-50 border-l border-gray-200">Solde</th>
                     <th className="px-3 py-2.5" />
                   </tr>

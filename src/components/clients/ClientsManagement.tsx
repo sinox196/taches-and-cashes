@@ -11,6 +11,8 @@ export interface EncaissementEntry {
   amount: number;
   date: string;
   note?: string;
+  /** Present only on entries merged in from the Brouillard de caisse. */
+  source?: 'BROUILLARD';
 }
 
 export interface Client {
@@ -768,32 +770,30 @@ export const ClientsManagement: React.FC = () => {
                         if (col.key === 'encaissements') {
                           const entries = Array.isArray(client.encaissements) ? client.encaissements : [];
                           const journal = client.journalEncaissements || [];
+                          const count = entries.length + journal.length;
                           // The displayed total must match the server's own
                           // resteAPayer, which counts both sources.
                           const total = sumEncaissements(client.encaissements) + sumEncaissements(journal);
+                          // A row-height that grows with how many encaissements a
+                          // client happens to have breaks the table as a whole —
+                          // one client with fifty small versements used to stretch
+                          // its row far past every other. The cell now stays a
+                          // fixed height regardless of count; the full dated list
+                          // lives one click away in the detail drawer instead.
                           return (
-                            <td key={col.key} className="px-5 py-3 text-right font-mono text-gray-700 bg-emerald-50/25">
+                            <td
+                              key={col.key}
+                              onClick={() => setViewingClient(client)}
+                              title={count > 0 ? 'Voir le détail des encaissements' : undefined}
+                              className={`px-5 py-3 text-right font-mono text-gray-700 bg-emerald-50/25 ${count > 0 ? 'cursor-pointer hover:bg-emerald-50/50' : ''}`}
+                            >
                               {formatCostTND(total)}
-                              {(entries.length > 0 || journal.length > 0) && (
-                                <div className="text-[10px] text-gray-400 font-sans mt-1 space-y-0.5">
-                                  {entries.map(entry => (
-                                    <div key={entry.id} className="whitespace-nowrap">
-                                      {formatCostTND(Number(entry.amount) || 0)}
-                                      {entry.date && <> · {new Date(entry.date).toLocaleDateString('fr-FR')}</>}
-                                    </div>
-                                  ))}
-                                  {/* Brouillard de caisse rows carry their own
-                                      mark so the two origins are never confused
-                                      for one another. */}
-                                  {journal.map(entry => (
-                                    <div key={entry.id} className="whitespace-nowrap text-turquoise font-medium">
-                                      {formatCostTND(Number(entry.amount) || 0)}
-                                      {entry.date && <> · {new Date(entry.date).toLocaleDateString('fr-FR')}</>}
-                                      <span className="ml-1 px-1 py-px rounded bg-turquoise/10 text-turquoise text-[9px] font-semibold uppercase tracking-wide">
-                                        caisse
-                                      </span>
-                                    </div>
-                                  ))}
+                              {count > 0 && (
+                                <div className="mt-0.5 font-sans">
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600">
+                                    {count} {count > 1 ? 'versements' : 'versement'}
+                                    <ChevronRight className="w-2.5 h-2.5" />
+                                  </span>
                                 </div>
                               )}
                             </td>
@@ -1352,6 +1352,53 @@ export const ClientsManagement: React.FC = () => {
                   </div>
                 </div>
               </section>
+
+              {/* Encaissements — every dated entry, both the manually typed
+                  ones and those merged in from the Brouillard de caisse. This
+                  is the only place the full list is shown; the table cell
+                  only ever gives the total, so one client with many small
+                  versements can't stretch that row past every other. */}
+              {(() => {
+                const manual = Array.isArray(viewingClient.encaissements) ? viewingClient.encaissements : [];
+                const journal = viewingClient.journalEncaissements || [];
+                const all = [...manual.map(e => ({ ...e, source: undefined as string | undefined })), ...journal]
+                  .slice()
+                  .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+                if (all.length === 0) return null;
+                return (
+                  <section>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                        Encaissements ({all.length})
+                      </h3>
+                      <span className="text-[12px] font-mono font-semibold text-gray-700">
+                        {formatCostTND(sumEncaissements(manual) + sumEncaissements(journal))}
+                      </span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                      {all.map(entry => (
+                        <div
+                          key={entry.id}
+                          className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 text-[12px]"
+                        >
+                          <div className="flex items-center gap-2 text-gray-500">
+                            <span>{entry.date ? new Date(entry.date).toLocaleDateString('fr-FR') : '—'}</span>
+                            {entry.note && <span className="text-gray-400 italic truncate max-w-[140px]">{entry.note}</span>}
+                            {entry.source === 'BROUILLARD' && (
+                              <span className="px-1.5 py-0.5 rounded bg-turquoise/10 text-turquoise text-[9px] font-semibold uppercase tracking-wide shrink-0">
+                                caisse
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-mono font-semibold text-gray-800 shrink-0">
+                            {formatCostTND(Number(entry.amount) || 0)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })()}
 
               {/* Notes */}
               {viewingClient.notes && (
