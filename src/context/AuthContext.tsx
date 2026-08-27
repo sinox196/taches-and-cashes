@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Role } from '../constants/roles';
 import { RESOURCES_PERMISSIONS, companyHasResourcesModule } from '../constants/secteurs';
+import { unsubscribeFromPush } from '../utils/osNotifications';
 
 export interface User {
   id: number;
@@ -91,6 +92,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = (reason?: string) => {
+    // Drop this device's push subscription before the token disappears — the
+    // call needs it to authenticate. Not awaited: logging out must not wait
+    // on the network, and the row is pruned server-side on its next 404/410
+    // either way. Matters most on a shared machine, where the next person
+    // would otherwise keep receiving the previous user's chronometer.
+    if (token) unsubscribeFromPush(token).catch(() => {});
+
     setToken(null);
     setUser(null);
     // Guard against `onClick={logout}` handing us a click event instead of a

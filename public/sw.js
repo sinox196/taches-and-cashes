@@ -15,12 +15,16 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 const TIMER_TAG = 'active-timer';
 
 /**
- * The running chronometer, pushed by the server. This is the only path that
- * still works once the browser is closed: no page is running then, so
- * nothing client-side could draw or update this.
+ * Two different senders share one push subscription per device: the
+ * chronometer sweep (this comment's original subject) and, separately,
+ * server.ts's notify()/message-send routes for ordinary notifications —
+ * task assigned, leave decisions, HR requests, new messages. They are told
+ * apart by shape, not by a type field: a chrono payload always carries
+ * `elapsed` (or `closed: true`); anything else that carries a `title` is a
+ * plain notification.
  *
- * A payload of `{ closed: true }` means the task ended — take the
- * notification down rather than leaving a frozen "en cours" on the phone.
+ * Either way this is the only path that still works once the browser is
+ * closed: no page is running then, so nothing client-side could draw this.
  */
 self.addEventListener('push', (event) => {
   let payload = {};
@@ -32,14 +36,28 @@ self.addEventListener('push', (event) => {
       open.forEach((n) => n.close());
       return;
     }
-    if (!payload.elapsed) return;
-
-    // With the app open and on screen the floating card already shows all of
-    // this; a system notification on top of it would be pure noise.
-    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (windows.some((c) => c.visibilityState === 'visible')) return;
-
-    await showTimerNotification(payload);
+    if (payload.elapsed) {
+      // With the app open and on screen the floating card already shows all
+      // of this; a system notification on top of it would be pure noise.
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      if (windows.some((c) => c.visibilityState === 'visible')) return;
+      await showTimerNotification(payload);
+      return;
+    }
+    if (payload.title) {
+      // No visibility gate here: with the app open, NotificationBell.tsx's
+      // own poll already draws the same notification from the same tag
+      // (`notif-<id>` / `msg-<senderId>`), and the platform's own tag
+      // matching collapses the two into one instead of stacking a second.
+      await self.registration.showNotification(payload.title, {
+        body: payload.body || '',
+        tag: payload.tag,
+        renotify: !!payload.tag,
+        icon: '/favicon.svg',
+        badge: '/favicon.svg',
+        data: { nav: payload.nav || 'Dashboard' },
+      });
+    }
   })());
 });
 
@@ -134,6 +152,9 @@ self.addEventListener('notificationclick', (event) => {
       existing.postMessage({ type: 'notification-click', nav });
       return;
     }
-    await self.clients.openWindow('/');
+    // No tab open — the section has to travel in the URL instead of a
+    // postMessage there's no window to receive it. App.tsx reads this once
+    // on mount (there's no router in this app) and strips it.
+    await self.clients.openWindow(nav ? `/?nav=${encodeURIComponent(nav)}` : '/');
   })());
 });

@@ -1,3 +1,9 @@
+// Loads .env before anything reads process.env. dotenv was already a
+// dependency but never imported, so a local .env did nothing; VAPID keys are
+// the first config a developer has to be able to set outside Railway. A
+// no-op in production, where the container has no .env and the platform
+// injects the variables directly.
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
@@ -3143,6 +3149,31 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       res.status(201).json(message);
       sendToUser(req.user.companyId, toUserId, { type: 'message', message });
       sendToUser(req.user.companyId, req.user.id, { type: 'message', message });
+
+      // Pushed straight from here rather than through notify(): a message
+      // must not become a notification row — the bell derives its message
+      // counts from the thread's own readAt, and a row per message would be
+      // a second "is this read" record to keep in sync with it. Tag matches
+      // the bell's own `msg-<senderId>` so the app-open and app-closed paths
+      // collapse into one OS notification instead of stacking two.
+      if (pushEnabled()) {
+        (async () => {
+          const subs = (await db.getAllPushSubscriptionsForCompany(req.user.companyId)).filter((s: any) => s.userId === toUserId);
+          if (!subs.length) return;
+          const sender = await db.getUserById(req.user.companyId, req.user.id);
+          const senderName = sender?.fullName || sender?.username || 'Collaborateur';
+          const payload = {
+            title: `Nouveau message — ${senderName}`,
+            body: body.length > 120 ? body.slice(0, 117) + '…' : body,
+            nav: 'Messages',
+            tag: `msg-${req.user.id}`,
+          };
+          for (const sub of subs) {
+            const { expired } = await sendPush(sub, payload);
+            if (expired) await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+          }
+        })().catch((error) => console.error('[push] message fan-out failed:', error));
+      }
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -3667,6 +3698,24 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // ---------------------------------------------------------
 
   /**
+   * Where clicking a pushed notification lands. Mirrors TYPE_META in
+   * NotificationBell.tsx — the service worker has no access to that map, so
+   * the destination has to travel inside the push payload itself.
+   */
+  const PUSH_NAV_FOR_TYPE: Record<string, string> = {
+    TASK_ASSIGNED: 'Dashboard',
+    TASK_REMINDER: 'Dashboard',
+    LEAVE_REQUEST: 'HR',
+    LEAVE_DECISION: 'HR',
+    ABSENCE_REQUEST: 'HR',
+    ABSENCE_DECISION: 'HR',
+    LOAN_REQUEST: 'HR',
+    LOAN_DECISION: 'HR',
+    ADVANCE_REQUEST: 'HR',
+    ADVANCE_DECISION: 'HR',
+  };
+
+  /**
    * The one place a notification is created. `type` picks where the bell
    * sends the user when they click it (see NOTIFICATION_LINK in the client).
    *
@@ -3676,15 +3725,33 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * hoisted through the whole scope; a `const` would not be.
    */
   async function notify(companyId: string, userId: number, type: string, title: string, body: string) {
-    await db.createNotification(companyId, {
-      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      userId,
-      type,
-      title,
-      body,
-      readAt: null,
-      createdAt: new Date().toISOString(),
-    });
+    const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await db.createNotification(companyId, { id, userId, type, title, body, readAt: null, createdAt: new Date().toISOString() });
+
+    // Reaches a closed browser the same way the chronometer does — this is a
+    // second, independent use of that same push infrastructure (subscribe/
+    // sendPush/pushEnabled), not a competing one: one device subscription
+    // already receives both kinds of push.
+    //
+    // Deliberately not awaited: the notification row is already durable and
+    // the bell shows it either way, so a slow round-trip to the push service
+    // must not sit in front of the HTTP response of whoever triggered this
+    // (an approver clicking "Approuver" would otherwise wait on it).
+    if (pushEnabled()) {
+      (async () => {
+        const subs = (await db.getAllPushSubscriptionsForCompany(companyId)).filter((s: any) => s.userId === userId);
+        for (const sub of subs) {
+          // Tag matches the one NotificationBell.tsx builds for this same row
+          // — `notif-${n.id}`, and `id` here already starts with `notif-`
+          // (see the id generated just above), so this is genuinely
+          // `notif-notif-…`, not a typo. With the app open, the client's own
+          // poll already draws this; the identical tag is what makes the two
+          // collapse into one notification instead of stacking two.
+          const { expired } = await sendPush(sub, { title, body, nav: PUSH_NAV_FOR_TYPE[type] || 'Dashboard', tag: `notif-${id}` });
+          if (expired) await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+        }
+      })().catch((error) => console.error('[push] notify() fan-out failed:', error));
+    }
   }
 
   const NOTIFICATIONS_PAGE_SIZE = 50;

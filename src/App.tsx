@@ -58,6 +58,15 @@ export default function App() {
   // app) leaves you where you were instead of bouncing back to Pointage.
   const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Plateforme'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
+    // Clicking a pushed notification with no tab open makes the service
+    // worker open the app at `/?nav=<section>` — there's no router to read a
+    // URL otherwise, so it's consumed once here and stripped, or a later
+    // refresh would keep dragging the user back to that section.
+    const fromPush = new URLSearchParams(window.location.search).get('nav');
+    if (fromPush && NAV_IDS.includes(fromPush)) {
+      window.history.replaceState({}, '', window.location.pathname);
+      return fromPush;
+    }
     const saved = localStorage.getItem('active_nav');
     return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';
   });

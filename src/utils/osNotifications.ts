@@ -149,9 +149,12 @@ export async function showTimerNotification({ elapsed, client, subtitle, running
 }
 
 /**
- * Registers this device for Web Push, which is what lets the chronometer
- * keep showing with the browser fully closed — at that point no page script
- * runs, so the notification has to come from the server.
+ * Registers this device for Web Push. One subscription carries two things
+ * with the browser fully closed, at which point no page script runs and the
+ * notification has to come from the server either way: the running
+ * chronometer (see push.ts's 15-minute sweep) and, separately, ordinary
+ * notifications — task assigned, leave decisions, a new message — sent
+ * straight from notify()/the message route in server.ts.
  *
  * Safe to call repeatedly: an existing subscription is reused, and the
  * server upserts on the endpoint. Silently does nothing when push is not
@@ -197,6 +200,29 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   const output = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
   return output;
+}
+
+/**
+ * Drops this device's subscription server-side on logout, so a shared
+ * machine stops receiving the previous user's chronometer and notifications.
+ * Does not unsubscribe the browser's own PushManager — a colleague logging
+ * in right after would otherwise have to wait out a fresh permission prompt
+ * for a capability the browser already granted to this site.
+ */
+export async function unsubscribeFromPush(token: string): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return;
+    await fetch('/api/push/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    });
+  } catch {
+    /* the row is pruned server-side on its next 404/410 either way */
+  }
 }
 
 export async function closeTimerNotification(): Promise<void> {
