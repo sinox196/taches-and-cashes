@@ -29,6 +29,18 @@ export interface TimeEntry {
    * answered.
    */
   overtimeAckCycle?: number;
+  /**
+   * The kind of device the task was *started* from, stamped server-side from
+   * the request. Never rewritten — editing a task later from a laptop does
+   * not change where it was started.
+   */
+  createdVia?: 'MOBILE' | 'DESKTOP';
+  /** The device, person and time of the most recent change to this entry. */
+  lastEditedVia?: 'MOBILE' | 'DESKTOP';
+  lastEditedBy?: number;
+  /** Resolved server-side in enrichEntries, off the same user map as userName. */
+  lastEditedByName?: string;
+  lastEditedAt?: string;
 }
 
 export interface ActiveTimerState {

@@ -3559,6 +3559,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         ...e,
         dureeSeconds: secs,
         userName: usersById.get(e.userId)?.username || 'Unknown',
+        // Resolved off the same map as userName rather than with a second
+        // lookup per row — the scale rules forbid a find() inside this loop.
+        lastEditedByName: e.lastEditedBy ? (usersById.get(e.lastEditedBy)?.username || 'Unknown') : undefined,
       };
       if (!forAdmin) {
         delete base.hourlyRate;
@@ -3752,7 +3755,26 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * `id: undefined`, which no route could then update or delete and which
    * broke React's keys in the table.
    */
-  const createRunningEntryForUser = async (companyId: string, userId: number, fields: any) => {
+  /**
+   * Which kind of device a request came from — recorded on a time entry so
+   * the team can see that a task was started or changed from a phone rather
+   * than at a desk.
+   *
+   * `Sec-CH-UA-Mobile` is the browser telling us directly and is preferred
+   * where it exists (Chromium, so most Android phones); the User-Agent regex
+   * is the fallback that covers Safari/iOS and Firefox. Both are self-reported
+   * by the browser and trivially spoofable — this is a convenience for
+   * reading the timesheet, never evidence, and nothing is gated on it.
+   */
+  const deviceFromRequest = (req: any): 'MOBILE' | 'DESKTOP' => {
+    const hint = String(req.headers?.['sec-ch-ua-mobile'] || '');
+    if (hint === '?1') return 'MOBILE';
+    if (hint === '?0') return 'DESKTOP';
+    const ua = String(req.headers?.['user-agent'] || '');
+    return /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile|Silk/i.test(ua) ? 'MOBILE' : 'DESKTOP';
+  };
+
+  const createRunningEntryForUser = async (companyId: string, userId: number, fields: any, via?: 'MOBILE' | 'DESKTOP') => {
     const userFull = await db.getUserById(companyId, userId);
     const settings = await db.getSettings(companyId) || {};
     // Snapshot the author's employer cost. Reads resolve it live as well, so
@@ -3778,12 +3800,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       userId,
       hourlyRate,
       lastStartedAt: Date.now(),
+      // The device the task was started from. Never rewritten afterwards —
+      // editing a task from a laptop doesn't change where it was started.
+      ...(via ? { createdVia: via } : {}),
     });
   };
 
   app.post('/api/time-entries', authenticate, async (req: any, res: any) => {
     try {
-      const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, req.body);
+      const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, req.body, deviceFromRequest(req));
       res.json(entry);
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
@@ -3836,6 +3861,22 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // resuming someone else's) pauses whatever else that person had running.
       if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
         await pauseOtherRunningEntries(req.user.companyId, existing.userId, entryId);
+      }
+
+      // Who last touched this task, from what kind of device, and when.
+      // `lastEditedBy` matters as much as the device: an admin pausing
+      // someone else's task from a laptop must not read as that collaborator
+      // having done it themselves.
+      //
+      // A write that only carries `overtimeAckCycle` is skipped — that is the
+      // 2h popup recording itself, not somebody editing the task, and letting
+      // it through would mark a task "modified" that nobody touched.
+      const bodyKeys = Object.keys(req.body);
+      const isSilentWrite = bodyKeys.length > 0 && bodyKeys.every(k => k === 'overtimeAckCycle' || k === 'id');
+      if (!isSilentWrite) {
+        updates.lastEditedVia = deviceFromRequest(req);
+        updates.lastEditedBy = req.user.id;
+        updates.lastEditedAt = new Date().toISOString();
       }
 
       const updated = await db.updateTimeEntry(req.user.companyId, entryId, updates);
@@ -4119,7 +4160,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         taskTypeId: assignment.taskTypeId,
         description: assignment.description,
         statut: 'RUNNING',
-      });
+      }, deviceFromRequest(req));
 
       const updated = await db.updateTaskAssignment(req.user.companyId, assignment.id, {
         status: 'STARTED',

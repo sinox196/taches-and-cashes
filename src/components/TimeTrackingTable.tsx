@@ -18,6 +18,7 @@ import { formatCostDT } from '../utils/formatters';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
 import { MultiSelectFilterDropdown } from './MultiSelectFilterDropdown';
+import { EntryDeviceBadge } from './EntryDeviceBadge';
 
 interface TimeTrackingTableProps {
   entries: TimeEntry[];
@@ -262,7 +263,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     <span className="inline-flex items-center gap-1.5 max-w-full">
                       {(() => { const p = presenceOf(row.userId);
                         return <PresenceBadge state={p.state} idleMs={p.idleMs} variant="dot" />; })()}
-                      {row.userName || 'Unknown'}
+                      <span className="truncate">{row.userName || 'Unknown'}</span>
+                      <EntryDeviceBadge entry={row} />
                     </span>
                   </td>
                   {/* Date */}
