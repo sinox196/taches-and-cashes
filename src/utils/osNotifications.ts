@@ -111,7 +111,11 @@ const LEGACY_TIMER_TAG = 'active-timer';
 export async function closeLingeringTimerNotification(): Promise<void> {
   if (!('serviceWorker' in navigator)) return;
   try {
-    const registration = swRegistration ?? (await navigator.serviceWorker.getRegistration());
+    // `ready` rather than `getRegistration()`: the latter can resolve before
+    // the worker is active, and a registration without one has no
+    // notifications to hand back — which looked like "nothing to clean up"
+    // on exactly the cold start where the leftover is most likely.
+    const registration = swRegistration ?? (await navigator.serviceWorker.ready);
     const open = await registration?.getNotifications({ tag: LEGACY_TIMER_TAG });
     open?.forEach(n => n.close());
   } catch {

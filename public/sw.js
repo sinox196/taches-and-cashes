@@ -48,6 +48,17 @@ self.addEventListener('push', (event) => {
   try { payload = event.data ? event.data.json() : {}; } catch (e) { payload = {}; }
 
   event.waitUntil((async () => {
+    // A chronometer push from a server still running the old build (its
+    // 15-minute sweep keeps sending these until it is redeployed). Don't
+    // draw it — and take down any it drew before, since this push is the
+    // one moment the worker is guaranteed to be awake without a page open.
+    // That is what stops a stale server re-showing a notification the user
+    // asked to be rid of.
+    if (payload.elapsed || payload.closed) {
+      const stale = await self.registration.getNotifications({ tag: LEGACY_TIMER_TAG });
+      stale.forEach((n) => n.close());
+      return;
+    }
     if (payload.title) {
       // No visibility gate here: with the app open, NotificationBell.tsx's
       // own poll already draws the same notification from the same tag
