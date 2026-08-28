@@ -253,6 +253,30 @@ Sized for **hundreds of clients and dozens of users**. The rules that keep it th
 - **The client list is never fully loaded.** Both the Clients page and the Pointage autocomplete query the server (`?q=`, `?page=&limit=`); the autocomplete is debounced and asks for 8 rows.
 - **`saveDb()` coalesces writes.** Every mutation still rewrites the whole JSON file — that is the real ceiling here. If this outgrows a single file, move to SQLite rather than optimising around it further.
 
+### Tableau de bord Direction
+
+`POST /api/dashboard/executive` sert les agrégats du bandeau exécutif, des alertes, de la rentabilité par client et de la concentration. Il vit à côté de `/api/kpi/dashboard`, qu'il **ne remplace pas** : les deux sont appelés en parallèle par [AdminDashboard.tsx](src/components/dashboard/AdminDashboard.tsx) avec le même corps de filtres, et l'ancien continue d'alimenter KPICards / ClientBreakdown / DashboardCharts / EmployeeTable.
+
+L'indicateur central est la **marge sur temps** = honoraires facturés − coût employeur du temps passé. Les deux moitiés existaient déjà séparément ; c'est leur croisement qui est neuf, et il ne demande aucun nouveau champ. Trois précautions le rendent honnête, et les retirer produirait un chiffre faux et crédible :
+
+- **Taux historiques.** Le coût d'une tâche vient du `hourlyRate` figé à sa création. Une augmentation de salaire ne re-tarife pas le passé.
+- **Les tâches non chiffrées valent `null`, pas zéro.** Elles sont exclues du coût et comptées à part (`tachesSansTaux`), et le bandeau affiche un avertissement : sans lui, une marge calculée sur un coût amputé se lit comme une bonne nouvelle.
+- **Le taux de marge est `null` quand rien n'a été facturé**, jamais 0 % ni −100 %. L'interface écrit « n/a ».
+
+Trois règles de périmètre, chacune corrigeant une façon de mentir avec des chiffres justes :
+
+- **Un filtre collaborateur supprime tous les montants** (`financialsFiltered`). Une facture n'a pas d'auteur : comparer les honoraires de tout le monde au coût d'une personne donne une marge spectaculairement fausse. Le serveur ne la calcule pas, et l'interface dit pourquoi.
+- **Seule la TND est agrégée.** `currency` est un texte libre ; les autres devises sont exclues et comptées (`devisesExclues`) plutôt que converties à un taux qu'on ne stocke pas.
+- **Les créances échues sont un majorant.** Aucun règlement ne porte d'`invoiceId`, donc on ne sait pas si une facture précise est soldée : on somme les factures dont `dueDate` est dépassée (fin de journée), **plafonnées au reste réellement dû par le client**.
+
+La **capacité nette** vient de `regimeHoraire` (volume *hebdomadaire*, 48 h par défaut — la même valeur que le coût horaire multiplie par 4,33 pour un mois), ramenée au jour ouvré et diminuée des congés approuvés. Les jours fériés ne sont pas modélisés : la capacité est donc légèrement surévaluée, ce qui sous-évalue le taux d'occupation. L'info-bulle le dit.
+
+Les **seuils d'alerte** vivent dans `settings.alertThresholds`, avec des valeurs par défaut dans la route — jamais de constante en dur, même règle que les statuts d'échéance et les objets de caisse. Il n'y a pas encore d'écran pour les éditer.
+
+**Le drill-down par client ne crée pas de deuxième chemin.** Cliquer une ligne de « Rentabilité du portefeuille » (ou une alerte client) passe `focusClient` à `ClientBreakdown`, qui filtre sur le nom et déplie la ligne : le détail des tâches par client reste au seul endroit qui le savait déjà faire. Les clés viennent du même `clientBucketKey` côté serveur, donc la ligne visée est exactement celle du bloc d'origine.
+
+**Ce qui n'est délibérément pas construit**, faute de donnée ou de règle tranchée : heures facturables, taux d'utilisation et valeur produite (il n'existe ni indicateur `facturable` ni tarif de vente) ; travail non facturé (rien ne relie une tâche à une facture) ; dépassement de budget (aucun budget stocké) ; écart aux objectifs (aucune cible stockée) ; prévision de trésorerie. Ces manques sont documentés dans la spécification fonctionnelle, pas comblés par des hypothèses.
+
 ### Dashboard charts
 
 Charts live in [DashboardCharts.tsx](src/components/dashboard/DashboardCharts.tsx) and follow the project's dataviz rules — they were rewritten because the originals broke all of them. When touching them, keep: **categorical slots assigned in fixed order and never cycled** (`SERIES_1` blue `#2a78d6`, `SERIES_2` orange `#eb6834`, validated as a pair against a white surface); **a legend whenever there are ≥ 2 series**; **one measure per axis** (the Autorisations chart used to put a count bar and an hours line on the same scale); and **colour by entity, never by rank** (the Taux-de-réalisation bars used to recolour green/amber/red by their own value, which repainted on every filter change and stole the reserved status colours).

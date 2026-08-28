@@ -10,12 +10,18 @@ import { ClientBreakdown } from './ClientBreakdown';
 import { MultiSelectAutocomplete } from './MultiSelectAutocomplete';
 import { AssignedTasksCard } from './AssignedTasksCard';
 import { ResourcesProgressCard } from './ResourcesProgressCard';
+import { ExecutiveBar } from './ExecutiveBar';
+import { AlertsPanel } from './AlertsPanel';
+import { ClientProfitability } from './ClientProfitability';
+import { ConcentrationCard } from './ConcentrationCard';
 
 
 export const AdminDashboard: React.FC = () => {
   const { token, hasPermission } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>(null);
+  /** Agrégats du tableau de bord Direction — marge, alertes, rentabilité. */
+  const [exec, setExec] = useState<any>(null);
 
   // Filters
   const toLocalDateString = (d: Date) => {
@@ -79,6 +85,12 @@ export const AdminDashboard: React.FC = () => {
   // of showing every client again. Cleared on the plain "Nbr Clients"/
   // "Temps passé" entry points, which mean "show everything".
   const [tasksModalInitialSearch, setTasksModalInitialSearch] = useState('');
+  /** Client à déplier dans « Activité par client », demandé depuis un autre bloc. */
+  const [focusClient, setFocusClient] = useState<{ key: string; name: string; nonce: number } | null>(null);
+  const focusOnClient = (key: string, name: string) => {
+    setFocusClient({ key, name, nonce: Date.now() });
+    document.getElementById('dashboard-activite-client')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
 
 
@@ -89,23 +101,29 @@ export const AdminDashboard: React.FC = () => {
   const fetchKPIs = async () => {
     setLoading(true);
 
+    const body = JSON.stringify({
+      startDate,
+      endDate,
+      filterUserIds: selectedUsers.map(u => u.id),
+      filterClientIds: selectedClients.map(c => c.id)
+    });
+    const post = (url: string) => fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body,
+    });
+
     try {
-      const res = await fetch('/api/kpi/dashboard', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          startDate,
-          endDate,
-          filterUserIds: selectedUsers.map(u => u.id),
-          filterClientIds: selectedClients.map(c => c.id)
-        })
-      });
-      if (res.ok) {
-        setStats(await res.json());
-      }
+      // Deux points d'entrée, un seul jeu de filtres : l'ancien résumé KPI et
+      // les agrégats Direction. En parallèle — ils ne dépendent pas l'un de
+      // l'autre, et l'un qui échoue ne doit pas emporter l'autre.
+      const [kpiRes, execRes] = await Promise.allSettled([
+        post('/api/kpi/dashboard'),
+        post('/api/dashboard/executive'),
+      ]);
+      if (kpiRes.status === 'fulfilled' && kpiRes.value.ok) setStats(await kpiRes.value.json());
+      if (execRes.status === 'fulfilled' && execRes.value.ok) setExec(await execRes.value.json());
+      else setExec(null);
     } catch (error) {
       console.error('Failed to fetch KPIs', error);
     } finally {
@@ -192,11 +210,60 @@ export const AdminDashboard: React.FC = () => {
             no date range, no collaborateur/client filter, just current state. */}
         <ResourcesProgressCard selectedClients={selectedClients} />
 
+        {/* ① Le bandeau exécutif — lecture en dix secondes.
+            ② Les alertes juste derrière : enterrées sous trois blocs de
+               graphiques, elles ne seraient plus des alertes mais une archive.
+            ③ La rentabilité avant la performance de l'équipe : l'activité est
+               un moyen, la rentabilité est la fin. « 480 heures produites »
+               rassure ; « 3 clients en marge négative » fait agir. */}
+        {exec && (
+          <>
+            <ExecutiveBar
+              data={exec.executive}
+              financialsFiltered={exec.financialsFiltered}
+              onAlertsClick={() => document.getElementById('dashboard-alertes')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              onClientsClick={() => document.getElementById('dashboard-rentabilite')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            />
+
+            <div id="dashboard-alertes" className="scroll-mt-4">
+              <AlertsPanel
+                alerts={exec.alerts}
+                total={exec.alertsTotal}
+                onOpen={a => {
+                  // On descend vers l'entité concernée plutôt que d'ouvrir une
+                  // fenêtre de plus : le contexte de filtre reste visible.
+                  if (a.entity === 'client') {
+                    const row = exec.clients?.find((c: any) => c.clientId === a.entityId);
+                    if (row) focusOnClient(row.key, row.name);
+                    else document.getElementById('dashboard-rentabilite')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  } else if (a.entity === 'user' && a.entityId != null) {
+                    const emp = stats?.employeeStats?.find((e: any) => e.id === a.entityId);
+                    if (emp) setSelectedEmployee(emp);
+                  }
+                }}
+              />
+            </div>
+
+            {exec.clients && (
+              <div id="dashboard-rentabilite" className="scroll-mt-4">
+                <ClientProfitability
+                  clients={exec.clients}
+                  onOpenClient={(key, name) => focusOnClient(key, name)}
+                />
+              </div>
+            )}
+
+            {exec.concentration && <ConcentrationCard data={exec.concentration} />}
+          </>
+        )}
+
         {stats && (
           <>
             <KPICards stats={stats.globalStats} />
+            <div id="dashboard-activite-client" className="scroll-mt-4" />
             <ClientBreakdown
               clients={stats.clientStats}
+              focusClient={focusClient}
               filters={{
                 startDate,
                 endDate,

@@ -1699,6 +1699,463 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   }
 });
 
+/**
+ * ---------------------------------------------------------------------------
+ * Tableau de bord Direction — agrégats exécutifs.
+ * ---------------------------------------------------------------------------
+ *
+ * POST plutôt que GET, comme /api/kpi/dashboard juste au-dessus : les filtres
+ * voyagent dans le corps, ce qui permet de réutiliser `filterKpiEntries()` tel
+ * quel. Une seule implémentation des filtres pour le résumé et pour les
+ * drill-downs — sinon un détail finit par contredire la ligne d'où l'on a
+ * cliqué, et l'écran entier perd sa crédibilité.
+ *
+ * Ne renvoie QUE des agrégats, jamais de liste de tâches : le détail se charge
+ * au clic via /api/kpi/client-tasks et /api/kpi/employee-tasks, qui existent
+ * déjà. Inliner ces listes ici avait fait passer une charge utile de 219 Ko à
+ * 3,2 Mo à 300 clients / 6000 entrées.
+ */
+app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) => {
+  try {
+    if (!DASHBOARD_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const companyId = req.user.companyId;
+    const isAdminViewer = req.user.role === 'ADMIN';
+
+    const filterUserIds: number[] = req.body?.filterUserIds || [];
+    const filterClientIds: number[] = req.body?.filterClientIds || [];
+
+    /**
+     * Un filtre collaborateur restreint le temps mais pas les factures : une
+     * facture n'a pas d'auteur. Comparer les honoraires de tout le monde au
+     * coût d'une seule personne produit une marge spectaculairement fausse et
+     * parfaitement crédible — donc on ne la calcule pas du tout, et le client
+     * grise les blocs financiers en le disant.
+     */
+    const financialsFiltered = filterUserIds.length > 0;
+    const showMoney = isAdminViewer && !financialsFiltered;
+
+    const dayMs = 86400000;
+    const startTs = req.body?.startDate ? new Date(req.body.startDate).getTime() : 0;
+    const endTs = req.body?.endDate ? new Date(req.body.endDate).getTime() + dayMs - 1 : Date.now();
+
+    // Période précédente de MÊME DURÉE, immédiatement antérieure.
+    const spanMs = Math.max(dayMs, endTs - startTs);
+    const prevEndTs = startTs - 1;
+    const prevStartTs = startTs - spanMs;
+    const iso = (ts: number) => new Date(ts).toISOString().slice(0, 10);
+    const prevBody = { startDate: iso(prevStartTs), endDate: iso(prevEndTs), filterUserIds, filterClientIds };
+
+    const fmtTnd = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} TND`;
+
+    const [allUsers, allEntriesRaw, allInvoices, allClients, allLeaves, allJournal, echeanceCols, echeanceStatuses] =
+      await Promise.all([
+        db.getAllUsers(companyId),
+        db.getAllTimeEntries(companyId),
+        db.getAllInvoices(companyId),
+        db.getAllClients(companyId),
+        db.getAllLeaveRequests(companyId),
+        db.getAllCashJournalEntries(companyId),
+        db.getAllEcheanceColumns(companyId),
+        db.getAllEcheanceStatuses(companyId),
+      ]);
+
+    const settings = (await db.getSettings(companyId)) || {};
+    const employees = (allUsers || []).filter((u: any) => STAFF_ROLES.includes(u.role));
+
+    const entries = filterKpiEntries(allEntriesRaw || [], req.body);
+    const prevEntries = filterKpiEntries(allEntriesRaw || [], prevBody);
+
+    // ---- Temps et coût -----------------------------------------------------
+    /** Coût d'une tâche à SON taux historique, jamais au taux actuel. */
+    const taskCost = (t: any): number | null => {
+      const rate = typeof t.hourlyRate === 'number' ? t.hourlyRate : null;
+      return rate === null ? null : (accruedSeconds(t) / 3600) * rate;
+    };
+    const hoursOf = (rows: any[]) => round3(rows.reduce((s, t) => s + accruedSeconds(t), 0) / 3600);
+    /** Une tâche non chiffrée vaut `null`, pas zéro : elle est exclue du coût. */
+    const costOf = (rows: any[]) => round3(rows.reduce((s, t) => s + (taskCost(t) ?? 0), 0));
+
+    const heures = hoursOf(entries);
+    const heuresPrev = hoursOf(prevEntries);
+    const coutTemps = costOf(entries);
+    const coutTempsPrev = costOf(prevEntries);
+    const unpriced = entries.filter((t: any) => taskCost(t) === null);
+    const tachesSansTaux = unpriced.length;
+    const collabsSansTaux = new Set(unpriced.map((t: any) => t.userId)).size;
+
+    // ---- Honoraires --------------------------------------------------------
+    // Une devise saisie librement ne s'additionne pas à la TND : on n'agrège
+    // que la TND et on compte ce qui a été écarté, plutôt que de convertir à
+    // un taux qu'on ne stocke pas (Q-07).
+    const isBillable = (inv: any) => inv.documentKind !== 'AUTRE_NON_FACTURABLE';
+    const isTnd = (inv: any) => String(inv.currency || 'TND').toUpperCase() === 'TND';
+    const invoiceTs = (inv: any) => (inv.issueDate ? new Date(inv.issueDate).getTime() : 0);
+
+    let devisesExclues = 0;
+    const invoicesInRange = (fromTs: number, toTs: number, countExcluded = false) =>
+      (allInvoices || []).filter((inv: any) => {
+        if (!isBillable(inv)) return false;
+        const ts = invoiceTs(inv);
+        if (ts < fromTs || ts > toTs) return false;
+        if (filterClientIds.length > 0) {
+          const cid = inv.clientId != null ? Number(inv.clientId) : null;
+          if (cid === null || !filterClientIds.includes(cid)) return false;
+        }
+        if (!isTnd(inv)) { if (countExcluded) devisesExclues += 1; return false; }
+        return true;
+      });
+
+    const periodInvoices = invoicesInRange(startTs, endTs, true);
+    const prevInvoices = invoicesInRange(prevStartTs, prevEndTs);
+    const sumNet = (rows: any[]) => round3(rows.reduce((s, i) => s + num(Number(i.totalNetToPay), 0), 0));
+    const honoraires = sumNet(periodInvoices);
+    const honorairesPrev = sumNet(prevInvoices);
+
+    // ---- Capacité nette ----------------------------------------------------
+    /**
+     * `regimeHoraire` est un volume HEBDOMADAIRE (48 h par défaut) — la même
+     * valeur que le coût horaire employeur multiplie par 4,33 pour un mois.
+     * Ramenée ici au jour ouvré : regimeHoraire / 5.
+     *
+     * Q-05 non tranchée : les jours fériés ne sont pas modélisés. La capacité
+     * est donc légèrement surévaluée sur un mois qui en contient, ce qui
+     * sous-évalue le taux d'occupation. L'interface le dit.
+     */
+    const workingDaysBetween = (fromTs: number, toTs: number) => {
+      let n = 0;
+      for (let ts = fromTs; ts <= toTs; ts += dayMs) {
+        const d = new Date(ts).getUTCDay();
+        if (d !== 0 && d !== 6) n += 1;
+      }
+      return n;
+    };
+    const scopedEmployees = filterUserIds.length > 0
+      ? employees.filter((u: any) => filterUserIds.includes(u.id))
+      : employees;
+
+    // Indexé une fois : un filter() par collaborateur serait un balayage par personne.
+    const leavesByUser = new Map<number, any[]>();
+    for (const l of (allLeaves || [])) {
+      if (l.status !== 'APPROVED') continue;
+      const arr = leavesByUser.get(l.userId) || [];
+      arr.push(l);
+      leavesByUser.set(l.userId, arr);
+    }
+    const absentDays = (userId: number, fromTs: number, toTs: number) =>
+      (leavesByUser.get(userId) || []).reduce((sum: number, l: any) => {
+        const s = Math.max(new Date(l.startDate).getTime(), fromTs);
+        const e = Math.min(new Date(l.endDate).getTime(), toTs);
+        return e >= s ? sum + workingDaysBetween(s, e) : sum;
+      }, 0);
+
+    const capacityOf = (u: any, fromTs: number, toTs: number) => {
+      const weekly = num(Number(u.regimeHoraire), 0);
+      if (weekly <= 0) return 0;
+      const open = workingDaysBetween(fromTs, toTs) - absentDays(u.id, fromTs, toTs);
+      return round3(Math.max(0, open) * (weekly / 5));
+    };
+    const capaciteNette = round3(scopedEmployees.reduce((s: number, u: any) => s + capacityOf(u, startTs, endTs), 0));
+    const capaciteNettePrev = round3(scopedEmployees.reduce((s: number, u: any) => s + capacityOf(u, prevStartTs, prevEndTs), 0));
+
+    // ---- Grand-livre client ------------------------------------------------
+    // Mêmes chiffres que la page Clients, calculés de la même façon, pour que
+    // les deux écrans ne puissent pas se contredire. C'est un stock, pas une
+    // grandeur de période.
+    const journalByClient = journalEncaissementsByClient(allJournal || []);
+    const netAllTime = new Map<string, number>();
+    for (const inv of (allInvoices || [])) {
+      if (!isBillable(inv) || !isTnd(inv)) continue;
+      const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
+      netAllTime.set(key, round3((netAllTime.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+    }
+    let resteAEncaisser = 0;
+    const resteByClientId = new Map<string, number>();
+    for (const c of (allClients || [])) {
+      const facture = round3((netAllTime.get(String(c.id)) || 0) + (netAllTime.get(`name:${c.name}`) || 0));
+      const enc = round3(sumEncaissements(c) + sumAmounts(journalFor(journalByClient, c)));
+      const reste = round3(num(Number(c.soldeAnterieur), 0) - enc + facture);
+      resteByClientId.set(String(c.id), reste);
+      if (reste > 0) resteAEncaisser = round3(resteAEncaisser + reste);
+    }
+
+    /**
+     * Créances échues — un MAJORANT, pas un chiffre exact (Q-04 non tranchée).
+     * Aucun règlement ne porte d'`invoiceId` : on ne sait pas si une facture
+     * précise est soldée. On somme donc les factures dont `dueDate` est
+     * dépassée, PLAFONNÉES au reste réellement dû par le client — sans ce
+     * plafond, un client à jour dont les vieilles factures sont payées serait
+     * compté comme en retard.
+     */
+    const today = Date.now();
+    const overdueByClient = new Map<string, number>();
+    for (const inv of (allInvoices || [])) {
+      if (!isBillable(inv) || !isTnd(inv) || !inv.dueDate) continue;
+      // Fin de journée : une facture due aujourd'hui n'est pas en retard.
+      if (new Date(inv.dueDate).getTime() + dayMs - 1 >= today) continue;
+      const key = String(inv.clientId ?? '');
+      if (!key) continue;
+      overdueByClient.set(key, round3((overdueByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+    }
+    let creancesEchues = 0;
+    for (const [cid, overdue] of overdueByClient) {
+      const reste = resteByClientId.get(cid) ?? 0;
+      if (reste > 0) creancesEchues = round3(creancesEchues + Math.min(overdue, reste));
+    }
+
+    // ---- Rentabilité par client -------------------------------------------
+    const clientAgg = new Map<string, any>();
+    const bump = (key: string, name: string, clientId: number | null) => {
+      let row = clientAgg.get(key);
+      if (!row) {
+        row = { key, clientId, name: name || 'Sans client', heures: 0, cout: 0, honoraires: 0,
+                heuresPrev: 0, honorairesPrev: 0, tachesSansTaux: 0 };
+        clientAgg.set(key, row);
+      }
+      if (row.clientId == null && clientId != null) row.clientId = clientId;
+      return row;
+    };
+    for (const t of entries) {
+      const row = bump(clientBucketKey(t), t.client, t.clientId ?? null);
+      row.heures = round3(row.heures + accruedSeconds(t) / 3600);
+      const c = taskCost(t);
+      if (c === null) row.tachesSansTaux += 1; else row.cout = round3(row.cout + c);
+    }
+    for (const t of prevEntries) {
+      bump(clientBucketKey(t), t.client, t.clientId ?? null).heuresPrev += accruedSeconds(t) / 3600;
+    }
+    for (const inv of periodInvoices) {
+      const row = bump(clientBucketKey({ clientId: inv.clientId, client: inv.clientName }), inv.clientName, inv.clientId ?? null);
+      row.honoraires = round3(row.honoraires + num(Number(inv.totalNetToPay), 0));
+    }
+    for (const inv of prevInvoices) {
+      const row = bump(clientBucketKey({ clientId: inv.clientId, client: inv.clientName }), inv.clientName, inv.clientId ?? null);
+      row.honorairesPrev = round3(row.honorairesPrev + num(Number(inv.totalNetToPay), 0));
+    }
+
+    const clientRows = Array.from(clientAgg.values()).map((r: any) => {
+      const marge = round3(r.honoraires - r.cout);
+      return {
+        ...r,
+        heuresPrev: round3(r.heuresPrev),
+        marge,
+        // Indéfini quand rien n'a été facturé : `null`, jamais 0 % ni −100 %.
+        tauxMarge: r.honoraires > 0 ? round3(marge / r.honoraires) : null,
+        honorairesParHeure: r.heures > 0 && r.honoraires > 0 ? round3(r.honoraires / r.heures) : null,
+        coutParHeure: r.heures > 0 ? round3(r.cout / r.heures) : null,
+        resteAPayer: r.clientId != null ? (resteByClientId.get(String(r.clientId)) ?? 0) : 0,
+      };
+    }).sort((a: any, b: any) => a.marge - b.marge);
+
+    // ---- Concentration -----------------------------------------------------
+    const byHon = clientRows.filter((r: any) => r.honoraires > 0).sort((a: any, b: any) => b.honoraires - a.honoraires);
+    const totalHon = round3(byHon.reduce((s: number, r: any) => s + r.honoraires, 0));
+    const share = (n: number) => (totalHon > 0 ? round3(n / totalHon) : 0);
+    const concentration = {
+      total: totalHon,
+      top1: byHon[0] ? { name: byHon[0].name, part: share(byHon[0].honoraires) } : null,
+      top5Part: share(byHon.slice(0, 5).reduce((s: number, r: any) => s + r.honoraires, 0)),
+      rows: byHon.slice(0, 8).map((r: any) => ({ name: r.name, honoraires: r.honoraires, part: share(r.honoraires) })),
+    };
+
+    // ---- Collaborateurs ----------------------------------------------------
+    const entriesByUser = new Map<number, any[]>();
+    for (const t of entries) {
+      const arr = entriesByUser.get(t.userId) || []; arr.push(t); entriesByUser.set(t.userId, arr);
+    }
+    const prevByUser = new Map<number, any[]>();
+    for (const t of prevEntries) {
+      const arr = prevByUser.get(t.userId) || []; arr.push(t); prevByUser.set(t.userId, arr);
+    }
+    const collaborateurs = scopedEmployees.map((u: any) => {
+      const mine = entriesByUser.get(u.id) || [];
+      const h = hoursOf(mine);
+      const cap = capacityOf(u, startTs, endTs);
+      return {
+        userId: u.id,
+        name: u.fullName || u.username,
+        role: u.role,
+        heures: h,
+        heuresPrev: hoursOf(prevByUser.get(u.id) || []),
+        capacite: cap,
+        occupation: cap > 0 ? round3(h / cap) : null,
+        cout: costOf(mine),
+        clients: new Set(mine.map((t: any) => clientBucketKey(t))).size,
+        sansTaux: mine.filter((t: any) => taskCost(t) === null).length,
+        /**
+         * Rendement moyen des clients servis, pondéré par les heures.
+         * Ce n'est PAS « les honoraires de cette personne » : une facture n'a
+         * pas d'auteur (Q-02). C'est le rendement des dossiers sur lesquels
+         * elle a travaillé — utile pour l'affectation, pas pour la paie.
+         */
+        rendementClients: (() => {
+          let hs = 0, vs = 0;
+          for (const t of mine) {
+            const row = clientAgg.get(clientBucketKey(t));
+            const hph = row && row.heures > 0 && row.honoraires > 0 ? row.honoraires / row.heures : null;
+            if (hph === null) continue;
+            const th = accruedSeconds(t) / 3600;
+            hs += th; vs += th * hph;
+          }
+          return hs > 0 ? round3(vs / hs) : null;
+        })(),
+      };
+    }).sort((a: any, b: any) => b.heures - a.heures);
+
+    // ---- Opérationnel ------------------------------------------------------
+    const now = new Date();
+    const monthCols = (echeanceCols || []).filter(
+      (c: any) => Number(c.year) === now.getFullYear() && Number(c.month) === now.getMonth() + 1
+    );
+    // Seuls les clients que le cabinet suit réellement dans la grille comptent :
+    // multiplier par TOUS les clients produirait des milliers de « cellules
+    // vides » qui ne correspondent à aucun travail attendu.
+    const trackedClients = new Set((echeanceStatuses || []).map((s: any) => String(s.clientId)));
+    const filledThisMonth = new Set(
+      (echeanceStatuses || [])
+        .filter((s: any) => monthCols.some((c: any) => String(c.id) === String(s.columnId)))
+        .map((s: any) => `${s.clientId}|${s.columnId}`)
+    ).size;
+    const echeancesAttendues = monthCols.length * trackedClients.size;
+    const echeancesVides = Math.max(0, echeancesAttendues - filledThisMonth);
+
+    // Une tâche en pause avant l'ajout de `lastEditedAt` n'a pas de date de
+    // dernière action : on ne peut rien affirmer, on ne la compte pas.
+    const pausedLong = (allEntriesRaw || []).filter((t: any) =>
+      t.statut === 'PAUSED' && t.lastEditedAt && (today - new Date(t.lastEditedAt).getTime()) > 7 * dayMs
+    ).length;
+
+    // ---- Alertes -----------------------------------------------------------
+    // Les seuils viennent de `settings` : aucune constante en dur, même règle
+    // que les statuts d'échéance et les objets de caisse, déjà éditables.
+    const TH = {
+      margeMin: 0.30, deriveHeures: 1.30, concentration: 0.20,
+      surcharge: 0.95, sousCharge: 0.50, pauseJours: 7, echeanceJour: 25,
+      ...((settings as any).alertThresholds || {}),
+    };
+    const alerts: any[] = [];
+
+    if (showMoney) {
+      for (const r of clientRows) {
+        if (r.honoraires > 0 && r.marge < 0) {
+          alerts.push({ key: `A1-${r.key}`, code: 'A1', level: 'CRITIQUE', entity: 'client', entityId: r.clientId, entityName: r.name,
+            title: `${r.name} — marge négative`,
+            detail: `${fmtTnd(r.honoraires)} facturés pour ${fmtTnd(r.cout)} de temps consommé.`,
+            action: 'Arbitrer sous 7 jours : retarifer, plafonner le temps, ou sortir le client.' });
+        } else if (r.tauxMarge !== null && r.tauxMarge >= 0 && r.tauxMarge < TH.margeMin) {
+          alerts.push({ key: `A4-${r.key}`, code: 'A4', level: 'AVERTISSEMENT', entity: 'client', entityId: r.clientId, entityName: r.name,
+            title: `${r.name} — marge de ${Math.round(r.tauxMarge * 100)} %`,
+            detail: `Sous le seuil de ${Math.round(TH.margeMin * 100)} %. ${fmtTnd(r.honoraires)} facturés, ${r.heures} h consommées.`,
+            action: 'Inscrire à la revue de portefeuille.' });
+        }
+        // Dérive : plus d'heures pour des honoraires qui ne suivent pas.
+        // `honorairesPrev > 0` est nécessaire : sans facturation antérieure il
+        // n'y a pas de base « constante » à comparer, et un client jamais
+        // facturé relève d'un autre sujet (le travail non facturé, Q-03).
+        if (r.honorairesPrev > 0 && r.heuresPrev > 0
+            && r.heures > r.heuresPrev * TH.deriveHeures
+            && r.honoraires <= r.honorairesPrev * 1.05) {
+          alerts.push({ key: `A5-${r.key}`, code: 'A5', level: 'AVERTISSEMENT', entity: 'client', entityId: r.clientId, entityName: r.name,
+            title: `${r.name} — temps en forte hausse`,
+            detail: `${r.heures} h contre ${r.heuresPrev} h sur la période précédente, à honoraires stables.`,
+            action: "Comprendre la cause avant qu'elle ne devienne structurelle." });
+        }
+      }
+      if (concentration.top1 && concentration.top1.part > TH.concentration) {
+        alerts.push({ key: 'A6', code: 'A6', level: 'AVERTISSEMENT', entity: 'client', entityId: null,
+          title: `${concentration.top1.name} pèse ${Math.round(concentration.top1.part * 100)} % des honoraires`,
+          detail: `Au-delà du seuil de ${Math.round(TH.concentration * 100)} %. Une perte de ce client serait difficile à absorber.`,
+          action: 'Plan de prospection pour réduire la dépendance.' });
+      }
+    }
+
+    for (const c of collaborateurs) {
+      if (c.occupation === null) continue;
+      if (c.occupation > TH.surcharge) {
+        alerts.push({ key: `A7-${c.userId}`, code: 'A7', level: 'AVERTISSEMENT', entity: 'user', entityId: c.userId, entityName: c.name,
+          title: `${c.name} — ${Math.round(c.occupation * 100)} % d'occupation`,
+          detail: `${c.heures} h pointées pour ${c.capacite} h de capacité nette.`,
+          action: 'Redistribuer la charge.' });
+      } else if (c.occupation < TH.sousCharge && c.capacite > 0) {
+        alerts.push({ key: `A8-${c.userId}`, code: 'A8', level: 'AVERTISSEMENT', entity: 'user', entityId: c.userId, entityName: c.name,
+          title: `${c.name} — ${Math.round(c.occupation * 100)} % d'occupation`,
+          detail: `${c.heures} h pointées sur ${c.capacite} h disponibles.`,
+          action: "Vérifier d'abord le pointage, avant de conclure à la sous-charge." });
+      }
+    }
+
+    if (collabsSansTaux > 0 && isAdminViewer) {
+      alerts.push({ key: 'A11', code: 'A11', level: 'AVERTISSEMENT', entity: 'user', entityId: null,
+        title: `${collabsSansTaux} collaborateur${collabsSansTaux > 1 ? 's' : ''} sans coût employeur configuré`,
+        detail: `${tachesSansTaux} tâche${tachesSansTaux > 1 ? 's' : ''} exclue${tachesSansTaux > 1 ? 's' : ''} du coût — toutes les marges affichées sont surévaluées.`,
+        action: 'Compléter la fiche dans Utilisateurs.' });
+    }
+    if (now.getDate() >= TH.echeanceJour && echeancesVides > 0) {
+      alerts.push({ key: 'A3', code: 'A3', level: 'CRITIQUE', entity: 'echeance', entityId: null,
+        title: `${echeancesVides} échéance${echeancesVides > 1 ? 's' : ''} du mois non renseignée${echeancesVides > 1 ? 's' : ''}`,
+        detail: `Nous sommes le ${now.getDate()} du mois — risque de pénalité pour le client.`,
+        action: 'Affecter immédiatement.' });
+    }
+    if (pausedLong > 0) {
+      alerts.push({ key: 'A10', code: 'A10', level: 'INFO', entity: 'task', entityId: null,
+        title: `${pausedLong} tâche${pausedLong > 1 ? 's' : ''} en pause depuis plus de ${TH.pauseJours} jours`,
+        detail: "Une pause de plus d'une semaine est un oubli, pas une pause.",
+        action: 'Clôturer ou reprendre — cela fiabilise tout le reste de l\'écran.' });
+    }
+
+    const RANK: Record<string, number> = { CRITIQUE: 0, AVERTISSEMENT: 1, INFO: 2 };
+    alerts.sort((a, b) => RANK[a.level] - RANK[b.level]);
+
+    // ---- Réponse -----------------------------------------------------------
+    const ratio = (n: number, d: number) => (d > 0 ? round3(n / d) : null);
+    const marge = round3(honoraires - coutTemps);
+    const margePrev = round3(honorairesPrev - coutTempsPrev);
+
+    const payload: any = {
+      periode: { startDate: iso(startTs), endDate: iso(endTs), precedente: { startDate: prevBody.startDate, endDate: prevBody.endDate } },
+      financialsFiltered,
+      executive: {
+        heures, heuresPrev,
+        capaciteNette, capaciteNettePrev,
+        occupation: ratio(heures, capaciteNette),
+        occupationPrev: ratio(heuresPrev, capaciteNettePrev),
+        tachesSansTaux, collabsSansTaux,
+        clientsEnAlerte: new Set(alerts.filter(a => a.entity === 'client' && a.entityId != null).map(a => a.entityId)).size,
+        alertesCritiques: alerts.filter(a => a.level === 'CRITIQUE').length,
+        // Les montants sont retirés côté serveur pour un non-ADMIN, jamais
+        // seulement masqués à l'écran — même règle que le coût employeur et
+        // le grand-livre client.
+        ...(showMoney ? {
+          honoraires, honorairesPrev,
+          coutTemps, coutTempsPrev,
+          marge, margePrev,
+          tauxMarge: honoraires > 0 ? round3(marge / honoraires) : null,
+          tauxMargePrev: honorairesPrev > 0 ? round3(margePrev / honorairesPrev) : null,
+          honorairesParHeure: ratio(honoraires, heures),
+          coutParHeure: ratio(coutTemps, heures),
+          resteAEncaisser, creancesEchues, devisesExclues,
+        } : {}),
+      },
+      alerts: alerts.slice(0, 10),
+      alertsTotal: alerts.length,
+      collaborateurs: collaborateurs.map((c: any) =>
+        isAdminViewer ? c : { ...c, cout: undefined, rendementClients: undefined }),
+      operationnel: { echeancesVides, echeancesAttendues, tachesEnPause: pausedLong },
+    };
+    if (showMoney) {
+      payload.clients = clientRows;
+      payload.concentration = concentration;
+    }
+
+    res.json(payload);
+  } catch (error) {
+    console.error('Dashboard executive error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 
   app.post('/api/clients', authenticate, requirePermission('CREATE_CLIENTS'), async (req: any, res: any) => {
     try {

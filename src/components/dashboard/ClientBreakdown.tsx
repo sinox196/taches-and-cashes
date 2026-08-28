@@ -9,6 +9,13 @@ interface ClientBreakdownProps {
   clients: any[];
   /** Dashboard filters, replayed when fetching a client's tasks. */
   filters: { startDate: string; endDate: string; filterUserIds: number[]; filterClientIds: number[] };
+  /**
+   * Demande d'ouvrir un client précis, depuis le bloc Rentabilité ou une
+   * alerte. `nonce` change à chaque clic pour que redemander le même client
+   * rouvre bien la ligne. Les clés viennent du même `clientBucketKey` côté
+   * serveur : la ligne visée est donc exactement celle du bloc d'origine.
+   */
+  focusClient?: { key: string; name: string; nonce: number } | null;
 }
 
 const STATUS_META: Record<string, { label: string; className: string; Icon: React.ElementType }> = {
@@ -33,7 +40,7 @@ const StatusBadge: React.FC<{ statut: string }> = ({ statut }) => {
  * it, and which tasks were done. A table rather than a chart — several measures
  * per row plus a drill-down is tabular work, not a magnitude comparison.
  */
-export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filters }) => {
+export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filters, focusClient }) => {
   const { user, token } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -45,11 +52,8 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
   const filtersKey = JSON.stringify(filters);
   useEffect(() => { setTaskCache({}); setExpanded({}); }, [filtersKey]);
 
-  const toggleRow = async (client: any) => {
-    const key = String(client.key ?? client.id);
-    const isOpen = !!expanded[key];
-    setExpanded(prev => ({ ...prev, [key]: !isOpen }));
-    if (isOpen || taskCache[key]) return;
+  const loadTasks = async (key: string) => {
+    if (taskCache[key]) return;
 
     setTaskCache(prev => ({ ...prev, [key]: { loading: true, tasks: [] } }));
     try {
@@ -67,11 +71,31 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
       setTaskCache(prev => ({ ...prev, [key]: { loading: false, tasks: [], error: true } }));
     }
   };
+
+  const toggleRow = async (client: any) => {
+    const key = String(client.key ?? client.id);
+    const isOpen = !!expanded[key];
+    setExpanded(prev => ({ ...prev, [key]: !isOpen }));
+    if (!isOpen) await loadTasks(key);
+  };
+
   const [search, setSearch] = useState('');
+
   // Hundreds of clients would mean hundreds of DOM rows; show the costliest
   // first and reveal more on demand.
   const PAGE = 25;
   const [visible, setVisible] = useState(PAGE);
+  // Ouverture demandée depuis un autre bloc : on filtre sur le nom et on
+  // déplie la ligne, plutôt que d'ouvrir une deuxième fenêtre de détail —
+  // le drill-down par client vit ici, et à un seul endroit.
+  useEffect(() => {
+    if (!focusClient) return;
+    setSearch(focusClient.name);
+    setVisible(PAGE);
+    setExpanded({ [focusClient.key]: true });
+    loadTasks(focusClient.key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusClient?.nonce]);
 
   if (!clients || clients.length === 0) {
     return (
