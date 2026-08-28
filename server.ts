@@ -3748,11 +3748,19 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       let updates = { ...req.body };
 
-      if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
+      // Only a body that actually carries `statut` is a status transition.
+      // Without this guard the `else if` below fired on *any* PUT that
+      // omitted it — folding the elapsed time in and nulling `lastStartedAt`
+      // on a task that stays RUNNING, which freezes its clock. Nothing hit it
+      // while every caller happened to send the whole entry back, but
+      // updating one field of a running task is a reasonable thing to do.
+      const isStatusChange = req.body.statut !== undefined;
+
+      if (isStatusChange && req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
          updates.lastStartedAt = Date.now();
          // Back in progress: an end time would be misleading.
          if (updates.heureFin === undefined) updates.heureFin = '';
-      } else if (req.body.statut !== 'RUNNING' && existing.statut === 'RUNNING') {
+      } else if (isStatusChange && req.body.statut !== 'RUNNING' && existing.statut === 'RUNNING') {
          // Stopping or pausing
          if (existing.lastStartedAt) {
             const added = Math.floor((Date.now() - existing.lastStartedAt) / 1000);

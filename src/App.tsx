@@ -38,45 +38,6 @@ import {
   calculateCostDT,
 } from './utils/formatters';
 
-/**
- * When the overtime popup was last shown for a given time entry, keyed by
- * entry id. Persisted, because the whole point is a gap measured in real
- * time: an in-memory record is lost on every remount, and the popup then
- * came straight back on the next load instead of two hours later.
- *
- * Every access is guarded — localStorage throws in a private window or with
- * site data blocked, and a stuck timer prompt is not worth crashing the app
- * over. A read that fails simply means "never asked", which at worst shows
- * one extra prompt.
- */
-const OVERTIME_PROMPTS_KEY = 'overtime_prompted_at';
-/** Records older than this are dropped on write, so the map stays bounded. */
-const OVERTIME_PROMPTS_TTL_MS = 7 * 24 * 3600 * 1000;
-
-function readOvertimePrompts(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(OVERTIME_PROMPTS_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function markOvertimePrompted(entryId: string) {
-  try {
-    const now = Date.now();
-    const next: Record<string, number> = {};
-    for (const [id, at] of Object.entries(readOvertimePrompts())) {
-      if (typeof at === 'number' && now - at < OVERTIME_PROMPTS_TTL_MS) next[id] = at;
-    }
-    next[entryId] = now;
-    localStorage.setItem(OVERTIME_PROMPTS_KEY, JSON.stringify(next));
-  } catch {
-    // Non-fatal: without a record the next load asks once more, nothing worse.
-  }
-}
-
 export default function App() {
   const { user, token, isLoading, hasPermission } = useAuth();
 
@@ -334,37 +295,45 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Overtime alert: once a task passes 2h, ask the collaborator whether
-  // they're still on it. Responding keeps it running; ignoring it for the
-  // grace period below pauses it automatically. It then re-asks every 2h, so
-  // a task left running for a whole afternoon is caught again at 4h, 6h, …
+  // Overtime alert: ask the collaborator whether they're still on a task
+  // every 2h *of that task's own duration* — at 2h, then 4h, 6h, … Responding
+  // keeps it running; ignoring it for the grace period below pauses it.
   //
-  // **The 2h is a gap between prompts, measured in wall-clock time and
-  // persisted**, not a count of 2h boundaries crossed held in a ref. The ref
-  // was lost on every remount — a refresh, a reopened tab — and `dureeSeconds`
-  // is *accumulated*, not continuous, so a task that had ever passed 2h was
-  // past it forever: every single load re-fired the popup immediately. Keying
-  // off "when did we last ask about this task" is what makes "every 2h" hold
-  // however often the app is reloaded.
+  // The milestone already asked about is recorded **on the entry itself**
+  // (`overtimeAckCycle`), not in the browser. That is what makes "every 2h"
+  // mean what it says:
+  //  - it survives a reload, so opening the app does not re-ask (it was held
+  //    in a `useRef` once, which died on every remount and re-fired the popup
+  //    on every single page load);
+  //  - it follows the task rather than the device, so answering on a phone
+  //    doesn't leave a laptop asking again about the same 2h;
+  //  - and it is tied to the duration, not to wall-clock time, so a prompt
+  //    lands when the work actually crosses 4h — not merely because two
+  //    hours have gone by since the last one.
   const OVERTIME_THRESHOLD_SECONDS = 2 * 3600;
   const OVERTIME_GRACE_MS = 2 * 60 * 1000;
-  const OVERTIME_PROMPT_INTERVAL_MS = 2 * 3600 * 1000;
   const [overtimeAlert, setOvertimeAlert] = useState<{ entryId: string; deadline: number } | null>(null);
   const [overtimeSecondsLeft, setOvertimeSecondsLeft] = useState(0);
+
+  /** Which 2h milestone a duration has reached: 0 under 2h, 1 at 2h, 2 at 4h… */
+  const overtimeCycleOf = (seconds: number) =>
+    Math.floor((seconds || 0) / OVERTIME_THRESHOLD_SECONDS);
 
   useEffect(() => {
     const myRunning = timeEntries.find(e => e.userId === user?.id && e.statut === 'RUNNING');
     if (!myRunning) { setOvertimeAlert(null); return; }
-    if (myRunning.dureeSeconds < OVERTIME_THRESHOLD_SECONDS) return;
     if (overtimeAlert) return;
 
-    const lastAsked = readOvertimePrompts()[myRunning.id] || 0;
-    if (Date.now() - lastAsked < OVERTIME_PROMPT_INTERVAL_MS) return;
+    const cycle = overtimeCycleOf(myRunning.dureeSeconds);
+    if (cycle < 1) return;
+    if (cycle <= (myRunning.overtimeAckCycle || 0)) return;
 
-    // Stamped when the popup is *shown*, not when it is answered: a reload
-    // while it is open must not bring it straight back, and the next one is
-    // then a full 2h away whatever the collaborator does with this one.
-    markOvertimePrompted(myRunning.id);
+    // Recorded when the popup is *shown*, not when it is answered, so a
+    // reload while it is open doesn't bring it straight back. The write goes
+    // through updateTimeEntryApi, which applies it to local state first —
+    // otherwise this effect would re-fire on the next tick, before the
+    // round-trip and broadcast land.
+    updateTimeEntryApi(myRunning.id, { overtimeAckCycle: cycle });
     setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
   }, [timeEntries, user?.id, overtimeAlert]);
 

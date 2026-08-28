@@ -21,6 +21,14 @@ export interface TimeEntry {
   /** Employer hourly cost of the collaborator. null = not configured for them. */
   hourlyRate?: number | null;
   statut: TaskStatus;
+  /**
+   * Which 2h milestone of this task's duration the overtime alert has already
+   * asked about — 1 once it has asked at 2h, 2 at 4h, and so on. Held on the
+   * entry rather than in the browser so the prompt follows the task, not the
+   * device, and so reopening the app never re-asks about a milestone already
+   * answered.
+   */
+  overtimeAckCycle?: number;
 }
 
 export interface ActiveTimerState {
