@@ -36,6 +36,42 @@ export const AdminDashboard: React.FC = () => {
   const [selectedUsers, setSelectedUsers] = useState<{id: number, name: string}[]>([]);
   const [selectedClients, setSelectedClients] = useState<{id: number, name: string}[]>([]);
 
+  // Quick "filtrer par mois" shortcut alongside the free Du/Au range below —
+  // picking one narrows startDate/endDate to that calendar month in one
+  // click instead of setting both dates by hand. Purely a shortcut: it
+  // writes into the same startDate/endDate state the range inputs use, so
+  // editing either input afterward silently falls out of sync with it,
+  // exactly like the year/month `<select>`s elsewhere in the app (CashJournal,
+  // ClientPayments) that don't try to reflect an arbitrary custom range either.
+  const MONTHS_FR = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+  const [monthFilter, setMonthFilter] = useState('');
+  const monthOptions = React.useMemo(() => {
+    const opts: { value: string; label: string }[] = [];
+    const cursor = new Date();
+    cursor.setDate(1);
+    for (let i = 0; i < 12; i++) {
+      opts.push({ value: `${cursor.getFullYear()}-${cursor.getMonth()}`, label: `${MONTHS_FR[cursor.getMonth()]} ${cursor.getFullYear()}` });
+      cursor.setMonth(cursor.getMonth() - 1);
+    }
+    return opts;
+  }, []);
+  const applyMonthFilter = (value: string) => {
+    setMonthFilter(value);
+    if (!value) return;
+    const [yearStr, monthStr] = value.split('-');
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const first = new Date(year, month, 1);
+    // Capped at today rather than the month's actual last day: a future
+    // endDate would just be a range with nothing in it for the current month,
+    // and there is never anything to find past today for an earlier one either.
+    const last = new Date(year, month + 1, 0);
+    const today = new Date();
+    const end = last > today ? today : last;
+    setStartDate(toLocalDateString(first));
+    setEndDate(toLocalDateString(end));
+  };
+
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
   const [tasksEmployee, setTasksEmployee] = useState<any>(null);
 
@@ -86,7 +122,7 @@ export const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div>
             <h1 className="text-[20px] font-bold text-gray-900 tracking-tight">Tableau de bord</h1>
-            <p className="text-[13px] text-gray-500 mt-1">Vue d'ensemble des performances opérationnelles et RH</p>
+            <p className="text-[13px] text-gray-500 mt-1">Pilotage global de l'activité, des temps et du portefeuille client.</p>
           </div>
           
           <div className="flex flex-wrap items-center gap-3">
@@ -96,7 +132,7 @@ export const AdminDashboard: React.FC = () => {
               <input 
                 type="date" 
                 value={startDate} 
-                onChange={e => setStartDate(e.target.value)}
+                onChange={e => { setStartDate(e.target.value); setMonthFilter(''); }}
                 className="text-[13px] outline-none text-gray-700 bg-transparent"
               />
               <span className="text-gray-300 mx-1">|</span>
@@ -104,11 +140,21 @@ export const AdminDashboard: React.FC = () => {
               <input 
                 type="date" 
                 value={endDate} 
-                onChange={e => setEndDate(e.target.value)}
+                onChange={e => { setEndDate(e.target.value); setMonthFilter(''); }}
                 className="text-[13px] outline-none text-gray-700 bg-transparent"
               />
             </div>
-            
+
+            <select
+              value={monthFilter}
+              onChange={e => applyMonthFilter(e.target.value)}
+              title="Filtrer par mois"
+              className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-[13px] text-gray-700 focus:outline-none cursor-pointer"
+            >
+              <option value="">Filtrer par mois…</option>
+              {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+
             <MultiSelectAutocomplete 
               placeholder="Rechercher collaborateur..."
               endpoint="/api/kpi/users/search"
