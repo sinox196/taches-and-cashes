@@ -12,7 +12,7 @@ export const PausedTasksList: React.FC<PausedTasksListProps> = ({ entries, onRes
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-        <h3 className="text-[13px] font-bold text-gray-800 uppercase tracking-wide">Activités en pause</h3>
+        <h3 className="text-[13px] font-bold text-gray-800 uppercase tracking-wide">Tâches en pause</h3>
       </div>
       <div className="divide-y divide-gray-50">
         {entries.map((entry) => (

@@ -682,10 +682,10 @@ export default function App() {
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div>
                 <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">
-                  Team Time Tracking
+                  Mes tâches & chrono
                 </h1>
                 <p className="text-[11.5px] text-gray-500 mt-0.5">
-                  Suivi du temps de travail et coût calculé des collaborateurs en temps réel
+                  Gérez votre chrono et vos tâches en cours
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
@@ -702,7 +702,7 @@ export default function App() {
                     className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   >
                     <ClipboardCheck className="w-3.5 h-3.5" />
-                    Assigner une tâche
+                    Déléguer une tâche
                   </button>
                 )}
               </div>
@@ -762,7 +762,6 @@ export default function App() {
                 entries={timeEntries}
                 onEdit={(entry) => setEditingEntry(entry)}
                 onDelete={handleDeleteEntry}
-                onMore={(entry) => showToast(`Options pour ${entry.client}`)}
                 onSelectAsActive={handleSelectAsActive}
                 onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
                 totalEntries={totalEntries ?? undefined}
