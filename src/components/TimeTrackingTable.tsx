@@ -323,11 +323,14 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     </td>
                   )}
 
-                  {/* Statut — Terminée green, En cours blue, En pause orange. */}
+                  {/* Statut — Terminée green, En cours blue, En pause orange.
+                      Label is French throughout; only the underlying
+                      `statut` value (RUNNING/PAUSED/COMPLETED) stays in
+                      English, since that's the API/DB enum, not UI copy. */}
                   <td className="px-2 py-2.5">
                     {row.statut === 'COMPLETED' ? (
                       <span className="px-2 py-0.5 rounded-full bg-[#ECFDF3] text-[#12B76A] font-bold text-[9px] uppercase tracking-wide inline-block">
-                        COMPLETED
+                        Terminée
                       </span>
                     ) : (
                       <button
@@ -342,7 +345,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                             : 'bg-[#FFFAEB] text-[#B54708] ' + (hasPermission('EDIT') && user?.id === row.userId && !hasRunningTask ? 'hover:bg-[#feeec8]' : '')
                         }`}
                       >
-                        {row.statut}
+                        {row.statut === 'RUNNING' ? 'En cours' : 'En pause'}
                       </button>
                     )}
                   </td>

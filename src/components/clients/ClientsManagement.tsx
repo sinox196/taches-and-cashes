@@ -1393,7 +1393,7 @@ export const ClientsManagement: React.FC = () => {
             </div>
 
             <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex justify-between items-center text-[11px] text-gray-400">
-              <span>Créé le {new Date(viewingClient.createdAt).toLocaleDateString()}</span>
+              <span>Créé le {new Date(viewingClient.createdAt).toLocaleDateString('fr-FR')}</span>
               {hasPermission('EDIT_CLIENTS') && (
                 <button
                   onClick={(e) => {

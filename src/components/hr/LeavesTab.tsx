@@ -11,7 +11,7 @@ export const LeavesTab: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   
   // Form state
-  const [type, setType] = useState('Annual leave');
+  const [type, setType] = useState('Congé annuel');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [duration, setDuration] = useState(1);
@@ -123,7 +123,7 @@ export const LeavesTab: React.FC = () => {
         window.dispatchEvent(new Event('refresh-hr-balance'));
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to approve');
+        alert(err.error || "Échec de l'approbation");
       }
     } catch (error) {
       console.error(error);
@@ -147,7 +147,7 @@ export const LeavesTab: React.FC = () => {
         window.dispatchEvent(new Event('refresh-hr-balance'));
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to reject');
+        alert(err.error || "Échec du refus");
       }
     } catch (error) {
       console.error(error);
@@ -167,7 +167,7 @@ export const LeavesTab: React.FC = () => {
         window.dispatchEvent(new Event('refresh-hr-balance'));
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to cancel');
+        alert(err.error || "Échec de l'annulation");
       }
     } catch (error) {
       console.error(error);
@@ -370,10 +370,10 @@ export const LeavesTab: React.FC = () => {
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900"
                     required
                   >
-                    <option value="Annual leave">Congé annuel</option>
-                    <option value="Sick leave">Congé maladie</option>
-                    <option value="Exceptional leave">Congé exceptionnel</option>
-                    <option value="Other">Autre</option>
+                    <option value="Congé annuel">Congé annuel</option>
+                    <option value="Congé maladie">Congé maladie</option>
+                    <option value="Congé exceptionnel">Congé exceptionnel</option>
+                    <option value="Autre">Autre</option>
                   </select>
                 </div>
                 

@@ -90,7 +90,7 @@ export const AdvancesTab: React.FC = () => {
         body: JSON.stringify({ comment: approvalComment }),
       });
       if (res.ok) { setApprovalModalId(null); setApprovalComment(''); fetchAdvances(); }
-      else { const err = await res.json(); alert(err.error || 'Failed to approve'); }
+      else { const err = await res.json(); alert(err.error || "Échec de l'approbation"); }
     } catch { /* ignore */ }
   };
 
@@ -102,7 +102,7 @@ export const AdvancesTab: React.FC = () => {
         body: JSON.stringify({ comment: rejectionReason }),
       });
       if (res.ok) { setRejectionModalId(null); setRejectionReason(''); fetchAdvances(); }
-      else { const err = await res.json(); alert(err.error || 'Failed to reject'); }
+      else { const err = await res.json(); alert(err.error || "Échec du refus"); }
     } catch { /* ignore */ }
   };
 
@@ -114,7 +114,7 @@ export const AdvancesTab: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) fetchAdvances();
-      else { const err = await res.json(); alert(err.error || 'Failed to cancel'); }
+      else { const err = await res.json(); alert(err.error || "Échec de l'annulation"); }
     } catch { /* ignore */ }
   };
 

@@ -72,7 +72,7 @@ export type HRRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 export interface LeaveRequest {
   id: number;
   userId: number;
-  type: 'Annual leave' | 'Sick leave' | 'Exceptional leave' | 'Other';
+  type: 'Congé annuel' | 'Congé maladie' | 'Congé exceptionnel' | 'Autre';
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   duration: number; // in days

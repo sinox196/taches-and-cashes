@@ -151,8 +151,8 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                 onChange={(e) => setStatut(e.target.value as any)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="COMPLETED">COMPLETED</option>
-                <option value="RUNNING">RUNNING</option>
+                <option value="COMPLETED">Terminée</option>
+                <option value="RUNNING">En cours</option>
               </select>
             </div>
           </div>
