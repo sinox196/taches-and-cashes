@@ -92,6 +92,34 @@ export async function showOsNotification({ title, body, nav, tag }: OsNotificati
 }
 
 /**
+ * Takes down a chronometer notification left over from before that feature
+ * was removed.
+ *
+ * It was drawn with `requireInteraction: true`, which means the OS keeps it
+ * on screen until something closes it — and the code that used to do that
+ * went with the feature. So a notification already showing when a device
+ * last ran the old build stays there indefinitely, frozen at whatever time
+ * it last displayed, above Pause / Arrêter buttons that now reach a route
+ * that no longer exists.
+ *
+ * Called once on app start. Safe and cheap when there is nothing to close,
+ * and safe to delete once every device has opened the app at least once —
+ * it is transitional cleanup, not part of any feature.
+ */
+const LEGACY_TIMER_TAG = 'active-timer';
+
+export async function closeLingeringTimerNotification(): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registration = swRegistration ?? (await navigator.serviceWorker.getRegistration());
+    const open = await registration?.getNotifications({ tag: LEGACY_TIMER_TAG });
+    open?.forEach(n => n.close());
+  } catch {
+    /* nothing to clean up */
+  }
+}
+
+/**
  * Registers this device for Web Push — how an ordinary notification (task
  * assigned, a leave decision, a new message, sent from notify()/the message
  * route in server.ts) reaches a device with the browser fully closed, at

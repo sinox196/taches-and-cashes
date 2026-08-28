@@ -18,6 +18,7 @@ import { HRManagement } from './components/hr/HRManagement';
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
 import { ResourcesManagement } from './components/resources/ResourcesManagement';
+import { closeLingeringTimerNotification } from './utils/osNotifications';
 import { useAuth } from './context/AuthContext';
 import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
@@ -525,6 +526,11 @@ export default function App() {
   }, [floatingEntry?.statut, floatingEntry?.dureeSeconds, floatingEntry?.client]);
 
   useEffect(() => () => { document.title = 'Tâches & Cash'; }, []);
+
+  // Transitional: take down a chronometer notification left behind by an
+  // older build. It was drawn with `requireInteraction`, so the OS keeps it
+  // until something closes it, and nothing else does any more.
+  useEffect(() => { closeLingeringTimerNotification(); }, []);
 
   const handleStartNewTask = async (
     client: string,

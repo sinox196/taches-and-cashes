@@ -9,8 +9,28 @@
  * "why am I seeing an old build" bugs for no benefit.
  */
 
+const LEGACY_TIMER_TAG = 'active-timer';
+
 self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
+/*
+ * Claiming clients, plus transitional cleanup: the chronometer notification
+ * this worker used to draw was created with `requireInteraction: true`, so
+ * the OS keeps it on screen until something closes it. The code that closed
+ * it went with the feature, which would leave a notification frozen at its
+ * last time — above buttons that now reach a route that no longer exists —
+ * on every device that had one showing. Closing it here catches those before
+ * any page even loads. Safe to delete once every device has updated.
+ */
+self.addEventListener('activate', (event) => event.waitUntil((async () => {
+  await self.clients.claim();
+  try {
+    const stale = await self.registration.getNotifications({ tag: LEGACY_TIMER_TAG });
+    stale.forEach((n) => n.close());
+  } catch (e) {
+    /* nothing to clean up */
+  }
+})()));
 
 /**
  * Ordinary notifications pushed by server.ts's notify()/message-send routes —
@@ -51,6 +71,12 @@ self.addEventListener('notificationclick', (event) => {
   const data = event.notification.data || {};
 
   event.notification.close();
+
+  // A leftover chronometer notification from before that feature was
+  // removed. Its Pause / Arrêter went to a route that no longer exists, so
+  // closing it (above) is the whole response — don't also drag the user into
+  // the app they deliberately left.
+  if (data.timer) return;
   const nav = data.nav;
 
   event.waitUntil((async () => {
