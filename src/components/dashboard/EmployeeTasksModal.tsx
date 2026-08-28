@@ -10,6 +10,10 @@ interface EmployeeTasksModalProps {
   /** Dashboard filters, replayed so the modal matches what's on screen. */
   filters: { startDate: string; endDate: string; filterUserIds: number[]; filterClientIds: number[] };
   onClose: () => void;
+  /** Pre-fills the search box — set when opened from one client's row in
+   *  EmployeeDetailsModal, so the per-task list lands already narrowed to
+   *  it instead of showing every client again. */
+  initialSearch?: string;
 }
 
 const STATUS_META: Record<string, { label: string; className: string; Icon: React.ElementType }> = {
@@ -29,12 +33,12 @@ const StatusBadge: React.FC<{ statut: string }> = ({ statut }) => {
   );
 };
 
-export const EmployeeTasksModal: React.FC<EmployeeTasksModalProps> = ({ employee, filters, onClose }) => {
+export const EmployeeTasksModal: React.FC<EmployeeTasksModalProps> = ({ employee, filters, onClose, initialSearch }) => {
   useEscapeToClose(onClose);
   const { user, token } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RUNNING' | 'PAUSED'>('ALL');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch ?? '');
 
   // Tasks are fetched on open rather than shipped with the dashboard summary,
   // so the summary stays small however many collaborators there are.

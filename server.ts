@@ -1413,10 +1413,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       
       const empClients = new Set();
       const clientTasksCount: any = {};
+      // Duration per client, summed alongside the count in the same pass —
+      // the "Clients Traités" list needs both, and this is the loop that
+      // already visits every one of this collaborator's tasks.
+      const clientDurationSeconds: any = {};
       empTasks.forEach((t: any) => {
         if (t.clientId) {
           empClients.add(t.clientId);
           clientTasksCount[t.clientId] = (clientTasksCount[t.clientId] || 0) + 1;
+          clientDurationSeconds[t.clientId] = (clientDurationSeconds[t.clientId] || 0) + accruedSeconds(t);
         }
       });
       
@@ -1431,12 +1436,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       const clientListDetails = Array.from(empClients).map((cid: any) => {
         const c = clientsById.get(cid);
+        const secs = clientDurationSeconds[cid] || 0;
         return {
           id: cid,
           name: c ? c.name : 'Unknown',
-          taskCount: clientTasksCount[cid]
+          taskCount: clientTasksCount[cid],
+          durationSeconds: secs,
+          durationFormatted: `${Math.floor(secs / 3600)}h${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}`,
         };
-      });
+      }).sort((a: any, b: any) => b.durationSeconds - a.durationSeconds);
 
       // The per-task breakdown is NOT inlined: 40 collaborators × their history
       // is the bulk of this payload. The drill-down modal loads it from

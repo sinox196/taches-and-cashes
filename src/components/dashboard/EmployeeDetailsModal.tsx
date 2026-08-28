@@ -6,9 +6,13 @@ import { roleMeta, roleLabel } from '../../constants/roles';
 interface EmployeeDetailsModalProps {
   employee: any;
   onClose: () => void;
+  /** Opens the per-task drill-down (EmployeeTasksModal), pre-filtered to one
+   *  client — the aggregate duration shown here has nothing to break down
+   *  by task, that view already does and is loaded on demand from there. */
+  onViewClientTasks?: (clientName: string) => void;
 }
 
-export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({ employee, onClose }) => {
+export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({ employee, onClose, onViewClientTasks }) => {
   useEscapeToClose(onClose);
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm transition-opacity">
@@ -117,12 +121,23 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({ empl
             {employee.clients.list.length > 0 ? (
               <div className="bg-white border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50">
                 {employee.clients.list.map((client: any) => (
-                  <div key={client.id} className="p-3 flex justify-between items-center hover:bg-gray-50">
+                  <button
+                    key={client.id}
+                    type="button"
+                    onClick={() => onViewClientTasks?.(client.name)}
+                    title="Voir le détail par tâche"
+                    className="w-full p-3 flex justify-between items-center hover:bg-gray-50 text-left"
+                  >
                     <span className="text-[13px] font-medium text-gray-900">{client.name}</span>
-                    <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                      {client.taskCount} tâche(s)
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                        {client.taskCount} tâche(s)
+                      </span>
+                      <span className="text-[11px] bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full font-mono font-medium">
+                        {client.durationFormatted ?? '0h00'}
+                      </span>
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             ) : (

@@ -74,6 +74,11 @@ export const AdminDashboard: React.FC = () => {
 
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
   const [tasksEmployee, setTasksEmployee] = useState<any>(null);
+  // Set when the tasks drill-down is opened from one client's row inside
+  // EmployeeDetailsModal, so that view opens already narrowed to it instead
+  // of showing every client again. Cleared on the plain "Nbr Clients"/
+  // "Temps passé" entry points, which mean "show everything".
+  const [tasksModalInitialSearch, setTasksModalInitialSearch] = useState('');
 
 
 
@@ -196,14 +201,24 @@ export const AdminDashboard: React.FC = () => {
             <EmployeeTable
               employees={stats.employeeStats}
               onRowClick={setSelectedEmployee}
-              onClientsClick={setTasksEmployee}
+              onClientsClick={emp => { setTasksModalInitialSearch(''); setTasksEmployee(emp); }}
             />
           </>
         )}
       </main>
       
       {selectedEmployee && (
-        <EmployeeDetailsModal employee={selectedEmployee} onClose={() => setSelectedEmployee(null)} />
+        <EmployeeDetailsModal
+          employee={selectedEmployee}
+          onClose={() => setSelectedEmployee(null)}
+          onViewClientTasks={clientName => {
+            // One drill-down modal at a time — same invariant the table's own
+            // entry points already keep.
+            setSelectedEmployee(null);
+            setTasksModalInitialSearch(clientName);
+            setTasksEmployee(selectedEmployee);
+          }}
+        />
       )}
 
       {tasksEmployee && (
@@ -216,6 +231,7 @@ export const AdminDashboard: React.FC = () => {
             filterClientIds: selectedClients.map(c => c.id),
           }}
           onClose={() => setTasksEmployee(null)}
+          initialSearch={tasksModalInitialSearch}
         />
       )}
     </div>
