@@ -479,6 +479,32 @@ async function startServer() {
   };
 
   /**
+   * The same check `requirePermission` makes, but asked *inside* a route
+   * rather than in front of it — for a permission that decides which fields
+   * a response carries instead of whether the route may be called at all.
+   * Re-reads the user row for the same reason: a permission taken away has
+   * to take effect on the next request, not on the next login.
+   */
+  const userCan = async (req: any, permission: string): Promise<boolean> => {
+    const user = await db.getUserById(req.user.companyId, req.user.id);
+    if (!user) return false;
+    return user.role === 'ADMIN' || JSON.parse(user.permissions).includes(permission);
+  };
+
+  /**
+   * The client ledger fields, stripped from a response when the viewer lacks
+   * VIEW_CLIENT_FINANCIALS. Hiding the columns in the table is not enough —
+   * without this the figures still ship over the wire, the same rule the
+   * ADMIN-only cost on time entries already follows.
+   */
+  const LEDGER_FIELDS = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer', 'journalEncaissements'];
+  const stripLedger = (client: any) => {
+    const out = { ...client };
+    for (const f of LEDGER_FIELDS) delete out[f];
+    return out;
+  };
+
+  /**
    * Cross-tenant capability, orthogonal to `requirePermission` (which is
    * scoped to "within my own company"): confirming another company's
    * payment or reading the platform's own bank details has nothing to do
@@ -911,6 +937,12 @@ async function startServer() {
     try {
       let clients = await db.getAllClients(req.user.companyId);
 
+      // Whether this viewer gets the ledger at all. Decided once here because
+      // it governs three things, not just the response body: sorting and
+      // filtering by a ledger field would otherwise let someone without the
+      // permission read the figures back out of the row order.
+      const seesLedger = await userCan(req, 'VIEW_CLIENT_FINANCIALS');
+
       // Parse filters
       let filters: Record<string, string> = {};
       if (req.query.filters) {
@@ -920,6 +952,7 @@ async function startServer() {
           // ignore
         }
       }
+      if (!seesLedger) for (const f of LEDGER_FIELDS) delete filters[f];
 
       // 1. Global Search (q)
       const q = (req.query.q || '').toLowerCase();
@@ -971,7 +1004,8 @@ async function startServer() {
       // pass both params explicitly; this default only affects callers that
       // don't (the debounced client-search autocomplete used across Pointage/
       // assignment forms), where alphabetical is the more useful order.
-      const sortField = req.query.sortField || 'name';
+      const requestedSort = req.query.sortField || 'name';
+      const sortField = !seesLedger && LEDGER_FIELDS.includes(requestedSort) ? 'name' : requestedSort;
       const sortDir = req.query.sortDir || 'asc';
 
       clients.sort((a, b) => {
@@ -1040,7 +1074,12 @@ async function startServer() {
       // The user wants "Do not load the entire Clients database... Use pagination".
       // We will ALWAYS return pagination wrapper if page/limit is provided, else we return array.
       const startIndex = (page - 1) * limit;
-      const page_ = req.query.page ? enrichedAll.slice(startIndex, startIndex + limit) : enrichedAll;
+      const rows = req.query.page ? enrichedAll.slice(startIndex, startIndex + limit) : enrichedAll;
+
+      // Without VIEW_CLIENT_FINANCIALS the ledger never leaves the server:
+      // no per-row figures and no "Total Général", which is those same
+      // figures summed.
+      const page_ = seesLedger ? rows : rows.map(stripLedger);
 
       if (req.query.page) {
         // Sums across the whole filtered set, not the page — this is what the
@@ -1055,7 +1094,7 @@ async function startServer() {
           acc.resteAPayer = round3(acc.resteAPayer + num(Number(c.resteAPayer), 0));
           return acc;
         }, { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
-        res.json({ data: page_, total: clients.length, page, limit, totals });
+        res.json({ data: page_, total: clients.length, page, limit, ...(seesLedger ? { totals } : {}) });
       } else {
         res.json(page_);
       }
@@ -1119,7 +1158,7 @@ async function startServer() {
       if (!client) {
         return res.status(404).json({ error: 'Client not found' });
       }
-      res.json(client);
+      res.json((await userCan(req, 'VIEW_CLIENT_FINANCIALS')) ? client : stripLedger(client));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1689,7 +1728,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         createdBy: req.user.id
       });
 
-      res.status(201).json(await enrichClientLedger(req.user.companyId, newClient));
+      const created = await enrichClientLedger(req.user.companyId, newClient);
+      res.status(201).json((await userCan(req, 'VIEW_CLIENT_FINANCIALS')) ? created : stripLedger(created));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1705,6 +1745,13 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         return res.status(400).json({ error: 'Client name is required' });
       }
 
+      // A caller who cannot see the ledger cannot overwrite it either: their
+      // form never received soldeAnterieur/encaissements, so taking them from
+      // the body would silently zero a client's balance every time someone
+      // edited a phone number.
+      const seesLedger = await userCan(req, 'VIEW_CLIENT_FINANCIALS');
+      const current = seesLedger ? null : await db.getClientById(req.user.companyId, id);
+
       const updates = {
         name: name.trim(),
         type: type || 'Company',
@@ -1717,17 +1764,18 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: status || 'Active',
         notes: notes || '',
         customFields: customFields || {},
-        soldeAnterieur: num(Number(soldeAnterieur), 0),
-        encaissements: normalizeEncaissements(encaissements),
+        soldeAnterieur: seesLedger ? num(Number(soldeAnterieur), 0) : num(Number(current?.soldeAnterieur), 0),
+        encaissements: seesLedger ? normalizeEncaissements(encaissements) : normalizeEncaissements(current?.encaissements),
         updatedAt: new Date().toISOString()
       };
-      
+
       const updated = await db.updateClient(req.user.companyId, id, updates);
       if (!updated) {
         return res.status(404).json({ error: 'Client not found' });
       }
 
-      res.json(await enrichClientLedger(req.user.companyId, updated));
+      const saved = await enrichClientLedger(req.user.companyId, updated);
+      res.json(seesLedger ? saved : stripLedger(saved));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

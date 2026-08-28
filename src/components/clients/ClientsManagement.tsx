@@ -267,12 +267,23 @@ export const ClientsManagement: React.FC = () => {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
 
+  /**
+   * VIEW_CLIENT_FINANCIALS gates the ledger columns themselves, not just the
+   * "Total Général" bar: without it Solde antérieur, Montant de facture,
+   * Encaissements and Reste à payer are not offered in the columns picker,
+   * not rendered in the table, and — the part that actually matters — not
+   * sent by the server either.
+   */
+  const seesFinancials = hasPermission('VIEW_CLIENT_FINANCIALS');
+
   const standardColumns = [
     { key: 'name', label: 'Client / Nom' },
-    { key: 'soldeAnterieur', label: 'Solde antérieur' },
-    { key: 'montantFacture', label: 'Montant de facture' },
-    { key: 'encaissements', label: 'Encaissements' },
-    { key: 'resteAPayer', label: 'Reste à payer' },
+    ...(seesFinancials ? [
+      { key: 'soldeAnterieur', label: 'Solde antérieur' },
+      { key: 'montantFacture', label: 'Montant de facture' },
+      { key: 'encaissements', label: 'Encaissements' },
+      { key: 'resteAPayer', label: 'Reste à payer' },
+    ] : []),
     { key: 'taxId', label: 'Matricule' },
     { key: 'address', label: 'Adresse' },
     { key: 'contact', label: 'Contact (Email/Tél)' },
@@ -702,7 +713,7 @@ export const ClientsManagement: React.FC = () => {
                       Actions
                     </th>
                   </tr>
-                  {hasPermission('VIEW_CLIENT_FINANCIALS') && (
+                  {seesFinancials && (
                     <tr className="bg-gray-100 border-b border-gray-200">
                       {allTableColumns.filter(c => visibleColumns.includes(c.key)).map((col, i) => {
                         const isFinancial = FINANCIAL_KEYS.includes(col.key);
@@ -954,35 +965,39 @@ export const ClientsManagement: React.FC = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Solde antérieur</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={formData.soldeAnterieur || ''}
-                    onChange={e => handleFormChange('soldeAnterieur', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                    placeholder="0.000"
-                  />
-                </div>
+                {seesFinancials && (
+                  <div>
+                    <label className="block text-[12px] font-semibold text-gray-700 mb-1">Solde antérieur</label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      value={formData.soldeAnterieur || ''}
+                      onChange={e => handleFormChange('soldeAnterieur', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                      placeholder="0.000"
+                    />
+                  </div>
+                )}
 
                 {/* Encaissements are recorded in Cash (Règlements clients),
                     never typed in here: the movement lives in one place, and a
                     second entry point would mean two records of one payment.
                     This is the read-only total, which is all this form needs
                     to show. */}
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Encaissements</label>
-                  <div className="flex items-center justify-between gap-3 px-3 py-2.5 border border-gray-200 bg-gray-50 rounded-lg">
-                    <span className="text-[12px] text-gray-500">Total encaissé</span>
-                    <span className="text-[13px] font-mono font-semibold text-gray-800">
-                      {formatCostTND(totalEncaissements)}
-                    </span>
+                {seesFinancials && (
+                  <div className="md:col-span-2">
+                    <label className="block text-[12px] font-semibold text-gray-700 mb-1">Encaissements</label>
+                    <div className="flex items-center justify-between gap-3 px-3 py-2.5 border border-gray-200 bg-gray-50 rounded-lg">
+                      <span className="text-[12px] text-gray-500">Total encaissé</span>
+                      <span className="text-[13px] font-mono font-semibold text-gray-800">
+                        {formatCostTND(totalEncaissements)}
+                      </span>
+                    </div>
+                    <p className="text-[10.5px] text-gray-500 mt-1.5">
+                      Les encaissements se saisissent dans Cash → Règlements clients.
+                    </p>
                   </div>
-                  <p className="text-[10.5px] text-gray-500 mt-1.5">
-                    Les encaissements se saisissent dans Cash → Règlements clients.
-                  </p>
-                </div>
+                )}
 
                 <div>
                   <label className="block text-[12px] font-semibold text-gray-700 mb-1">Type de client</label>
@@ -1295,7 +1310,7 @@ export const ClientsManagement: React.FC = () => {
                   is the only place the full list is shown; the table cell
                   only ever gives the total, so one client with many small
                   versements can't stretch that row past every other. */}
-              {(() => {
+              {seesFinancials && (() => {
                 const manual = Array.isArray(viewingClient.encaissements) ? viewingClient.encaissements : [];
                 const journal = viewingClient.journalEncaissements || [];
                 const all = [...manual.map(e => ({ ...e, source: undefined as string | undefined })), ...journal]
