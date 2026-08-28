@@ -38,6 +38,45 @@ import {
   calculateCostDT,
 } from './utils/formatters';
 
+/**
+ * When the overtime popup was last shown for a given time entry, keyed by
+ * entry id. Persisted, because the whole point is a gap measured in real
+ * time: an in-memory record is lost on every remount, and the popup then
+ * came straight back on the next load instead of two hours later.
+ *
+ * Every access is guarded — localStorage throws in a private window or with
+ * site data blocked, and a stuck timer prompt is not worth crashing the app
+ * over. A read that fails simply means "never asked", which at worst shows
+ * one extra prompt.
+ */
+const OVERTIME_PROMPTS_KEY = 'overtime_prompted_at';
+/** Records older than this are dropped on write, so the map stays bounded. */
+const OVERTIME_PROMPTS_TTL_MS = 7 * 24 * 3600 * 1000;
+
+function readOvertimePrompts(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(OVERTIME_PROMPTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function markOvertimePrompted(entryId: string) {
+  try {
+    const now = Date.now();
+    const next: Record<string, number> = {};
+    for (const [id, at] of Object.entries(readOvertimePrompts())) {
+      if (typeof at === 'number' && now - at < OVERTIME_PROMPTS_TTL_MS) next[id] = at;
+    }
+    next[entryId] = now;
+    localStorage.setItem(OVERTIME_PROMPTS_KEY, JSON.stringify(next));
+  } catch {
+    // Non-fatal: without a record the next load asks once more, nothing worse.
+  }
+}
+
 export default function App() {
   const { user, token, isLoading, hasPermission } = useAuth();
 
@@ -295,27 +334,39 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Overtime alert: every full 2h a task runs continuously, ask the
-  // collaborator whether they're still on it. Responding keeps it running;
-  // ignoring it for the grace period below pauses it automatically. Re-fires
-  // at every subsequent 2h boundary (4h, 6h, …), not just once, since a task
-  // left running for a whole afternoon is exactly the case this exists for.
+  // Overtime alert: once a task passes 2h, ask the collaborator whether
+  // they're still on it. Responding keeps it running; ignoring it for the
+  // grace period below pauses it automatically. It then re-asks every 2h, so
+  // a task left running for a whole afternoon is caught again at 4h, 6h, …
+  //
+  // **The 2h is a gap between prompts, measured in wall-clock time and
+  // persisted**, not a count of 2h boundaries crossed held in a ref. The ref
+  // was lost on every remount — a refresh, a reopened tab — and `dureeSeconds`
+  // is *accumulated*, not continuous, so a task that had ever passed 2h was
+  // past it forever: every single load re-fired the popup immediately. Keying
+  // off "when did we last ask about this task" is what makes "every 2h" hold
+  // however often the app is reloaded.
   const OVERTIME_THRESHOLD_SECONDS = 2 * 3600;
   const OVERTIME_GRACE_MS = 2 * 60 * 1000;
+  const OVERTIME_PROMPT_INTERVAL_MS = 2 * 3600 * 1000;
   const [overtimeAlert, setOvertimeAlert] = useState<{ entryId: string; deadline: number } | null>(null);
   const [overtimeSecondsLeft, setOvertimeSecondsLeft] = useState(0);
-  const acknowledgedOvertimeRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const myRunning = timeEntries.find(e => e.userId === user?.id && e.statut === 'RUNNING');
     if (!myRunning) { setOvertimeAlert(null); return; }
-    const cycles = Math.floor(myRunning.dureeSeconds / OVERTIME_THRESHOLD_SECONDS);
-    if (cycles < 1) return;
-    const acknowledged = acknowledgedOvertimeRef.current[myRunning.id] || 0;
-    if (cycles > acknowledged && !overtimeAlert) {
-      setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
-    }
-  }, [timeEntries, user?.id]);
+    if (myRunning.dureeSeconds < OVERTIME_THRESHOLD_SECONDS) return;
+    if (overtimeAlert) return;
+
+    const lastAsked = readOvertimePrompts()[myRunning.id] || 0;
+    if (Date.now() - lastAsked < OVERTIME_PROMPT_INTERVAL_MS) return;
+
+    // Stamped when the popup is *shown*, not when it is answered: a reload
+    // while it is open must not bring it straight back, and the next one is
+    // then a full 2h away whatever the collaborator does with this one.
+    markOvertimePrompted(myRunning.id);
+    setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
+  }, [timeEntries, user?.id, overtimeAlert]);
 
   useEffect(() => {
     if (!overtimeAlert) return;
@@ -323,8 +374,6 @@ export default function App() {
     tick();
     const countdown = setInterval(tick, 1000);
     const timeout = setTimeout(() => {
-      const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-      acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
       updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
       setOvertimeAlert(null);
       showToast('Tâche mise en pause automatiquement — aucune réponse à l’alerte de 2h.');
@@ -335,15 +384,11 @@ export default function App() {
 
   const acknowledgeOvertimeAlert = () => {
     if (!overtimeAlert) return;
-    const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-    acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
     setOvertimeAlert(null);
   };
 
   const pauseFromOvertimeAlert = () => {
     if (!overtimeAlert) return;
-    const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-    acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
     updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
     setOvertimeAlert(null);
   };
@@ -883,7 +928,7 @@ export default function App() {
               <h3 className="text-[15px] font-bold text-gray-900 mb-1">Toujours sur cette tâche ?</h3>
               <p className="text-[13px] text-gray-600 mb-3">
                 Vous travaillez sur <span className="font-semibold">{entry?.pole || 'cette tâche'}</span>
-                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h sans interruption.
+                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h cumulées.
               </p>
               <p className="text-[12px] text-gray-400 mb-4">
                 Sans réponse, la tâche sera mise en pause automatiquement dans {overtimeSecondsLeft}s.
