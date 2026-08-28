@@ -283,7 +283,7 @@ export const UsersManagement: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1000px] w-full mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">
             {t('users.title')}
@@ -294,7 +294,7 @@ export const UsersManagement: React.FC = () => {
         </div>
         <button
           onClick={handleOpenCreate}
-          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors shrink-0 whitespace-nowrap self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>{t('users.add')}</span>
@@ -309,7 +309,11 @@ export const UsersManagement: React.FC = () => {
             <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         ) : (
-          <table className="w-full text-left border-collapse">
+          // Five columns, one of them a bag of permission chips: it does not
+          // fit a phone, so it scrolls sideways instead of being clipped by
+          // the card's own overflow-hidden.
+          <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[760px]">
             <thead>
               <tr className="bg-[#F9FAFB] border-b border-gray-200">
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -361,7 +365,7 @@ export const UsersManagement: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => handleOpenEdit(user)}
                         className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
@@ -387,6 +391,7 @@ export const UsersManagement: React.FC = () => {
               )}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

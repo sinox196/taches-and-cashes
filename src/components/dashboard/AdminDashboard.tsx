@@ -130,31 +130,38 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-[13px] text-gray-500 mt-1">Pilotage global de l'activité, des temps et du portefeuille client.</p>
           </div>
           
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200">
-              <Calendar className="w-4 h-4 text-gray-400" />
-              <span className="text-[13px] text-gray-500 font-medium">Du</span>
-              <input 
-                type="date" 
-                value={startDate} 
-                onChange={e => { setStartDate(e.target.value); setMonthFilter(''); }}
-                className="text-[13px] outline-none text-gray-700 bg-transparent"
-              />
-              <span className="text-gray-300 mx-1">|</span>
-              <span className="text-[13px] text-gray-500 font-medium">Au</span>
-              <input 
-                type="date" 
-                value={endDate} 
-                onChange={e => { setEndDate(e.target.value); setMonthFilter(''); }}
-                className="text-[13px] outline-none text-gray-700 bg-transparent"
-              />
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {/* Du and Au each wrap as a unit: side by side they are wider than
+                a phone, and the second date input used to run off the edge
+                with no way to scroll to it. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-white px-3 py-1.5 rounded-lg border border-gray-200 w-full sm:w-auto">
+              <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[13px] text-gray-500 font-medium">Du</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => { setStartDate(e.target.value); setMonthFilter(''); }}
+                  className="text-[13px] outline-none text-gray-700 bg-transparent min-w-0"
+                />
+              </div>
+              <span className="text-gray-300 mx-1 hidden sm:inline">|</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[13px] text-gray-500 font-medium">Au</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => { setEndDate(e.target.value); setMonthFilter(''); }}
+                  className="text-[13px] outline-none text-gray-700 bg-transparent min-w-0"
+                />
+              </div>
             </div>
 
             <select
               value={monthFilter}
               onChange={e => applyMonthFilter(e.target.value)}
               title="Filtrer par mois"
-              className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-[13px] text-gray-700 focus:outline-none cursor-pointer"
+              className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-[13px] text-gray-700 focus:outline-none cursor-pointer w-full sm:w-auto"
             >
               <option value="">Filtrer par mois…</option>
               {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

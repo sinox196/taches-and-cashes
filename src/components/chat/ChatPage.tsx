@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { roleMeta } from '../../constants/roles';
-import { Loader2, Send, MessageCircle, Check, CheckCheck } from 'lucide-react';
+import { Loader2, Send, MessageCircle, Check, CheckCheck, ArrowLeft } from 'lucide-react';
 
 interface Contact {
   id: number;
@@ -233,9 +233,21 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
   };
 
   return (
+    /**
+     * Master-detail, and on a phone the two panes take turns rather than
+     * sharing the width: a 280px list beside a thread left the thread about
+     * 110px wide, which is not a chat. Below `md` the list is the whole page
+     * until a conversation is picked, then the thread is — with a back arrow
+     * in its header, since there is no router to give the browser's own back
+     * button anything to do.
+     */
     <div className="flex-1 flex min-w-0 overflow-hidden bg-canvas">
       {/* Conversation list */}
-      <aside className="w-[280px] shrink-0 border-r border-gray-200 bg-white flex flex-col">
+      <aside
+        className={`w-full md:w-[280px] md:shrink-0 border-r border-gray-200 bg-white flex-col ${
+          selected ? 'hidden md:flex' : 'flex'
+        }`}
+      >
         <div className="p-4 border-b border-gray-100">
           <h1 className="text-[16px] font-bold text-gray-900">Messages</h1>
           <p className="text-[12px] text-gray-500 mt-0.5">Discutez avec l'équipe</p>
@@ -288,25 +300,32 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
       </aside>
 
       {/* Thread */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className={`flex-1 flex-col min-w-0 ${selected ? 'flex' : 'hidden md:flex'}`}>
         {!selected ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2 px-6 text-center">
             <MessageCircle className="w-10 h-10" />
             <span className="text-[13px]">Sélectionnez une conversation pour commencer</span>
           </div>
         ) : (
           <>
-            <div className="px-5 py-3 border-b border-gray-200 bg-white flex items-center gap-3">
+            <div className="px-3 sm:px-5 py-3 border-b border-gray-200 bg-white flex items-center gap-2 sm:gap-3">
+              <button
+                onClick={() => setSelected(null)}
+                className="md:hidden -ml-1 p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 shrink-0"
+                aria-label="Retour aux conversations"
+              >
+                <ArrowLeft className="w-[18px] h-[18px]" />
+              </button>
               <div className="w-8 h-8 rounded-full bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
                 {initials(selected.fullName)}
               </div>
-              <div>
-                <div className="text-[13px] font-semibold text-gray-900">{selected.fullName}</div>
-                <div className="text-[11px] text-gray-400">{roleMeta(selected.role).label}</div>
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold text-gray-900 truncate">{selected.fullName}</div>
+                <div className="text-[11px] text-gray-400 truncate">{roleMeta(selected.role).label}</div>
               </div>
             </div>
 
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 space-y-1">
               {loadingThread ? (
                 <div className="flex items-center justify-center h-full">
                   <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
@@ -329,7 +348,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
                       )}
                       <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                         <div
-                          className={`max-w-[65%] px-3 py-2 rounded-2xl text-[13px] leading-snug ${
+                          className={`max-w-[82%] sm:max-w-[65%] px-3 py-2 rounded-2xl text-[13px] leading-snug ${
                             mine
                               ? 'bg-slate-800 text-white rounded-br-sm'
                               : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm'
@@ -348,19 +367,26 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-200 bg-white flex items-center gap-2">
+            {/* pb picks up the home-indicator inset so the composer isn't
+                half under the gesture bar on a phone. */}
+            <div
+              className="p-3 sm:p-4 border-t border-gray-200 bg-white flex items-center gap-2"
+              style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+            >
               <input
                 type="text"
                 value={draft}
                 onChange={e => setDraft(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 placeholder="Écrivez un message..."
-                className="flex-1 text-[13px] px-3 py-2 rounded-lg border border-gray-200 outline-none focus:border-gray-400"
+                /* 16px below sm: anything smaller makes iOS Safari zoom the
+                   page in on focus and never zoom back out. */
+                className="flex-1 min-w-0 text-[16px] sm:text-[13px] px-3 py-2 rounded-lg border border-gray-200 outline-none focus:border-gray-400"
               />
               <button
                 onClick={handleSend}
                 disabled={!draft.trim() || sending}
-                className="w-9 h-9 rounded-lg bg-slate-800 text-white flex items-center justify-center disabled:opacity-40 shrink-0"
+                className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-slate-800 text-white flex items-center justify-center disabled:opacity-40 shrink-0"
               >
                 <Send className="w-4 h-4" />
               </button>

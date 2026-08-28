@@ -70,28 +70,30 @@ export const HRManagement: React.FC = () => {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1 min-h-[500px]">
-        <div className="flex border-b border-gray-200">
+        {/* Scrolls sideways below sm: four tabs sharing 390px squeezed
+            "Autorisations d'absence" onto two lines and clipped the rest. */}
+        <div className="flex border-b border-gray-200 overflow-x-auto shrink-0">
           <button
             onClick={() => setActiveTab('leaves')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'leaves' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'leaves' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {t('hr.tabs.leaves')}
           </button>
           <button
             onClick={() => setActiveTab('absences')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'absences' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'absences' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {t('hr.tabs.absences')}
           </button>
           <button
             onClick={() => setActiveTab('loans')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'loans' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'loans' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Prêts
           </button>
           <button
             onClick={() => setActiveTab('advances')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'advances' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'advances' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Avances
           </button>

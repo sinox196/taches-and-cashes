@@ -72,8 +72,8 @@ export const MultiSelectAutocomplete: React.FC<MultiSelectAutocompleteProps> = (
   };
 
   return (
-    <div className="relative" ref={wrapperRef}>
-      <div className="flex flex-wrap items-center gap-1 bg-white px-2 py-1.5 rounded-lg border border-gray-200 min-h-[38px] max-w-sm">
+    <div className="relative w-full sm:w-auto" ref={wrapperRef}>
+      <div className="flex flex-wrap items-center gap-1 bg-white px-2 py-1.5 rounded-lg border border-gray-200 min-h-[38px] sm:max-w-sm">
         {selectedItems.map(item => (
           <div key={item.id} className="flex items-center gap-1 bg-gray-100 text-gray-700 text-[12px] px-2 py-1 rounded-md">
             <span>{item.name}</span>

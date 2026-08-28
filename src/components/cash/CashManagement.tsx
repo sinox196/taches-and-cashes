@@ -176,7 +176,10 @@ export const CashManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-1 border-b border-gray-200">
+      {/* Scrolls sideways rather than wrapping: three two-word labels do not
+          fit a phone, and letting them wrap turned the bar into three rows of
+          broken text with no underline lining up under anything. */}
+      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto shrink-0">
         {([
           { id: 'documents', label: 'Facturation', icon: FileText },
           { id: 'reglements', label: 'Règlements clients', icon: Wallet },
@@ -185,7 +188,7 @@ export const CashManagement: React.FC = () => {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-medium -mb-px border-b-2 transition-colors ${
+            className={`flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-medium -mb-px border-b-2 transition-colors shrink-0 whitespace-nowrap ${
               tab === t.id
                 ? 'border-navy text-navy'
                 : 'border-transparent text-gray-500 hover:text-gray-700'

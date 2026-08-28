@@ -405,7 +405,7 @@ export const ClientPayments: React.FC = () => {
                         <td className="px-3 py-2.5 text-gray-600">{row.reference || <span className="text-gray-300">—</span>}</td>
                         <td className="px-3 py-2.5 text-right font-mono font-semibold text-gray-900">{money(Number(row.entree) || 0)}</td>
                         <td className="px-3 py-2.5">
-                          <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center justify-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                             {canManage && (
                               <>
                                 <button onClick={() => startEdit(row)} title="Modifier"

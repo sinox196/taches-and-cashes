@@ -631,12 +631,16 @@ export default function App() {
   }
 
   return (
-    // h-screen, not min-h-screen: the shell must have a *definite* height for
-    // the content column's own overflow-y-auto to become the single scroll
+    // A definite height, not min-h-screen: the shell must have one for the
+    // content column's own overflow-y-auto to become the single scroll
     // container. With min-h-screen the column just grew past the viewport, so
     // a page that pins its own footer (the Clients pagination bar) had that
     // footer pushed off-screen and reachable only by scrolling the whole page.
-    <div className="h-screen bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
+    //
+    // dvh rather than vh: on a phone `100vh` is the viewport with the browser
+    // chrome *hidden*, so a pinned footer — the chat composer, the Clients
+    // pagination bar — sat behind the address bar until you scrolled.
+    <div className="h-dvh bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
       <Sidebar
         activeItem={activeSidebarItem}
         onSelectItem={(item) => setActiveSidebarItem(item)}
@@ -780,6 +784,7 @@ export default function App() {
       {hasPermission('VIEW') && floatingEntry && (
         <FloatingTimer
           entry={floatingEntry}
+          raised={activeSidebarItem === 'Messages'}
           onResume={handleFloatingResume}
           onPause={handleFloatingPause}
           onStop={handleFloatingStop}

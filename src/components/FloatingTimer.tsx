@@ -8,6 +8,14 @@ interface FloatingTimerProps {
   onResume: () => void;
   onPause: () => void;
   onStop: () => void;
+  /**
+   * Set on a page that pins its own bar to the bottom of the viewport — today
+   * only Messages, whose composer runs the full width. On a phone the card is
+   * wide enough to cover its Send button, so the clock has to move up rather
+   * than sit on top of the one control the page exists for. From `sm` up
+   * there is room for both and the corner is the corner.
+   */
+  raised?: boolean;
 }
 
 /**
@@ -24,8 +32,9 @@ interface FloatingTimerProps {
  * modals (z-[60]) and toasts (z-[70]), so an open dialog covers it rather
  * than being fought for the corner.
  */
-export const FloatingTimer: React.FC<FloatingTimerProps> = ({ entry, onResume, onPause, onStop }) => {
+export const FloatingTimer: React.FC<FloatingTimerProps> = ({ entry, onResume, onPause, onStop, raised = false }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const bottom = raised ? 'bottom-24 sm:bottom-4' : 'bottom-4';
   const isRunning = entry.statut === 'RUNNING';
   const subtitle = [entry.pole, entry.taskType].filter(v => v && v !== '-').join(' · ');
 
@@ -36,7 +45,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ entry, onResume, o
       <button
         onClick={() => setCollapsed(false)}
         title="Afficher le chronomètre"
-        className="fixed bottom-4 right-4 z-40 flex items-center gap-2 bg-navy text-white rounded-full pl-3 pr-3.5 py-2 shadow-lg hover:bg-navy-hover transition-colors"
+        className={`fixed ${bottom} right-4 z-40 flex items-center gap-2 bg-navy text-white rounded-full pl-3 pr-3.5 py-2 shadow-lg hover:bg-navy-hover transition-colors`}
       >
         <span
           className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-run-fg animate-pulse' : 'bg-white/40'}`}
@@ -49,7 +58,7 @@ export const FloatingTimer: React.FC<FloatingTimerProps> = ({ entry, onResume, o
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-[240px] max-w-[calc(100vw-2rem)] bg-navy text-white rounded-xl p-4 shadow-lg font-sans">
+    <div className={`fixed ${bottom} right-4 z-40 w-[240px] max-w-[calc(100vw-2rem)] bg-navy text-white rounded-xl p-4 shadow-lg font-sans`}>
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0">
           <span

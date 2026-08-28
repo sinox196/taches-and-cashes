@@ -190,12 +190,12 @@ export const AbsencesTab: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Autorisations d'absence</h2>
         {hasPermission('CREATE_ABSENCE_AUTHORIZATION') && (
           <button
             onClick={() => setIsCreating(true)}
-            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2"
+            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2 self-start shrink-0 whitespace-nowrap"
           >
             <Plus className="w-4 h-4" />
             Nouvelle autorisation

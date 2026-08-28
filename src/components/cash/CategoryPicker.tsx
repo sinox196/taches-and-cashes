@@ -102,7 +102,7 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
                     type="button"
                     title="Retirer de la liste"
                     onClick={() => onDelete(c)}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                    className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 shrink-0"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>

@@ -113,7 +113,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm mt-6 flex flex-col overflow-hidden font-sans">
       {/* Card Header */}
-      <div className="px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex flex-col gap-0.5 shrink-0">
           <div className="flex items-center gap-3">
             <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide whitespace-nowrap">
@@ -129,7 +129,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
         </div>
 
         {/* Header Controls: Search & Filter */}
-        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+        <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2 min-w-0 w-full sm:w-auto">
           {/* Collaborator Filter — searchable, multiple at once */}
           {isAdmin && (
             <MultiSelectFilterDropdown
@@ -164,7 +164,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
 
           {/* Status: a segmented control rather than a dropdown — four states,
               constantly switched, worth showing without opening a menu. */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {([
               ['ALL', 'Tous'],
               ['RUNNING', 'En cours'],

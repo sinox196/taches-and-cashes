@@ -645,14 +645,14 @@ export const EcheancesGrid: React.FC = () => {
                   </button>
                   <button
                     onClick={() => startEditStatusOption(opt)}
-                    className="p-1 mr-0.5 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-gray-600 rounded shrink-0"
+                    className="p-1 mr-0.5 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-gray-600 rounded shrink-0"
                     title="Modifier cette valeur"
                   >
                     <Pencil className="w-3 h-3" />
                   </button>
                   <button
                     onClick={() => removeStatusOption(opt)}
-                    className="p-1 mr-1.5 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-red-600 rounded shrink-0"
+                    className="p-1 mr-1.5 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-600 rounded shrink-0"
                     title="Supprimer cette valeur"
                   >
                     <Trash2 className="w-3 h-3" />

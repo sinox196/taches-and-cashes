@@ -146,23 +146,29 @@ export const MyDashboard: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200">
-            <Calendar className="w-4 h-4 text-gray-400" />
-            <span className="text-[13px] text-gray-500 font-medium">Du</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              className="text-[13px] outline-none text-gray-700 bg-transparent"
-            />
-            <span className="text-gray-300 mx-1">|</span>
-            <span className="text-[13px] text-gray-500 font-medium">Au</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              className="text-[13px] outline-none text-gray-700 bg-transparent"
-            />
+          {/* Du and Au each wrap as a unit — side by side the pair is wider
+              than a phone, and the second picker ran off the edge. */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-white px-3 py-1.5 rounded-lg border border-gray-200 w-full sm:w-auto">
+            <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[13px] text-gray-500 font-medium">Du</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                className="text-[13px] outline-none text-gray-700 bg-transparent min-w-0"
+              />
+            </div>
+            <span className="text-gray-300 mx-1 hidden sm:inline">|</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[13px] text-gray-500 font-medium">Au</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                className="text-[13px] outline-none text-gray-700 bg-transparent min-w-0"
+              />
+            </div>
           </div>
         </div>
 

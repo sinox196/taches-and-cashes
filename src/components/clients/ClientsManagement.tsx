@@ -687,7 +687,7 @@ export const ClientsManagement: React.FC = () => {
                       >
                         <div className={`flex items-center gap-1 ${FINANCIAL_KEYS.includes(col.key) ? 'justify-end' : ''}`}>
                           {col.label}
-                          <div className={`flex flex-col opacity-0 group-hover:opacity-100 transition-opacity ${sortField === col.key ? '!opacity-100' : ''}`}>
+                          <div className={`flex flex-col opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity ${sortField === col.key ? '!opacity-100' : ''}`}>
                             <ChevronRight className={`w-3 h-3 -rotate-90 -mb-1.5 ${sortField === col.key && sortDir === 'asc' ? 'text-gray-900' : 'text-gray-400'}`} />
                             <ChevronRight className={`w-3 h-3 rotate-90 ${sortField === col.key && sortDir === 'desc' ? 'text-gray-900' : 'text-gray-400'}`} />
                           </div>
