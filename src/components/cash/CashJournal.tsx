@@ -275,14 +275,17 @@ export const CashJournal: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <p className="text-[11.5px] text-gray-500">
           Chaque <span className="font-semibold text-gray-700">entrée</span> rattachée à un client apparaît
           automatiquement dans ses encaissements sur la page Clients. Les règlements clients en{' '}
           <span className="font-semibold text-gray-700">espèce</span> y figurent d'office ; les autres modes
           restent hors caisse.
         </p>
-        <div className="flex items-center gap-2">
+        {/* Wraps on a phone: unwrapped, this row was ~500px wide, so the
+            search ran off the edge and "Nouvelle ligne" sat entirely
+            off-screen — no way to add a movement at all. */}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <select value={year} onChange={e => setYear(Number(e.target.value))}
             className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
             <option value={0}>Toutes les années</option>
@@ -293,14 +296,14 @@ export const CashJournal: React.FC = () => {
             <option value={0}>Tous les mois</option>
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
           </select>
-          <div className="relative">
+          <div className="relative flex-1 min-w-[160px] sm:flex-none">
             <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Description, client, objet…"
-              className="pl-8 pr-3 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-56" />
+              className="pl-8 pr-3 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full sm:w-56" />
           </div>
           {canManage && !draft && (
             <button onClick={() => { setDraft(emptyDraft()); setPage(1); }}
-              className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2">
+              className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 shrink-0 whitespace-nowrap">
               <Plus className="w-4 h-4" /> Nouvelle ligne
             </button>
           )}
@@ -355,14 +358,7 @@ export const CashJournal: React.FC = () => {
                     </tr>
                   )}
 
-                  {pageRows.length === 0 && !draft ? (
-                    <tr><td colSpan={8} className="p-10 text-center">
-                      <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-                      <p className="text-[13px] text-gray-500">
-                        {search || month || year ? 'Aucune ligne ne correspond à ce filtre.' : 'Aucun mouvement de caisse enregistré.'}
-                      </p>
-                    </td></tr>
-                  ) : pageRows.map(({ row, solde }) => (
+                  {pageRows.length === 0 && !draft ? null : pageRows.map(({ row, solde }) => (
                     editingId === row.id && editDraft ? (
                       <tr key={row.id} className="bg-blue-50/40 border-b border-gray-100">
                         <Fields value={editDraft} onChange={patch => setEditDraft(d => ({ ...(d as any), ...patch }))} {...fieldProps} />
@@ -410,6 +406,19 @@ export const CashJournal: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+
+              {/* Outside the table, not a colSpan row: eight nowrap columns
+                  make the table wider than the card on a phone, so a cell
+                  centred across all of them centred the message off the
+                  visible edge. A block here is exactly the card's width. */}
+              {pageRows.length === 0 && !draft && (
+                <div className="p-10 text-center">
+                  <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+                  <p className="text-[13px] text-gray-500">
+                    {search || month || year ? 'Aucune ligne ne correspond à ce filtre.' : 'Aucun mouvement de caisse enregistré.'}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Outside the scrolling area and `shrink-0`, so it stays on screen
@@ -420,7 +429,7 @@ export const CashJournal: React.FC = () => {
                   ? 'Aucune ligne'
                   : `Affichage de ${((page - 1) * PAGE_SIZE) + 1} à ${Math.min(page * PAGE_SIZE, withSolde.length)} sur ${withSolde.length} lignes`}
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1 shrink-0">
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page === 1}

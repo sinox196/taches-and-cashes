@@ -424,13 +424,6 @@ export const ClientPayments: React.FC = () => {
                     )
                   ))}
 
-                  {filtered.length === 0 && !draft && (
-                    <tr>
-                      <td colSpan={COLSPAN} className="px-3 py-10 text-center text-gray-500 text-[13px]">
-                        Aucun règlement enregistré.
-                      </td>
-                    </tr>
-                  )}
                 </>
               )}
             </tbody>
@@ -449,6 +442,15 @@ export const ClientPayments: React.FC = () => {
               </tfoot>
             )}
           </table>
+
+          {/* Outside the table, not a colSpan row: the columns are nowrap and
+              wider than the card on a phone, so a cell centred across all of
+              them centred the message off the visible edge. */}
+          {!isLoading && filtered.length === 0 && !draft && (
+            <div className="px-3 py-10 text-center text-gray-500 text-[13px]">
+              Aucun règlement enregistré.
+            </div>
+          )}
         </div>
 
         {/* Outside the scrolling area and `shrink-0`, so it stays on screen
@@ -464,7 +466,7 @@ export const ClientPayments: React.FC = () => {
                 ? 'Aucun règlement'
                 : `Affichage de ${((page - 1) * PAGE_SIZE) + 1} à ${Math.min(page * PAGE_SIZE, filtered.length)} sur ${filtered.length} règlement${filtered.length > 1 ? 's' : ''}`}
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-1 shrink-0">
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page === 1}

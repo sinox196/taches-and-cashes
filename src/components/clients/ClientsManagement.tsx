@@ -478,7 +478,11 @@ export const ClientsManagement: React.FC = () => {
               </button>
 
               {isFilterOpen && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4">
+                // Anchored left below sm: right-aligning a 288px panel to a
+                // button whose right edge sits ~110px in pushed half of it off
+                // the left of a phone screen, taking the field labels and the
+                // "Ajouter le filtre" button with it.
+                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-2 w-[min(18rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-[13px] font-bold text-gray-900">Ajouter un filtre</h3>
                     <button onClick={() => setIsFilterOpen(false)} className="text-gray-400 hover:text-gray-600">
@@ -592,7 +596,7 @@ export const ClientsManagement: React.FC = () => {
               </button>
 
               {isColumnsOpen && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4 max-h-[300px] overflow-y-auto">
+                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-2 w-[min(16rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4 max-h-[300px] overflow-y-auto">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-[13px] font-bold text-gray-900">Affichage des colonnes</h3>
                     <button onClick={() => setIsColumnsOpen(false)} className="text-gray-400 hover:text-gray-600">
