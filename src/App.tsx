@@ -18,6 +18,7 @@ import { HRManagement } from './components/hr/HRManagement';
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
 import { ResourcesManagement } from './components/resources/ResourcesManagement';
+import { useEscapeToClose } from './hooks/useEscapeToClose';
 import { closeLingeringTimerNotification } from './utils/osNotifications';
 import { useAuth } from './context/AuthContext';
 import { DASHBOARD_ROLES } from './constants/roles';
@@ -25,7 +26,7 @@ import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
 import { ResetPassword } from './pages/ResetPassword';
-import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square } from 'lucide-react';
+import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -104,6 +105,10 @@ export default function App() {
   const [attendanceGate, setAttendanceGate] = useState<{ shiftStart: string; shiftEnd: string; toleranceMinutes: number } | null>(null);
   const [attendanceGateBusy, setAttendanceGateBusy] = useState(false);
   const [attendanceGateError, setAttendanceGateError] = useState('');
+  // Dismissable (X / Escape) rather than a hard block — closing it only
+  // hides it until the next poll, which re-opens it as a reminder if the
+  // arrival still hasn't been checked in.
+  const [attendanceGateDismissed, setAttendanceGateDismissed] = useState(false);
 
   useEffect(() => {
     if (!token || !hasPermission('VIEW_HR')) return;
@@ -113,6 +118,7 @@ export default function App() {
         .then(data => {
           if (data?.shiftStart && !data.record?.checkinAt) {
             setAttendanceGate({ shiftStart: data.shiftStart, shiftEnd: data.shiftEnd, toleranceMinutes: data.toleranceMinutes });
+            setAttendanceGateDismissed(false);
           } else {
             setAttendanceGate(null);
           }
@@ -145,6 +151,8 @@ export default function App() {
       setAttendanceGateBusy(false);
     }
   };
+
+  useEscapeToClose(() => setAttendanceGateDismissed(true), !!attendanceGate && !attendanceGateDismissed);
 
   useEffect(() => {
     if (token) {
@@ -969,11 +977,19 @@ export default function App() {
 
       {/* Pointage gate — the first thing shown once a shift is configured and
           today's arrival isn't checked in yet. Above everything else
-          (z-[100]) and not dismissable except by checking in, so no task can
-          be started first "in case ma 3mlch checkin". */}
-      {attendanceGate && (
+          (z-[100]). Dismissable via the X or Escape — it's a reminder, not a
+          hard lock — but reappears on the next 5-minute poll as long as the
+          arrival is still unchecked. */}
+      {attendanceGate && !attendanceGateDismissed && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 text-center">
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-sm p-6 text-center">
+            <button
+              onClick={() => setAttendanceGateDismissed(true)}
+              aria-label="Fermer"
+              className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
             <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-4">
               <LogIn className="w-7 h-7 text-emerald-600" />
             </div>
