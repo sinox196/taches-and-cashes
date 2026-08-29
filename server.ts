@@ -423,6 +423,8 @@ async function startServer() {
         permissions: JSON.parse(user.permissions),
         salaireBrut: user.salaireBrut,
         regimeHoraire: user.regimeHoraire,
+        shiftStart: user.shiftStart || null,
+        shiftEnd: user.shiftEnd || null,
         isPlatformAdmin: !!user.isPlatformAdmin,
         company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt } : null,
       });
@@ -644,7 +646,7 @@ async function startServer() {
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge } = req.body;
+      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd } = req.body;
 
       const existing = await db.getUserByUsername(username);
       if (existing) {
@@ -687,9 +689,11 @@ async function startServer() {
         accidentTravail,
         primesFraisNonCotisables,
         coutTotalEmployeur,
-        coutHoraireEmployeur
+        coutHoraireEmployeur,
+        shiftStart: shiftStart || null,
+        shiftEnd: shiftEnd || null,
       });
-      
+
       // The admin sets the annual leave allowance from this same form.
       await db.updateLeaveBalance(req.user.companyId, newUser.id, {
         entitlement: num(soldeConge, DEFAULT_LEAVE_ENTITLEMENT),
@@ -706,7 +710,7 @@ async function startServer() {
   app.put('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge } = req.body;
+      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd } = req.body;
       
       const simSalaire = typeof salaireBrut === 'number' ? salaireBrut : 0;
       const simRegime = typeof regimeHoraire === 'number' ? regimeHoraire : 0;
@@ -731,9 +735,11 @@ async function startServer() {
         accidentTravail,
         primesFraisNonCotisables,
         coutTotalEmployeur,
-        coutHoraireEmployeur
+        coutHoraireEmployeur,
+        shiftStart: shiftStart || null,
+        shiftEnd: shiftEnd || null,
       };
-      
+
       if (password) {
         updates.password = await bcrypt.hash(password, 10);
       }
@@ -1210,9 +1216,19 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     let authorizations = await db.getAllAbsenceAuthorizations(req.user.companyId) || [];
     let clients = await db.getAllClients(req.user.companyId) || [];
     let leaveBalances = await db.getAllLeaveBalances(req.user.companyId) || [];
+    let attendanceRecords = await db.getAllAttendanceRecords(req.user.companyId) || [];
 
     // Filter time entries (shared with the per-client drill-down endpoint)
     timeEntries = filterKpiEntries(timeEntries, req.body);
+
+    // Filter pointage records the same way as leaves/authorizations — by
+    // calendar date, since attendance has no start/end range of its own.
+    attendanceRecords = attendanceRecords.filter((r: any) => {
+      const ts = parseIsoDate(r.date);
+      if (ts < startTs || ts > endTs) return false;
+      if (filterUserIds && filterUserIds.length > 0 && !filterUserIds.includes(r.userId)) return false;
+      return true;
+    });
 
     // Filter leave requests
     leaveRequests = leaveRequests.filter((l: any) => {
@@ -1337,6 +1353,16 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         .filter((a: any) => a.status === 'APPROVED')
         .reduce((sum: number, a: any) => sum + (a.duration || 0), 0);
 
+      // Pointage: a check-in/checkout is only "on time" within the 15-minute
+      // tolerance — beyond it counts against punctuality, feeding the
+      // performance view the same way task completion does.
+      const empAttendance = attendanceRecords.filter((r: any) => r.userId === emp.id);
+      const checkins = empAttendance.filter((r: any) => r.checkinAt);
+      const onTimeCheckins = checkins.filter((r: any) => (r.checkinLateMinutes ?? 0) <= PUNCTUALITY_TOLERANCE_MIN).length;
+      const checkouts = empAttendance.filter((r: any) => r.checkoutAt);
+      const onTimeCheckouts = checkouts.filter((r: any) => Math.abs(r.checkoutLateMinutes ?? 0) <= PUNCTUALITY_TOLERANCE_MIN).length;
+      const viaPhoneCount = empAttendance.filter((r: any) => r.checkinViaPhone || r.checkoutViaPhone).length;
+
       const clientListDetails = Array.from(empClients).map((cid: any) => {
         const c = clientsById.get(cid);
         return {
@@ -1392,6 +1418,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           pending: empAuths.filter((a: any) => a.status === 'PENDING').length,
           rejected: empAuths.filter((a: any) => a.status === 'REJECTED').length,
           totalDuration: totalAuthDuration // in hours
+        },
+        attendance: {
+          checkins: checkins.length,
+          onTimeCheckins,
+          lateCheckins: checkins.length - onTimeCheckins,
+          checkouts: checkouts.length,
+          onTimeCheckouts,
+          viaPhone: viaPhoneCount,
+          punctualityRate: checkins.length > 0 ? (onTimeCheckins / checkins.length) * 100 : null,
         }
       };
     }).filter(Boolean);
@@ -2991,6 +3026,134 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       const updated = await db.updateAdvance(req.user.companyId, id, updates);
       res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---- Pointage (présence quotidienne) -----------------------------------
+  // Manual check-in / check-out against the admin-set shift (Équipe view) —
+  // distinct from Time Tracking's task timers, which track what was worked
+  // on, not whether the collaborator showed up. One row per (user, date).
+
+  const PUNCTUALITY_TOLERANCE_MIN = 15;
+  const attendanceToday = () => new Date().toISOString().slice(0, 10);
+  const isPhoneRequest = (req: any) => /Mobi|Android|iPhone|iPad/i.test(req.headers['user-agent'] || '');
+
+  /** Minutes between an admin-set "HH:MM" shift boundary (today) and `at` — positive means `at` is later. */
+  const minutesFromShift = (hhmm: string, at: Date) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    const scheduled = new Date(at);
+    scheduled.setHours(h, m, 0, 0);
+    return Math.round((at.getTime() - scheduled.getTime()) / 60000);
+  };
+
+  app.get('/api/attendance/today', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const me = await db.getUserById(req.user.companyId, req.user.id);
+      const records = await db.getAllAttendanceRecords(req.user.companyId);
+      const record = records.find((r: any) => r.userId === req.user.id && r.date === attendanceToday()) || null;
+      res.json({
+        shiftStart: me?.shiftStart || null,
+        shiftEnd: me?.shiftEnd || null,
+        toleranceMinutes: PUNCTUALITY_TOLERANCE_MIN,
+        record,
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/attendance/checkin', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const date = attendanceToday();
+      const records = await db.getAllAttendanceRecords(req.user.companyId);
+      if (records.some((r: any) => r.userId === req.user.id && r.date === date)) {
+        return res.status(400).json({ error: 'Arrivée déjà pointée aujourd\'hui.' });
+      }
+
+      const me = await db.getUserById(req.user.companyId, req.user.id);
+      const now = new Date();
+      const lateMinutes = me?.shiftStart ? minutesFromShift(me.shiftStart, now) : null;
+
+      const record = await db.createAttendanceRecord(req.user.companyId, {
+        id: Date.now(),
+        userId: req.user.id,
+        date,
+        checkinAt: now.toISOString(),
+        checkinViaPhone: isPhoneRequest(req),
+        checkinLateMinutes: lateMinutes,
+        checkoutAt: null,
+        checkoutViaPhone: null,
+        checkoutLateMinutes: null,
+        shiftStart: me?.shiftStart || null,
+        shiftEnd: me?.shiftEnd || null,
+      });
+      res.status(201).json(record);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/attendance/checkout', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const date = attendanceToday();
+      const records = await db.getAllAttendanceRecords(req.user.companyId);
+      const existing = records.find((r: any) => r.userId === req.user.id && r.date === date);
+      if (!existing) return res.status(400).json({ error: "Vous n'avez pas encore pointé votre arrivée." });
+      if (existing.checkoutAt) return res.status(400).json({ error: 'Départ déjà pointé aujourd\'hui.' });
+
+      // Pointage tracks presence, not task time — "checked out" while a task
+      // timer keeps running would silently keep costing/billing an absent
+      // collaborator's time. The client is expected to show this as a
+      // reminder popup rather than a raw error.
+      const entries = await db.getAllTimeEntries(req.user.companyId);
+      const running = entries.find((e: any) => e.userId === req.user.id && e.statut === 'RUNNING');
+      if (running) {
+        return res.status(409).json({
+          error: `Vous avez une tâche en cours (${running.pole || running.taskType || 'sans nom'}). Arrêtez-la avant de pointer votre départ.`,
+          runningEntryId: running.id,
+        });
+      }
+
+      const me = await db.getUserById(req.user.companyId, req.user.id);
+      const now = new Date();
+      const lateMinutes = me?.shiftEnd ? minutesFromShift(me.shiftEnd, now) : null;
+
+      const record = await db.updateAttendanceRecord(req.user.companyId, existing.id, {
+        checkoutAt: now.toISOString(),
+        checkoutViaPhone: isPhoneRequest(req),
+        checkoutLateMinutes: lateMinutes,
+      });
+      res.json(record);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Own history for anyone with VIEW_HR; DASHBOARD_ROLES (ADMIN/SUPERVISEUR,
+  // same split the KPI dashboard already uses) see the whole team's log.
+  app.get('/api/attendance', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const canViewAll = DASHBOARD_ROLES.includes(req.user.role);
+      let records = await db.getAllAttendanceRecords(req.user.companyId);
+      if (!canViewAll) records = records.filter((r: any) => r.userId === req.user.id);
+
+      const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      records = records.filter((r: any) => r.date >= cutoffStr);
+
+      const users = await db.getAllUsers(req.user.companyId);
+      res.json(
+        records
+          .map((r: any) => ({
+            ...r,
+            userName: users.find((u: any) => u.id === r.userId)?.fullName || users.find((u: any) => u.id === r.userId)?.username || 'Inconnu',
+          }))
+          .sort((a: any, b: any) => b.date.localeCompare(a.date) || b.id - a.id),
+      );
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

@@ -76,6 +76,12 @@ export interface Database {
   createAdvance(companyId: string, advance: any): Promise<any>;
   updateAdvance(companyId: string, id: number, updates: any): Promise<any | null>;
 
+  /** Daily check-in/check-out (pointage), one row per (user, date). */
+  getAllAttendanceRecords(companyId: string): Promise<any[]>;
+  getAttendanceRecordById(companyId: string, id: number): Promise<any | undefined>;
+  createAttendanceRecord(companyId: string, record: any): Promise<any>;
+  updateAttendanceRecord(companyId: string, id: number, updates: any): Promise<any | null>;
+
   getAllLeaveBalances(companyId: string): Promise<any[]>;
   getLeaveBalanceByUserId(companyId: string, userId: number): Promise<any>;
   updateLeaveBalance(companyId: string, userId: number, updates: any): Promise<any>;
@@ -213,10 +219,12 @@ export const emptyDb = () => ({
   invoices: [],
   leaveRequests: [],
   absenceAuthorizations: [],
-  // Gestion des prêts et avances — employer-managed records, not a
-  // collaborator-initiated request/approval workflow like leaves/absences.
+  // Gestion des prêts et avances — collaborator-initiated request/approval
+  // workflow, same shape as leaves/absences.
   loans: [],
   advances: [],
+  // Daily check-in/check-out (pointage), one row per (user, date).
+  attendanceRecords: [],
   leaveBalances: [],
   timeEntries: [],
   // Direct messages between two users (chat).

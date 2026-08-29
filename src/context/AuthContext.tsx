@@ -8,6 +8,9 @@ export interface User {
   permissions: string[];
   salaireBrut?: number;
   regimeHoraire?: number;
+  /** Admin-set shift boundaries, "HH:MM" — drives the pointage punctuality gate. */
+  shiftStart?: string | null;
+  shiftEnd?: string | null;
   cnss?: number;
   tfp?: number;
   foprolos?: number;

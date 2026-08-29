@@ -63,6 +63,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   absence_authorizations: { desc: false },
   loans: { desc: false },
   advances: { desc: false },
+  attendance_records: { desc: false },
   time_entries: { desc: true },
   messages: { desc: false },
   task_assignments: { desc: true },
@@ -93,6 +94,7 @@ const TABLE_FOR: Record<string, string> = {
   absenceAuthorizations: 'absence_authorizations',
   loans: 'loans',
   advances: 'advances',
+  attendanceRecords: 'attendance_records',
   timeEntries: 'time_entries',
   messages: 'messages',
   taskAssignments: 'task_assignments',
@@ -328,6 +330,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const absences = tenantCollection('absence_authorizations');
   const loans = tenantCollection('loans');
   const advances = tenantCollection('advances');
+  const attendance = tenantCollection('attendance_records');
   const timeEntries = tenantCollection('time_entries');
   const messages = tenantCollection('messages');
   const taskAssignments = tenantCollection('task_assignments');
@@ -443,6 +446,11 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAdvanceById: advances.byId,
     createAdvance: advances.create,
     updateAdvance: advances.update,
+
+    getAllAttendanceRecords: attendance.all,
+    getAttendanceRecordById: attendance.byId,
+    createAttendanceRecord: attendance.create,
+    updateAttendanceRecord: attendance.update,
 
     // `available` stays derived — it is never a column.
     getAllLeaveBalances: async (companyId: string) =>

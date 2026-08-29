@@ -6,12 +6,13 @@ import { LeavesTab } from './LeavesTab';
 import { AbsencesTab } from './AbsencesTab';
 import { LoansTab } from './LoansTab';
 import { AdvancesTab } from './AdvancesTab';
+import { AttendanceTab } from './AttendanceTab';
 import { LeaveBalance } from '../../types';
 
 export const HRManagement: React.FC = () => {
   const { hasPermission, token } = useAuth();
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'leaves' | 'absences' | 'loans' | 'advances'>('leaves');
+  const [activeTab, setActiveTab] = useState<'leaves' | 'absences' | 'loans' | 'advances' | 'attendance'>('leaves');
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
 
   const loadBalance = () => {
@@ -84,6 +85,12 @@ export const HRManagement: React.FC = () => {
             {t('hr.tabs.absences')}
           </button>
           <button
+            onClick={() => setActiveTab('attendance')}
+            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'attendance' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Pointage
+          </button>
+          <button
             onClick={() => setActiveTab('loans')}
             className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'loans' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
@@ -100,6 +107,7 @@ export const HRManagement: React.FC = () => {
         <div className="p-4 flex-1 overflow-auto">
           {activeTab === 'leaves' ? <LeavesTab />
             : activeTab === 'absences' ? <AbsencesTab />
+            : activeTab === 'attendance' ? <AttendanceTab />
             : activeTab === 'loans' ? <LoansTab />
             : <AdvancesTab />}
         </div>

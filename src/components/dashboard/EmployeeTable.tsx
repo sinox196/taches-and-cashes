@@ -26,7 +26,8 @@ type SortField =
   | 'leavesTaken' 
   | 'leavesRemaining' 
   | 'authorizations'
-  | 'completionRate';
+  | 'completionRate'
+  | 'punctuality';
 
 type SortDirection = 'asc' | 'desc';
 
@@ -103,6 +104,10 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
         case 'completionRate':
           valA = a.tasks?.completionRate || 0;
           valB = b.tasks?.completionRate || 0;
+          break;
+        case 'punctuality':
+          valA = a.attendance?.punctualityRate ?? -1;
+          valB = b.attendance?.punctualityRate ?? -1;
           break;
         default:
           valA = 0;
@@ -242,12 +247,19 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
               >
                 Autorisations {renderSortIcon('authorizations')}
               </th>
+              <th
+                onClick={() => handleSort('punctuality')}
+                className="px-3 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center"
+                title="Pointage : arrivées à l'heure (± 15 min), sur le nombre d'arrivées pointées"
+              >
+                Ponctualité {renderSortIcon('punctuality')}
+              </th>
             </tr>
           </thead>
           <tbody className="text-[12px] divide-y divide-gray-50">
             {sortedEmployees.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-5 py-8 text-center text-gray-500 italic">
+                <td colSpan={13} className="px-5 py-8 text-center text-gray-500 italic">
                   Aucune donnée disponible pour cette période et ces filtres
                 </td>
               </tr>
@@ -367,6 +379,26 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                     {emp.authorizations?.totalDuration ? (
                       <span className="text-[10px] text-gray-400 ml-1">({emp.authorizations.totalDuration}h)</span>
                     ) : null}
+                  </td>
+
+                  {/* Ponctualité — pointage arrivées à l'heure sur le total pointé */}
+                  <td className="px-3 py-3 text-center">
+                    {emp.attendance?.checkins ? (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                          emp.attendance.punctualityRate >= 90
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : emp.attendance.punctualityRate >= 70
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-red-50 text-red-700'
+                        }`}
+                        title={`${emp.attendance.onTimeCheckins}/${emp.attendance.checkins} arrivées à l'heure${emp.attendance.viaPhone ? `, ${emp.attendance.viaPhone} pointage(s) via téléphone` : ''}`}
+                      >
+                        {emp.attendance.onTimeCheckins}/{emp.attendance.checkins}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
                 </tr>
               );

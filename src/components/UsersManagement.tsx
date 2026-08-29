@@ -94,6 +94,9 @@ export const UsersManagement: React.FC = () => {
   const [formAccidentTravail, setFormAccidentTravail] = useState<number | ''>('');
   const [formPrimesFraisNonCotisables, setFormPrimesFraisNonCotisables] = useState<number | ''>('');
   const [formSoldeConge, setFormSoldeConge] = useState<number | ''>(20);
+  /** "HH:MM" shift boundaries — drive the pointage check-in/check-out gate. Empty = no shift, no gate. */
+  const [formShiftStart, setFormShiftStart] = useState('');
+  const [formShiftEnd, setFormShiftEnd] = useState('');
   /** Days already consumed — read-only context so the admin sets the allowance knowingly. */
   const [formCongesUtilises, setFormCongesUtilises] = useState<number>(0);
   const [globalSettings, setGlobalSettings] = useState<any>(null);
@@ -150,6 +153,8 @@ export const UsersManagement: React.FC = () => {
     setFormPrimesFraisNonCotisables('');
     setFormSoldeConge(20);
     setFormCongesUtilises(0);
+    setFormShiftStart('');
+    setFormShiftEnd('');
     setFormError('');
     setIsModalOpen(true);
   };
@@ -169,6 +174,8 @@ export const UsersManagement: React.FC = () => {
     setFormPrimesFraisNonCotisables(typeof user.primesFraisNonCotisables === 'number' ? user.primesFraisNonCotisables : '');
     setFormSoldeConge(typeof user.soldeConge === 'number' ? user.soldeConge : 20);
     setFormCongesUtilises(typeof user.congesUtilises === 'number' ? user.congesUtilises : 0);
+    setFormShiftStart(user.shiftStart || '');
+    setFormShiftEnd(user.shiftEnd || '');
     setFormError('');
     setIsModalOpen(true);
   };
@@ -218,7 +225,9 @@ export const UsersManagement: React.FC = () => {
         foprolos: formFoprolos === '' ? null : Number(formFoprolos),
         accidentTravail: formAccidentTravail === '' ? null : Number(formAccidentTravail),
         primesFraisNonCotisables: formPrimesFraisNonCotisables === '' ? null : Number(formPrimesFraisNonCotisables),
-        soldeConge: formSoldeConge === '' ? 0 : Number(formSoldeConge)
+        soldeConge: formSoldeConge === '' ? 0 : Number(formSoldeConge),
+        shiftStart: formShiftStart || null,
+        shiftEnd: formShiftEnd || null,
       };
       if (formPassword) payload.password = formPassword;
       if (!editingUserId) payload.username = formUsername;
@@ -493,6 +502,31 @@ export const UsersManagement: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  <h3 className="text-[13px] font-bold text-gray-800 mt-8 mb-4">Shift de présence (pointage)</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Heure d'arrivée</label>
+                      <input
+                        type="time"
+                        value={formShiftStart}
+                        onChange={e => setFormShiftStart(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Heure de départ</label>
+                      <input
+                        type="time"
+                        value={formShiftEnd}
+                        onChange={e => setFormShiftEnd(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-2">
+                    Laissez vide pour ne pas assujettir ce collaborateur au pointage. Une tolérance de 15 minutes s'applique à l'arrivée comme au départ.
+                  </p>
 
                   <h3 className="text-[13px] font-bold text-gray-800 mt-8 mb-4">Configuration des charges & Heures</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -22,7 +22,7 @@ import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
-import { Loader2, ClipboardCheck, CalendarClock } from 'lucide-react';
+import { Loader2, ClipboardCheck, CalendarClock, LogIn } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -76,6 +76,55 @@ export default function App() {
     const interval = setInterval(fetchUnread, 20000);
     return () => clearInterval(interval);
   }, [token]);
+
+  // Pointage gate: the very first thing shown once a shift is configured and
+  // today's arrival hasn't been checked in yet — before any task can start,
+  // not just on the HR page. Polled (not just fetched once) so a tab left
+  // open across a shift boundary — or a day rollover — still catches it.
+  const [attendanceGate, setAttendanceGate] = useState<{ shiftStart: string; shiftEnd: string; toleranceMinutes: number } | null>(null);
+  const [attendanceGateBusy, setAttendanceGateBusy] = useState(false);
+  const [attendanceGateError, setAttendanceGateError] = useState('');
+
+  useEffect(() => {
+    if (!token || !hasPermission('VIEW_HR')) return;
+    const checkGate = () => {
+      fetch('/api/attendance/today', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(res => res.json())
+        .then(data => {
+          if (data?.shiftStart && !data.record?.checkinAt) {
+            setAttendanceGate({ shiftStart: data.shiftStart, shiftEnd: data.shiftEnd, toleranceMinutes: data.toleranceMinutes });
+          } else {
+            setAttendanceGate(null);
+          }
+        })
+        .catch(() => {});
+    };
+    checkGate();
+    const interval = setInterval(checkGate, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const handleGateCheckin = async () => {
+    setAttendanceGateBusy(true);
+    setAttendanceGateError('');
+    try {
+      const res = await fetch('/api/attendance/checkin', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAttendanceGate(null);
+      } else {
+        setAttendanceGateError(data.error || "Échec du pointage d'arrivée.");
+      }
+    } catch {
+      setAttendanceGateError('Erreur de connexion.');
+    } finally {
+      setAttendanceGateBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (token) {
@@ -678,6 +727,37 @@ export default function App() {
         <div className="fixed bottom-5 right-5 bg-navy text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl z-50 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
           <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Pointage gate — the first thing shown once a shift is configured and
+          today's arrival isn't checked in yet. Above everything else
+          (z-[100]) and not dismissable except by checking in, so no task can
+          be started first "in case ma 3mlch checkin". */}
+      {attendanceGate && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 text-center">
+            <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-4">
+              <LogIn className="w-7 h-7 text-emerald-600" />
+            </div>
+            <h3 className="text-[16px] font-bold text-gray-900 mb-1">Pointez votre arrivée</h3>
+            <p className="text-[13px] text-gray-600 mb-1">
+              Votre shift commence à {attendanceGate.shiftStart}.
+            </p>
+            <p className="text-[12px] text-gray-400 mb-5">
+              Pointez votre arrivée avant de commencer une tâche.
+            </p>
+            {attendanceGateError && (
+              <p className="text-[12px] text-red-600 font-medium mb-3">{attendanceGateError}</p>
+            )}
+            <button
+              onClick={handleGateCheckin}
+              disabled={attendanceGateBusy}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-[14px] font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              <LogIn className="w-4 h-4" /> Pointer mon arrivée
+            </button>
+          </div>
         </div>
       )}
     </div>

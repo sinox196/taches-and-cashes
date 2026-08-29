@@ -59,7 +59,7 @@ export async function initDb(): Promise<Database> {
  */
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
-  'absenceAuthorizations', 'loans', 'advances', 'leaveBalances', 'timeEntries', 'messages',
+  'absenceAuthorizations', 'loans', 'advances', 'attendanceRecords', 'leaveBalances', 'timeEntries', 'messages',
   'taskAssignments', 'notifications', 'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
@@ -78,6 +78,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.absenceAuthorizations) db.absenceAuthorizations = [];
     if (!db.loans) db.loans = [];
     if (!db.advances) db.advances = [];
+    if (!db.attendanceRecords) db.attendanceRecords = [];
     if (!db.leaveBalances) db.leaveBalances = [];
     if (!db.timeEntries) db.timeEntries = [];
     if (!db.messages) db.messages = [];
@@ -388,6 +389,22 @@ async function initJsonDb(): Promise<Database> {
       db.advances[index] = { ...db.advances[index], ...updates };
       await saveDb();
       return db.advances[index];
+    },
+
+    getAllAttendanceRecords: async (companyId: string) => scoped(db.attendanceRecords, companyId),
+    getAttendanceRecordById: async (companyId: string, id: number) => findScoped(db.attendanceRecords, companyId, id),
+    createAttendanceRecord: async (companyId: string, record: any) => {
+      const row = { ...record, companyId };
+      db.attendanceRecords.push(row);
+      await saveDb();
+      return row;
+    },
+    updateAttendanceRecord: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.attendanceRecords, companyId, id);
+      if (index === -1) return null;
+      db.attendanceRecords[index] = { ...db.attendanceRecords[index], ...updates };
+      await saveDb();
+      return db.attendanceRecords[index];
     },
 
     getAllLeaveBalances: async (companyId: string) => scoped(db.leaveBalances, companyId).map(normalizeBalance),
