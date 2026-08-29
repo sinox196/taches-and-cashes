@@ -200,6 +200,28 @@ async function initJsonDb(): Promise<Database> {
       return db.companies[index];
     },
 
+    deleteCompany: async (id: string) => {
+      const index = db.companies.findIndex((c: any) => c.id === id);
+      if (index === -1) return false;
+      // Purge générique : toute collection dont les lignes portent un
+      // companyId. Balayer les clés plutôt que de les lister une à une, pour
+      // qu'une collection ajoutée plus tard soit purgée sans qu'on ait à y
+      // repenser — l'oubli laisserait les données d'un tenant supprimé
+      // visibles par le suivant si un id venait à être réutilisé.
+      for (const key of Object.keys(db)) {
+        if (key === 'companies' || key === 'orders') continue;
+        if (Array.isArray(db[key])) {
+          db[key] = db[key].filter((row: any) => row?.companyId !== id);
+        }
+      }
+      // settingsByCompany est indexé par `id`, pas par `companyId` : le filtre
+      // générique ci-dessus ne l'attrape pas.
+      db.settingsByCompany = (db.settingsByCompany || []).filter((s: any) => s.id !== id);
+      db.companies.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
     getAllUsers: async (companyId: string) => scoped(db.users, companyId),
     createUser: async (companyId: string, user: any) => {
       const row = { ...user, companyId };

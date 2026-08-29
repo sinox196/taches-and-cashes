@@ -253,6 +253,16 @@ Sized for **hundreds of clients and dozens of users**. The rules that keep it th
 - **The client list is never fully loaded.** Both the Clients page and the Pointage autocomplete query the server (`?q=`, `?page=&limit=`); the autocomplete is debounced and asks for 8 rows.
 - **`saveDb()` coalesces writes.** Every mutation still rewrites the whole JSON file — that is the real ceiling here. If this outgrows a single file, move to SQLite rather than optimising around it further.
 
+### Console plateforme
+
+La ligne d'une entreprise porte **Modifier** et **Supprimer** — le bouton « Utilisateurs » qui s'y trouvait a bougé *dans* la fiche de modification, il n'a pas disparu.
+
+`PUT /api/platform/companies/:id` travaille sur une **liste blanche** : nom, contact, email, téléphone, secteur, sièges, fin d'essai. `status` et `plan` en sont volontairement absents — ils se changent par la confirmation de paiement, qui porte ses propres effets de bord ; les accepter ici ouvrirait un second chemin capable d'activer un compte sans paiement.
+
+`DELETE /api/platform/companies/:id` supprime **le tenant entier** : `deleteCompany()` purge chaque collection portant un `companyId`, plus `settingsByCompany` (indexé par `id`, que le filtre générique n'attrape pas) et, sous Postgres, `leave_balances` et `settings` qui ont leur propre colonne `company_id` — le tout dans une transaction, une purge à moitié faite laisserait des utilisateurs sans entreprise. `orders` n'est jamais touché : une demande d'accès précède l'entreprise et ne porte pas de `companyId`.
+
+Trois garde-fous, tous côté serveur : `LEGACY_COMPANY_ID` est indestructible et non modifiable depuis cette console ; la requête doit renvoyer le **nom exact** dans `confirmName`, parce qu'une console plateforme s'appelle aussi au curl et qu'une boîte de dialogue du navigateur ne protège rien ; et la suppression est journalisée avec le nom, l'id, le nombre d'utilisateurs et l'auteur.
+
 ### Tableau de bord Direction
 
 `POST /api/dashboard/executive` sert les agrégats du bandeau exécutif, des alertes, de la rentabilité par client et de la concentration. Il vit à côté de `/api/kpi/dashboard`, qu'il **ne remplace pas** : les deux sont appelés en parallèle par [AdminDashboard.tsx](src/components/dashboard/AdminDashboard.tsx) avec le même corps de filtres, et l'ancien continue d'alimenter KPICards / ClientBreakdown / DashboardCharts / EmployeeTable.

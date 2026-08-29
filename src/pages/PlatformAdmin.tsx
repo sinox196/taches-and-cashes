@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Users } from 'lucide-react';
+import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Pencil, Trash2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 import { PlatformUsersModal } from '../components/platform/PlatformUsersModal';
+import { CompanyEditModal } from '../components/platform/CompanyEditModal';
 
 interface Company {
   id: string;
+  secteur?: string;
   name: string;
   status: 'TRIAL' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED';
   plan: 'FREELANCE' | 'EQUIPE' | 'CROISSANCE';
@@ -45,6 +47,9 @@ export const PlatformAdmin: React.FC = () => {
   const [planPick, setPlanPick] = useState<Record<string, string>>({});
 
   const [usersCompany, setUsersCompany] = useState<Company | null>(null);
+  const [editCompany, setEditCompany] = useState<Company | null>(null);
+  /** Le bouton Supprimer de la ligne ouvre la fiche directement sur sa zone de suppression. */
+  const [openDelete, setOpenDelete] = useState(false);
 
   const [bank, setBank] = useState({ bankName: '', iban: '', rib: '', swift: '', instructions: '' });
   const [bankSaving, setBankSaving] = useState(false);
@@ -247,12 +252,24 @@ export const PlatformAdmin: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
+                        {/* Modifier ouvre la fiche complète — les utilisateurs
+                            de l'entreprise s'y gèrent aussi, l'action n'a pas
+                            disparu avec le bouton qui était ici. Supprimer
+                            passe par la même fiche : la confirmation par nom
+                            exact ne tient pas dans une ligne de tableau. */}
                         <button
-                          onClick={() => setUsersCompany(c)}
-                          title="Gérer les utilisateurs"
+                          onClick={() => setEditCompany(c)}
+                          title="Modifier l'entreprise"
                           className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-[11.5px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
                         >
-                          <Users className="w-3.5 h-3.5" /> Utilisateurs
+                          <Pencil className="w-3.5 h-3.5" /> Modifier
+                        </button>
+                        <button
+                          onClick={() => { setEditCompany(c); setOpenDelete(true); }}
+                          title="Supprimer l'entreprise et toutes ses données"
+                          className="px-2.5 py-1.5 border border-red-200 rounded-lg text-[11.5px] font-medium text-red-600 hover:bg-red-50 flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Supprimer
                         </button>
                         {c.status !== 'ACTIVE' && (
                           <>
@@ -283,6 +300,17 @@ export const PlatformAdmin: React.FC = () => {
             </tbody>
           </table>
         </div>
+      )}
+
+      {editCompany && (
+        <CompanyEditModal
+          company={editCompany as any}
+          startInDeleteMode={openDelete}
+          onClose={() => { setEditCompany(null); setOpenDelete(false); }}
+          onSaved={() => { setEditCompany(null); setOpenDelete(false); load(); }}
+          onDeleted={() => { setEditCompany(null); setOpenDelete(false); load(); }}
+          onManageUsers={() => { setUsersCompany(editCompany); setEditCompany(null); setOpenDelete(false); }}
+        />
       )}
 
       {usersCompany && (

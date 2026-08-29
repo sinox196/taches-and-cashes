@@ -5450,6 +5450,95 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  /**
+   * Modifier une entreprise depuis la console plateforme.
+   *
+   * Liste blanche de champs : le corps ne peut pas écrire `id`, `createdAt`
+   * ni quoi que ce soit d'autre. `status` et `plan` restent hors de portée —
+   * ils se changent par les actions dédiées (confirmation de paiement), qui
+   * portent leurs propres effets de bord ; les laisser modifiables ici
+   * ouvrirait un second chemin capable d'activer un compte sans paiement.
+   */
+  app.put('/api/platform/companies/:id', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const id = String(req.params.id);
+      if (id === LEGACY_COMPANY_ID) {
+        return res.status(403).json({ error: "L'entreprise historique ne se modifie pas depuis cette console." });
+      }
+      const company = await db.getCompanyById(id);
+      if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      const name = text(req.body?.name, 160);
+      if (!name) return res.status(400).json({ error: "Le nom de l'entreprise est obligatoire" });
+
+      const updates: any = {
+        name,
+        contactName: text(req.body?.contactName, 120),
+        contactEmail: text(req.body?.contactEmail, 160),
+        phone: text(req.body?.phone, 40),
+        secteur: text(req.body?.secteur, 80) || company.secteur,
+      };
+      // Le nombre de sièges reste modifiable à la main : un cabinet peut en
+      // négocier plus que son offre n'en donne. Absent du corps, on garde
+      // l'existant plutôt que de le remettre à la valeur de l'offre.
+      if (req.body?.seatLimit !== undefined && req.body.seatLimit !== '') {
+        const seats = Number(req.body.seatLimit);
+        if (!Number.isFinite(seats) || seats < 1) {
+          return res.status(400).json({ error: 'Le nombre de sièges doit être un entier positif' });
+        }
+        updates.seatLimit = Math.floor(seats);
+      }
+      // Prolonger ou raccourcir un essai — la seule date que la console a une
+      // raison de toucher.
+      if (req.body?.trialEndsAt !== undefined) {
+        const d = String(req.body.trialEndsAt || '').slice(0, 10);
+        updates.trialEndsAt = d ? new Date(`${d}T23:59:59Z`).toISOString() : null;
+      }
+
+      res.json(await db.updateCompany(id, updates));
+    } catch (error) {
+      console.error('Platform update company error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Supprimer une entreprise et TOUTES ses données.
+   *
+   * Irréversible et sans corbeille : la confirmation est donc exigée dans la
+   * requête elle-même (`confirmName` doit répondre au nom exact), et pas
+   * seulement dans une boîte de dialogue du navigateur — une console
+   * plateforme s'appelle aussi au curl.
+   */
+  app.delete('/api/platform/companies/:id', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const id = String(req.params.id);
+      if (id === LEGACY_COMPANY_ID) {
+        return res.status(403).json({ error: "L'entreprise historique ne peut pas être supprimée." });
+      }
+      const company = await db.getCompanyById(id);
+      if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      const confirmName = String(req.query.confirmName ?? req.body?.confirmName ?? '').trim();
+      if (confirmName !== String(company.name || '').trim()) {
+        return res.status(400).json({
+          error: "Confirmation invalide : renvoyez le nom exact de l'entreprise dans `confirmName`.",
+        });
+      }
+
+      const users = await db.getAllUsers(id);
+      const ok = await db.deleteCompany(id);
+      if (!ok) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      console.warn(`[platform] entreprise supprimée : ${company.name} (${id}), ${users.length} utilisateur(s), par ${req.user.username}`);
+      res.json({ success: true, deletedUsers: users.length });
+    } catch (error) {
+      console.error('Platform delete company error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.get('/api/platform/settings', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
     try {
       res.json(await db.getPlatformSettings());

@@ -23,6 +23,13 @@ export interface Database {
   getCompanyById(id: string): Promise<any | undefined>;
   createCompany(company: any): Promise<any>;
   updateCompany(id: string, updates: any): Promise<any | null>;
+  /**
+   * Supprime une entreprise ET tout ce qui lui appartient : utilisateurs,
+   * clients, temps, factures, caisse, ressources, RH, paramètres. Irréversible.
+   * `orders` n'est pas touché — une demande d'accès précède l'entreprise et ne
+   * porte pas de companyId.
+   */
+  deleteCompany(id: string): Promise<boolean>;
 
   getAllUsers(companyId: string): Promise<any[]>;
   createUser(companyId: string, user: any): Promise<any>;

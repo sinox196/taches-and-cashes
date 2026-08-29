@@ -368,6 +368,28 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getCompanyById: companies.byId,
     createCompany: companies.create,
     updateCompany: companies.update,
+    deleteCompany: async (id: string) => {
+      // Une seule transaction : une purge à moitié faite laisserait un tenant
+      // fantôme — des utilisateurs sans entreprise, ou l'inverse.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const table of TENANT_TABLES) {
+          await client.query(`DELETE FROM ${table} WHERE data->>'companyId' = $1`, [id]);
+        }
+        // Ces deux-là ont leur propre colonne company_id, pas un champ JSON.
+        await client.query('DELETE FROM leave_balances WHERE company_id = $1', [id]);
+        await client.query('DELETE FROM settings WHERE company_id = $1', [id]);
+        const res = await client.query('DELETE FROM companies WHERE id = $1', [id]);
+        await client.query('COMMIT');
+        return (res.rowCount ?? 0) > 0;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
 
     getAllUsers: users.all,
     createUser: users.create,
