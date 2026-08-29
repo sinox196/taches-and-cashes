@@ -141,7 +141,11 @@ export function PaginationBar<T>({ page, unit = 'lignes' }: { page: PeriodPage<T
   const from = filtered.length === 0 ? 0 : (current - 1) * HR_PAGE_SIZE + 1;
   const to = Math.min(current * HR_PAGE_SIZE, filtered.length);
   return (
-    <div className="shrink-0 mt-3 -mx-4 -mb-4 px-4 py-2.5 border-t border-gray-200 bg-gray-50 flex items-center justify-between text-[12.5px]">
+    // `flex-wrap` + `gap-2` : à 375 px le décompte et les boutons se
+    // chevauchaient — le texte passait à la ligne sous « Précédent »/« Suivant »
+    // au lieu de les pousser. Il occupe désormais toute la largeur et les
+    // boutons passent dessous.
+    <div className="shrink-0 mt-3 -mx-4 -mb-4 px-4 py-2.5 border-t border-gray-200 bg-gray-50 flex flex-wrap items-center justify-between gap-2 text-[12.5px]">
       <div className="text-gray-500">
         {filtered.length === 0
           ? `Aucune ${unit.replace(/s$/, '')}`

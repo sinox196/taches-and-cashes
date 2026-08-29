@@ -45,7 +45,16 @@ export const HRManagement: React.FC = () => {
     // taille de son contenu, la page grandit, et la barre de pagination du
     // tableau se retrouve sous la ligne de flottaison. Même montage que la
     // page Clients.
-    <main className="p-4 sm:p-6 lg:p-8 flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
+    //
+    // Mais **à partir de `sm` seulement**. Sur un téléphone, l'en-tête, les
+    // deux cartes de solde et la barre d'onglets consomment la quasi-totalité
+    // des ~720 px disponibles : la même chaîne `flex-1 min-h-0` ne laissait
+    // que 2 à 102 px de liste selon l'onglet (2 px sur Pointage, mesuré à
+    // 375×780). En dessous de `sm` on rend donc à hauteur naturelle et c'est
+    // la page qui défile — ce qu'un téléphone fait de toute façon le mieux ;
+    // la barre de pagination suit la liste dans le flux au lieu d'être
+    // épinglée sous un scrollport haut de deux pixels.
+    <main className="p-4 sm:p-6 lg:p-8 sm:flex-1 sm:min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t('hr.title')}</h1>
@@ -53,28 +62,28 @@ export const HRManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 shrink-0">
+        <div className="bg-white p-3 sm:p-5 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between gap-2">
           <div>
-            <p className="text-sm font-medium text-gray-500 mb-1">{t('hr.balance.available')} ({t('hr.balance.days')})</p>
-            <h3 className="text-2xl font-bold text-gray-900">{balance ? balance.available : '-'}</h3>
+            <p className="text-[12px] sm:text-sm font-medium text-gray-500 mb-0.5 sm:mb-1 leading-snug">{t('hr.balance.available')} ({t('hr.balance.days')})</p>
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-900">{balance ? balance.available : '-'}</h3>
           </div>
-          <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full bg-blue-50 hidden sm:flex items-center justify-center shrink-0">
             <CalendarRange className="w-5 h-5 text-blue-600" />
           </div>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+        <div className="bg-white p-3 sm:p-5 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between gap-2">
           <div>
-            <p className="text-sm font-medium text-gray-500 mb-1">{t('hr.balance.used')} ({t('hr.balance.days')})</p>
-            <h3 className="text-2xl font-bold text-gray-900">{balance ? balance.used : '-'}</h3>
+            <p className="text-[12px] sm:text-sm font-medium text-gray-500 mb-0.5 sm:mb-1 leading-snug">{t('hr.balance.used')} ({t('hr.balance.days')})</p>
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-900">{balance ? balance.used : '-'}</h3>
           </div>
-          <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full bg-orange-50 hidden sm:flex items-center justify-center shrink-0">
             <Clock className="w-5 h-5 text-orange-600" />
           </div>
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1 min-h-0">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col sm:flex-1 sm:min-h-0">
         {/* Scrolls sideways below sm: four tabs sharing 390px squeezed
             "Autorisations d'absence" onto two lines and clipped the rest. */}
         <div className="flex border-b border-gray-200 overflow-x-auto shrink-0">
@@ -114,7 +123,7 @@ export const HRManagement: React.FC = () => {
             garde sa barre de pagination en dehors, comme le Brouillard de
             caisse. Un `overflow-auto` ici ferait défiler la barre avec le
             contenu, et il faudrait descendre tout en bas pour l'atteindre. */}
-        <div className="p-4 flex-1 min-h-0 flex flex-col">
+        <div className="p-4 flex flex-col sm:flex-1 sm:min-h-0">
           {activeTab === 'leaves' ? <LeavesTab />
             : activeTab === 'absences' ? <AbsencesTab />
             : activeTab === 'attendance' ? <AttendanceTab />

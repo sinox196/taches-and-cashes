@@ -58,18 +58,38 @@ const presenceMinutes = (r: AttendanceRecord): number | null => {
 
 const time = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
 
-/** Within tolerance -> "à l'heure"; beyond it -> flagged, direction-aware for checkout. */
-const punctualityBadge = (minutes: number | null | undefined, tolerance: number, kind: 'checkin' | 'checkout') => {
+/**
+ * Within tolerance -> "à l'heure"; beyond it -> flagged, direction-aware for
+ * checkout.
+ *
+ * `compact` sert aux cartes du téléphone : « Retard de 45 min » repassait à la
+ * ligne dans les ~180 px qui restent à droite de l'heure, et la carte se
+ * lisait de travers. La forme courte garde le signe (+ en retard, − en
+ * avance), la couleur et l'info-bulle, qui portent la même information sans
+ * la faire déborder.
+ */
+const punctualityBadge = (
+  minutes: number | null | undefined,
+  tolerance: number,
+  kind: 'checkin' | 'checkout',
+  compact = false,
+) => {
   if (minutes == null) return <span className="text-gray-400">—</span>;
   if (Math.abs(minutes) <= tolerance) {
-    return <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> À l'heure</span>;
+    return <span className="inline-flex items-center gap-1 text-emerald-700 whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> À l'heure</span>;
   }
-  if (kind === 'checkin') {
-    return <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle className="w-3.5 h-3.5" /> Retard de {minutes} min</span>;
-  }
-  return minutes < 0
-    ? <span className="inline-flex items-center gap-1 text-amber-700"><AlertTriangle className="w-3.5 h-3.5" /> Départ anticipé ({Math.abs(minutes)} min)</span>
-    : <span className="inline-flex items-center gap-1 text-amber-700"><AlertTriangle className="w-3.5 h-3.5" /> Départ tardif ({minutes} min)</span>;
+  const long = kind === 'checkin'
+    ? `Retard de ${minutes} min`
+    : minutes < 0
+      ? `Départ anticipé (${Math.abs(minutes)} min)`
+      : `Départ tardif (${minutes} min)`;
+  const tone = kind === 'checkin' ? 'text-red-700' : 'text-amber-700';
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap ${tone}`} title={compact ? long : undefined}>
+      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+      {compact ? `${minutes > 0 ? '+' : '−'}${Math.abs(minutes)} min` : long}
+    </span>
+  );
 };
 
 /**
@@ -175,7 +195,7 @@ export const AttendanceTab: React.FC = () => {
   const record = today?.record;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col sm:h-full sm:min-h-0">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Pointage</h2>
         <div className="flex flex-wrap items-center gap-2 self-start">
@@ -193,12 +213,12 @@ export const AttendanceTab: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5 shrink-0">
+      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-4 sm:mb-5 shrink-0">
         {today && !today.shiftStart && !today.shiftEnd ? (
           <p className="text-sm text-gray-500">Aucun shift n'est configuré pour vous. Contactez un administrateur (page Équipe).</p>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2 text-[13px] text-gray-600 mb-4">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] sm:text-[13px] text-gray-600 mb-3 sm:mb-4">
               <Clock className="w-4 h-4 text-gray-400" />
               Shift : {today?.shiftStart || '—'} - {today?.shiftEnd || '—'}
               {today?.breakMinutes ? (
@@ -209,25 +229,25 @@ export const AttendanceTab: React.FC = () => {
               ) : null}
               <span className="text-gray-400">(tolérance {tolerance} min)</span>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
               <button
                 onClick={handleCheckin}
                 disabled={isWorking || !!record?.checkinAt}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <LogIn className="w-4 h-4" /> Pointer mon arrivée
               </button>
               <button
                 onClick={handleCheckout}
                 disabled={isWorking || !record?.checkinAt || !!record?.checkoutAt}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <LogOut className="w-4 h-4" /> Pointer mon départ
               </button>
             </div>
             {actionError && <p className="mt-3 text-[12px] text-red-600 font-medium">{actionError}</p>}
             {record && (
-              <div className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-[12px] text-gray-600">
+              <div className="mt-4 flex flex-col sm:flex-row sm:flex-wrap gap-x-8 gap-y-1.5 text-[12px] text-gray-600">
                 <span>Heure entrée : <span className="font-semibold text-gray-900">{time(record.checkinAt)}</span> {record.checkinViaPhone && <Smartphone className="w-3.5 h-3.5 inline text-gray-400 ml-1" title="Pointé depuis un téléphone" />} — {punctualityBadge(record.checkinLateMinutes, tolerance, 'checkin')}</span>
                 {record.checkoutAt && (
                   <span>Heure sortie : <span className="font-semibold text-gray-900">{time(record.checkoutAt)}</span> {record.checkoutViaPhone && <Smartphone className="w-3.5 h-3.5 inline text-gray-400 ml-1" title="Pointé depuis un téléphone" />} — {punctualityBadge(record.checkoutLateMinutes, tolerance, 'checkout')}</span>
@@ -238,7 +258,7 @@ export const AttendanceTab: React.FC = () => {
         )}
       </div>
 
-      <div className="overflow-auto flex-1 min-h-0 border border-gray-200 rounded-lg">
+      <div className="hidden sm:block sm:overflow-auto sm:flex-1 sm:min-h-0 border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0">
             <tr>
@@ -296,6 +316,63 @@ export const AttendanceTab: React.FC = () => {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Même page, en cartes, sous `sm`. Les sept colonnes demandent 825 px
+          dans un conteneur qui en fait 307 sur un téléphone : un tableau qui
+          défile latéralement obligerait à balayer de côté pour lire l'heure de
+          sortie d'une ligne dont on vient de lire l'entrée. Une carte par
+          journée tient dans la largeur et se lit d'un coup d'œil. */}
+      <div className="sm:hidden flex flex-col gap-2.5">
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-gray-500">Chargement…</p>
+        ) : pager.pageRows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-500">Aucun pointage trouvé.</p>
+        ) : (
+          pager.pageRows.map(r => {
+            const presence = presenceMinutes(r);
+            const pause = r.breakMinutes ?? null;
+            return (
+              <div key={r.id} className="border border-gray-200 rounded-lg p-3">
+                <div className="flex items-baseline justify-between gap-2 mb-2">
+                  <span className="text-[13px] font-semibold text-gray-900">{r.date}</span>
+                  {isTeamViewer && <span className="text-[12px] text-gray-500 truncate">{r.userName}</span>}
+                </div>
+
+                <div className="flex flex-col gap-1.5 text-[12.5px]">
+                  <div className="flex items-center gap-2">
+                    <span className="w-[86px] shrink-0 text-gray-500">Heure entrée</span>
+                    <span className="font-medium text-gray-900 tabular-nums">{time(r.checkinAt)}</span>
+                    {r.checkinViaPhone && <Smartphone className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+                    <span className="ml-auto">{punctualityBadge(r.checkinLateMinutes, tolerance, 'checkin', true)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-[86px] shrink-0 text-gray-500">Heure sortie</span>
+                    <span className="font-medium text-gray-900 tabular-nums">{time(r.checkoutAt)}</span>
+                    {r.checkoutViaPhone && <Smartphone className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+                    {r.checkoutAt && (
+                      <span className="ml-auto">{punctualityBadge(r.checkoutLateMinutes, tolerance, 'checkout', true)}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-2.5 pt-2.5 border-t border-gray-100 flex items-center gap-4 text-[12px]">
+                  <span className="inline-flex items-center gap-1.5 text-gray-600">
+                    <Coffee className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    Pause {pause == null ? <span className="text-gray-300">—</span> : formatBreak(pause)}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-gray-600">
+                    <Clock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    Présence{' '}
+                    {presence == null
+                      ? <span className="text-gray-300">—</span>
+                      : <span className="font-semibold text-gray-900">{formatBreak(presence)}</span>}
+                  </span>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       <PaginationBar page={pager} unit="pointages" />
