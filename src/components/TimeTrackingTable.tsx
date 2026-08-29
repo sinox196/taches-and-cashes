@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Pencil,
   Trash2,
-  MoreVertical,
   Search,
   Filter,
   ArrowUpDown,
@@ -18,12 +17,15 @@ import { useAuth } from '../context/AuthContext';
 import { formatCostDT } from '../utils/formatters';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
+import { MultiSelectFilterDropdown } from './MultiSelectFilterDropdown';
+import { EntryDeviceBadge } from './EntryDeviceBadge';
+import { ExportButton } from './ExportButton';
+import { csvNumber } from '../utils/exportCsv';
 
 interface TimeTrackingTableProps {
   entries: TimeEntry[];
   onEdit: (entry: TimeEntry) => void;
   onDelete: (id: string) => void;
-  onMore: (entry: TimeEntry) => void;
   onSelectAsActive?: (entry: TimeEntry) => void;
   /** Admin override: change any collaborator's task status directly. */
   onChangeStatus?: (entry: TimeEntry, statut: TaskStatus) => void;
@@ -36,7 +38,6 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   entries,
   onEdit,
   onDelete,
-  onMore,
   onSelectAsActive,
   onChangeStatus,
   totalEntries,
@@ -53,9 +54,10 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
       [monthKey]: !prev[monthKey]
     }));
   };
-  const [clientFilter, setClientFilter] = useState('ALL');
-  const [poleFilter, setPoleFilter] = useState('ALL');
-  const [collabFilter, setCollabFilter] = useState('ALL');
+  // Multi-select: an empty array means "no filter applied", not "match nothing".
+  const [clientFilter, setClientFilter] = useState<string[]>([]);
+  const [poleFilter, setPoleFilter] = useState<string[]>([]);
+  const [collabFilter, setCollabFilter] = useState<string[]>([]);
 
   const uniqueClients = Array.from(new Set(entries.map(e => e.client))).sort((a: string, b: string) => a.localeCompare(b));
   const uniquePoles = Array.from(new Set(entries.map(e => e.pole))).sort((a: string, b: string) => a.localeCompare(b));
@@ -66,12 +68,17 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
     const matchesStatus =
       statusFilter === 'ALL' ? true : item.statut === statusFilter;
       
-    const matchesClient = clientFilter === 'ALL' || item.client === clientFilter;
-    const matchesPole = poleFilter === 'ALL' || item.pole === poleFilter;
-    const matchesCollab = collabFilter === 'ALL' || (item.userName || 'Unknown') === collabFilter;
+    const matchesClient = clientFilter.length === 0 || clientFilter.includes(item.client);
+    const matchesPole = poleFilter.length === 0 || poleFilter.includes(item.pole);
+    const matchesCollab = collabFilter.length === 0 || collabFilter.includes(item.userName || 'Unknown');
 
     return matchesStatus && matchesClient && matchesPole && matchesCollab;
   });
+
+  /** Libellés de statut, partagés par l'affichage et l'export. */
+  const STATUT_LABEL: Record<string, string> = {
+    COMPLETED: 'Terminée', RUNNING: 'En cours', PAUSED: 'En pause',
+  };
 
   // Group by month
   const MONTHS = [
@@ -114,62 +121,82 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm mt-6 flex flex-col overflow-hidden font-sans">
       {/* Card Header */}
-      <div className="px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 shrink-0">
-          <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide whitespace-nowrap">
-            MON TIME TRACKING
-          </h2>
-          <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
-            {filteredEntries.length} entrées
-          </span>
+      <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex flex-col gap-0.5 shrink-0">
+          <div className="flex items-center gap-3">
+            <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide whitespace-nowrap">
+              Suivi des tâches de l'équipe
+            </h2>
+            <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
+              {filteredEntries.length} entrées
+            </span>
+          </div>
+          <p className="text-[11px] text-gray-400">
+            Consultez en temps réel le temps passé et le coût valorisé de vos équipes
+          </p>
         </div>
 
         {/* Header Controls: Search & Filter */}
-        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
-          {/* Collaborator Filter */}
+        <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2 min-w-0 w-full sm:w-auto">
+          {/* Collaborator Filter — searchable, multiple at once */}
           {isAdmin && (
-            <div className="relative">
-              <select
-                value={collabFilter}
-                onChange={(e) => setCollabFilter(e.target.value)}
-                className="appearance-none bg-white border border-gray-200 hover:border-gray-300 rounded-md pl-2.5 pr-7 py-1 text-[11px] font-semibold text-gray-700 focus:outline-none focus:border-gray-400 cursor-pointer max-w-[130px] truncate"
-              >
-                <option value="ALL">Tous (Collabs)</option>
-                {uniqueCollaborateurs.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <Filter className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
+            <MultiSelectFilterDropdown
+              allLabel="Tous (Collabs)"
+              searchPlaceholder="Rechercher un collaborateur…"
+              options={uniqueCollaborateurs}
+              selected={collabFilter}
+              onChange={setCollabFilter}
+              widthClass="max-w-[130px]"
+            />
           )}
 
-          {/* Client Filter */}
-          <div className="relative">
-            <select
-              value={clientFilter}
-              onChange={(e) => setClientFilter(e.target.value)}
-              className="appearance-none bg-white border border-gray-200 hover:border-gray-300 rounded-md pl-2.5 pr-7 py-1 text-[11px] font-semibold text-gray-700 focus:outline-none focus:border-gray-400 cursor-pointer max-w-[130px] truncate"
-            >
-              <option value="ALL">Tous (Clients)</option>
-              {uniqueClients.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <Filter className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
+          {/* Client Filter — searchable, multiple at once */}
+          <MultiSelectFilterDropdown
+            allLabel="Tous (Clients)"
+            searchPlaceholder="Rechercher un client…"
+            options={uniqueClients}
+            selected={clientFilter}
+            onChange={setClientFilter}
+            widthClass="max-w-[130px]"
+          />
 
-          {/* Mission Filter */}
-          <div className="relative">
-            <select
-              value={poleFilter}
-              onChange={(e) => setPoleFilter(e.target.value)}
-              className="appearance-none bg-white border border-gray-200 hover:border-gray-300 rounded-md pl-2.5 pr-7 py-1 text-[11px] font-semibold text-gray-700 focus:outline-none focus:border-gray-400 cursor-pointer max-w-[110px] truncate"
-            >
-              <option value="ALL">Toutes (Missions)</option>
-              {uniquePoles.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <Filter className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
+          {/* Mission Filter — searchable, multiple at once */}
+          <MultiSelectFilterDropdown
+            allLabel="Toutes (Missions)"
+            searchPlaceholder="Rechercher une mission…"
+            options={uniquePoles}
+            selected={poleFilter}
+            onChange={setPoleFilter}
+            widthClass="max-w-[130px]"
+          />
+
+          <ExportButton
+            fileName="pointage"
+            rows={filteredEntries}
+            columns={[
+              { header: 'Collaborateur', value: (e: TimeEntry) => e.userName || '' },
+              { header: 'Date', value: (e: TimeEntry) => e.date },
+              { header: 'Client', value: (e: TimeEntry) => e.client },
+              { header: 'Facturable', value: (e: TimeEntry) => (e.facturable === false ? 'Non' : 'Oui') },
+              { header: 'Description', value: (e: TimeEntry) => e.description },
+              { header: 'Mission', value: (e: TimeEntry) => e.pole },
+              { header: 'Type de tâche', value: (e: TimeEntry) => e.taskType || '' },
+              { header: 'Début', value: (e: TimeEntry) => e.heureDebut },
+              { header: 'Fin', value: (e: TimeEntry) => e.heureFin || '' },
+              { header: 'Durée (h)', value: (e: TimeEntry) => csvNumber((e.dureeSeconds || 0) / 3600, 2) },
+              { header: 'Statut', value: (e: TimeEntry) => STATUT_LABEL[e.statut] ?? e.statut },
+              // Le coût ne sort du fichier que s'il sort déjà de l'écran :
+              // le serveur ne l'envoie pas à un non-admin.
+              ...(isAdmin ? [{
+                header: 'Coût employeur (TND)',
+                value: (e: TimeEntry) => (e.hourlyRate == null ? '' : csvNumber(((e.dureeSeconds || 0) / 3600) * e.hourlyRate)),
+              }] : []),
+            ]}
+          />
 
           {/* Status: a segmented control rather than a dropdown — four states,
               constantly switched, worth showing without opening a menu. */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {([
               ['ALL', 'Tous'],
               ['RUNNING', 'En cours'],
@@ -259,7 +286,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                 <tr
                   key={row.id}
                   className={`hover:bg-gray-50/80 transition-colors ${
-                    row.statut === 'RUNNING' ? 'bg-[#FFFAEB]/30' : ''
+                    row.statut === 'RUNNING' ? 'bg-[#EFF8FF]/40' : ''
                   }`}
                 >
                   {/* Collaborator */}
@@ -267,7 +294,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     <span className="inline-flex items-center gap-1.5 max-w-full">
                       {(() => { const p = presenceOf(row.userId);
                         return <PresenceBadge state={p.state} idleMs={p.idleMs} variant="dot" />; })()}
-                      {row.userName || 'Unknown'}
+                      <span className="truncate">{row.userName || 'Unknown'}</span>
+                      <EntryDeviceBadge entry={row} />
                     </span>
                   </td>
                   {/* Date */}
@@ -275,9 +303,21 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     {row.date}
                   </td>
 
-                  {/* Client */}
+                  {/* Client — un client non facturable est signalé ici plutôt
+                      que dans la colonne Coût : le coût employeur reste réel,
+                      c'est la refacturation qui n'a pas lieu. */}
                   <td className="px-2 py-2.5 font-medium text-gray-900 truncate" title={row.client}>
-                    {row.client}
+                    <span className="inline-flex items-center gap-1.5 max-w-full">
+                      <span className="truncate">{row.client}</span>
+                      {row.facturable === false && (
+                        <span
+                          title="Client non facturable : ce temps ne sera couvert par aucun honoraire."
+                          className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-[9px] font-bold uppercase tracking-wide shrink-0"
+                        >
+                          non fact.
+                        </span>
+                      )}
+                    </span>
                   </td>
 
                   {/* Description */}
@@ -328,11 +368,14 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     </td>
                   )}
 
-                  {/* Statut */}
+                  {/* Statut — Terminée green, En cours blue, En pause orange.
+                      Label is French throughout; only the underlying
+                      `statut` value (RUNNING/PAUSED/COMPLETED) stays in
+                      English, since that's the API/DB enum, not UI copy. */}
                   <td className="px-2 py-2.5">
                     {row.statut === 'COMPLETED' ? (
                       <span className="px-2 py-0.5 rounded-full bg-[#ECFDF3] text-[#12B76A] font-bold text-[9px] uppercase tracking-wide inline-block">
-                        COMPLETED
+                        Terminée
                       </span>
                     ) : (
                       <button
@@ -343,11 +386,11 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                           !hasPermission('EDIT') || user?.id !== row.userId || hasRunningTask ? 'cursor-default opacity-80' : 'cursor-pointer'
                         } ${
                           row.statut === 'RUNNING'
-                            ? 'bg-[#FFFAEB] text-[#B54708] ' + (hasPermission('EDIT') && user?.id === row.userId && !hasRunningTask ? 'hover:bg-[#feeec8]' : '')
-                            : 'bg-gray-100 text-gray-600 ' + (hasPermission('EDIT') && user?.id === row.userId && !hasRunningTask ? 'hover:bg-gray-200' : '')
+                            ? 'bg-[#EFF8FF] text-[#175CD3] ' + (hasPermission('EDIT') && user?.id === row.userId && !hasRunningTask ? 'hover:bg-[#dceafe]' : '')
+                            : 'bg-[#FFFAEB] text-[#B54708] ' + (hasPermission('EDIT') && user?.id === row.userId && !hasRunningTask ? 'hover:bg-[#feeec8]' : '')
                         }`}
                       >
-                        {row.statut}
+                        {row.statut === 'RUNNING' ? 'En cours' : 'En pause'}
                       </button>
                     )}
                   </td>
@@ -409,14 +452,6 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                           </button>
                         )}
 
-                        {/* More button */}
-                        <button
-                          onClick={() => onMore(row)}
-                          className="w-6 h-6 border border-gray-200 rounded flex items-center justify-center bg-white text-gray-400 hover:text-gray-700 hover:border-gray-300 transition-colors"
-                          title="Options"
-                        >
-                          <MoreVertical className="w-3 h-3" />
-                        </button>
                       </div>
                     </td>
                   )}

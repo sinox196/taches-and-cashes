@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ActiveTimerCard } from './components/ActiveTimerCard';
+import { FloatingTimer } from './components/FloatingTimer';
 import { NewTaskCard } from './components/NewTaskCard';
 import { TimeTrackingTable } from './components/TimeTrackingTable';
 import { PausedTasksList } from './components/PausedTasksList';
@@ -17,12 +18,14 @@ import { HRManagement } from './components/hr/HRManagement';
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
 import { ResourcesManagement } from './components/resources/ResourcesManagement';
+import { closeLingeringTimerNotification } from './utils/osNotifications';
 import { useAuth } from './context/AuthContext';
 import { DASHBOARD_ROLES } from './constants/roles';
 import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
-import { Loader2, ClipboardCheck, CalendarClock, LogIn } from 'lucide-react';
+import { ResetPassword } from './pages/ResetPassword';
+import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -43,10 +46,27 @@ export default function App() {
   // activeSidebarItem, which only ever applies to the authenticated shell.
   const [publicScreen, setPublicScreen] = useState<'landing' | 'login'>('landing');
 
+  // The app has no router, but the "mot de passe oublié" email links back to
+  // this same URL with ?reset=<token> — read once at mount, ahead of the
+  // normal logged-in/logged-out split, since this screen applies regardless
+  // of whether a session already exists in this browser.
+  const [resetToken, setResetToken] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('reset')
+  );
+
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
   const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Plateforme'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
+    // Clicking a pushed notification with no tab open makes the service
+    // worker open the app at `/?nav=<section>` — there's no router to read a
+    // URL otherwise, so it's consumed once here and stripped, or a later
+    // refresh would keep dragging the user back to that section.
+    const fromPush = new URLSearchParams(window.location.search).get('nav');
+    if (fromPush && NAV_IDS.includes(fromPush)) {
+      window.history.replaceState({}, '', window.location.pathname);
+      return fromPush;
+    }
     const saved = localStorage.getItem('active_nav');
     return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';
   });
@@ -239,6 +259,60 @@ export default function App() {
     };
   }, [token, activeSidebarItem, fetchTimeEntries]);
 
+  /**
+   * Off Pointage there is no SSE stream (it pushes a whole page of every
+   * user's entries — far too much to hold open on every screen), so the
+   * floating chronometer keeps itself fresh from the one-row
+   * /api/time-entries/active instead. The local 1s tick below does the
+   * counting; this poll only has to catch changes made elsewhere (another
+   * device, or an admin pausing your task), hence 30s rather than a
+   * second-by-second refresh.
+   */
+  useEffect(() => {
+    if (!token || activeSidebarItem === 'Time Tracking') return;
+
+    let cancelled = false;
+    const syncActive = async () => {
+      try {
+        const res = await fetch('/api/time-entries/active', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) return;
+        const { entry } = await res.json();
+        if (cancelled) return;
+        setTimeEntries(prev => {
+          // Nothing of mine is running or paused any more: drop my stale rows
+          // so the widget can't keep counting a task that has been stopped.
+          if (!entry) return prev.filter(e => !(e.userId === user?.id && e.statut !== 'COMPLETED'));
+          const local = prev.find(e => e.id === entry.id);
+          // Same <5s drift rule the SSE handler uses: keep the local count
+          // when it broadly agrees, so the display doesn't visibly stutter.
+          const merged =
+            local && local.statut === 'RUNNING' && entry.statut === 'RUNNING'
+              && Math.abs(local.dureeSeconds - entry.dureeSeconds) < 5
+              ? { ...entry, dureeSeconds: local.dureeSeconds, duree: local.duree, coutCalcule: local.coutCalcule }
+              : decorate(entry);
+          return local
+            ? prev.map(e => (e.id === merged.id ? merged : e))
+            : [merged, ...prev];
+        });
+      } catch {
+        // A failed poll is not worth surfacing: the next one is 30s away and
+        // the tick keeps the display alive in the meantime.
+      }
+    };
+
+    syncActive();
+    const interval = setInterval(syncActive, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [token, activeSidebarItem, user?.id]);
+
+  /**
+   * The task the user paused during this session — what keeps the floating
+   * chronometer on screen (in paused state) after a pause, so resuming stays
+   * one click away. Session-scoped on purpose: a reload starts clean rather
+   * than resurrecting an old paused task into the corner of every page.
+   */
+  const [justPausedId, setJustPausedId] = useState<string | null>(null);
+
   /** Mobile nav drawer. Has no effect from `lg` up, where the rail is static. */
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
@@ -270,27 +344,47 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Overtime alert: every full 2h a task runs continuously, ask the
-  // collaborator whether they're still on it. Responding keeps it running;
-  // ignoring it for the grace period below pauses it automatically. Re-fires
-  // at every subsequent 2h boundary (4h, 6h, …), not just once, since a task
-  // left running for a whole afternoon is exactly the case this exists for.
+  // Overtime alert: ask the collaborator whether they're still on a task
+  // every 2h *of that task's own duration* — at 2h, then 4h, 6h, … Responding
+  // keeps it running; ignoring it for the grace period below pauses it.
+  //
+  // The milestone already asked about is recorded **on the entry itself**
+  // (`overtimeAckCycle`), not in the browser. That is what makes "every 2h"
+  // mean what it says:
+  //  - it survives a reload, so opening the app does not re-ask (it was held
+  //    in a `useRef` once, which died on every remount and re-fired the popup
+  //    on every single page load);
+  //  - it follows the task rather than the device, so answering on a phone
+  //    doesn't leave a laptop asking again about the same 2h;
+  //  - and it is tied to the duration, not to wall-clock time, so a prompt
+  //    lands when the work actually crosses 4h — not merely because two
+  //    hours have gone by since the last one.
   const OVERTIME_THRESHOLD_SECONDS = 2 * 3600;
   const OVERTIME_GRACE_MS = 2 * 60 * 1000;
   const [overtimeAlert, setOvertimeAlert] = useState<{ entryId: string; deadline: number } | null>(null);
   const [overtimeSecondsLeft, setOvertimeSecondsLeft] = useState(0);
-  const acknowledgedOvertimeRef = useRef<Record<string, number>>({});
+
+  /** Which 2h milestone a duration has reached: 0 under 2h, 1 at 2h, 2 at 4h… */
+  const overtimeCycleOf = (seconds: number) =>
+    Math.floor((seconds || 0) / OVERTIME_THRESHOLD_SECONDS);
 
   useEffect(() => {
     const myRunning = timeEntries.find(e => e.userId === user?.id && e.statut === 'RUNNING');
     if (!myRunning) { setOvertimeAlert(null); return; }
-    const cycles = Math.floor(myRunning.dureeSeconds / OVERTIME_THRESHOLD_SECONDS);
-    if (cycles < 1) return;
-    const acknowledged = acknowledgedOvertimeRef.current[myRunning.id] || 0;
-    if (cycles > acknowledged && !overtimeAlert) {
-      setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
-    }
-  }, [timeEntries, user?.id]);
+    if (overtimeAlert) return;
+
+    const cycle = overtimeCycleOf(myRunning.dureeSeconds);
+    if (cycle < 1) return;
+    if (cycle <= (myRunning.overtimeAckCycle || 0)) return;
+
+    // Recorded when the popup is *shown*, not when it is answered, so a
+    // reload while it is open doesn't bring it straight back. The write goes
+    // through updateTimeEntryApi, which applies it to local state first —
+    // otherwise this effect would re-fire on the next tick, before the
+    // round-trip and broadcast land.
+    updateTimeEntryApi(myRunning.id, { overtimeAckCycle: cycle });
+    setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
+  }, [timeEntries, user?.id, overtimeAlert]);
 
   useEffect(() => {
     if (!overtimeAlert) return;
@@ -298,8 +392,6 @@ export default function App() {
     tick();
     const countdown = setInterval(tick, 1000);
     const timeout = setTimeout(() => {
-      const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-      acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
       updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
       setOvertimeAlert(null);
       showToast('Tâche mise en pause automatiquement — aucune réponse à l’alerte de 2h.');
@@ -310,15 +402,11 @@ export default function App() {
 
   const acknowledgeOvertimeAlert = () => {
     if (!overtimeAlert) return;
-    const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-    acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
     setOvertimeAlert(null);
   };
 
   const pauseFromOvertimeAlert = () => {
     if (!overtimeAlert) return;
-    const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-    acknowledgedOvertimeRef.current[overtimeAlert.entryId] = Math.floor((entry?.dureeSeconds || 0) / OVERTIME_THRESHOLD_SECONDS);
     updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
     setOvertimeAlert(null);
   };
@@ -396,10 +484,71 @@ export default function App() {
 
   const handlePauseTimer = () => {
     if (myRunningEntry) {
+      setJustPausedId(myRunningEntry.id);
       updateTimeEntryApi(myRunningEntry.id, { statut: 'PAUSED' });
       showToast('Chronomètre en pause.');
     }
   };
+
+  /**
+   * The floating chronometer follows the running task; with none running it
+   * falls back to one paused *in this session*, so pausing from it doesn't
+   * make it vanish and strand the user with no way to resume without walking
+   * back to Pointage. Deliberately not "the most recent paused entry": that
+   * would park a task paused days ago in the corner of every page forever.
+   */
+  const floatingEntry =
+    myRunningEntry || (justPausedId ? myPausedEntries.find(e => e.id === justPausedId) : undefined);
+
+  const handleFloatingPause = () => {
+    if (!floatingEntry) return;
+    setJustPausedId(floatingEntry.id);
+    updateTimeEntryApi(floatingEntry.id, { statut: 'PAUSED' });
+    showToast('Chronomètre en pause.');
+  };
+
+  const handleFloatingResume = () => {
+    if (!floatingEntry) return;
+    setJustPausedId(null);
+    updateTimeEntryApi(floatingEntry.id, { statut: 'RUNNING' });
+    showToast('Chronomètre repris.');
+  };
+
+  const handleFloatingStop = () => {
+    if (!floatingEntry) return;
+    if (!confirm('Voulez-vous vraiment arrêter cette tâche ? Le temps déjà enregistré sera conservé.')) return;
+    setJustPausedId(null);
+    updateTimeEntryApi(floatingEntry.id, { statut: 'COMPLETED' });
+    showToast('Chronomètre arrêté et enregistré.');
+  };
+
+  /* ---- The chronometer once the app is no longer on screen ---- */
+  //
+  // The tab title is the only carrier left. The ongoing OS notification with
+  // Pause / Arrêter — both the one drawn here while the tab was hidden and
+  // the one the server pushed once the browser was closed — was removed at
+  // the user's request: they did not want the app putting a control surface
+  // in front of them after they had left it. The floating card covers the
+  // in-app case, and Pointage covers the rest.
+
+  // The tab title carries the clock, so switching to another tab still
+  // answers "is it running, and for how long" from the tab strip alone.
+  // Only while RUNNING: a paused task is not a clock, and leaving a frozen
+  // time in the title reads as a stuck page.
+  useEffect(() => {
+    const base = 'Tâches & Cash';
+    document.title =
+      floatingEntry && floatingEntry.statut === 'RUNNING'
+        ? `⏱ ${formatHHMMSS(floatingEntry.dureeSeconds)} · ${floatingEntry.client} — ${base}`
+        : base;
+  }, [floatingEntry?.statut, floatingEntry?.dureeSeconds, floatingEntry?.client]);
+
+  useEffect(() => () => { document.title = 'Tâches & Cash'; }, []);
+
+  // Transitional: take down a chronometer notification left behind by an
+  // older build. It was drawn with `requireInteraction`, so the OS keeps it
+  // until something closes it, and nothing else does any more.
+  useEffect(() => { closeLingeringTimerNotification(); }, []);
 
   const handleStartNewTask = async (
     client: string,
@@ -494,15 +643,49 @@ export default function App() {
     showToast(`Tâche de ${entry.userName || 'collaborateur'} ${label}.`);
   };
 
+  /**
+   * Reprendre une tâche alors qu'une autre tourne demandait une décision qui
+   * n'était jamais posée : l'ancienne version *clôturait* la tâche en cours,
+   * sans rien demander. Mettre en pause et arrêter ne sont pas la même chose —
+   * une tâche arrêtée par erreur ne se reprend pas, il faut en recréer une.
+   * On demande donc, plutôt que de choisir à la place de l'utilisateur.
+   */
+  const [switchPrompt, setSwitchPrompt] = useState<{ from: TimeEntry; to: TimeEntry } | null>(null);
+
+  const startEntry = async (entry: TimeEntry) => {
+    await updateTimeEntryApi(entry.id, { statut: 'RUNNING' });
+    showToast(`Chronomètre basculé sur « ${entry.description || entry.taskType || entry.pole || entry.client} »`);
+  };
+
   const handleSelectAsActive = async (entry: TimeEntry) => {
     if (myRunningEntry && myRunningEntry.id !== entry.id) {
-      await updateTimeEntryApi(myRunningEntry.id, {
-        statut: myRunningEntry.statut === 'RUNNING' ? 'COMPLETED' : myRunningEntry.statut
-      });
+      setSwitchPrompt({ from: myRunningEntry, to: entry });
+      return;
     }
-    await updateTimeEntryApi(entry.id, { statut: 'RUNNING' });
-    showToast(`Chronomètre actif basculé sur "${entry.description}"`);
+    await startEntry(entry);
   };
+
+  /** Choix fait dans la fenêtre : que devient la tâche en cours ? */
+  const resolveSwitch = async (action: 'PAUSED' | 'COMPLETED') => {
+    if (!switchPrompt) return;
+    const { from, to } = switchPrompt;
+    setSwitchPrompt(null);
+    if (action === 'PAUSED') setJustPausedId(from.id);
+    await updateTimeEntryApi(from.id, { statut: action });
+    await startEntry(to);
+  };
+
+  if (resetToken) {
+    return (
+      <ResetPassword
+        token={resetToken}
+        onDone={() => {
+          window.history.replaceState({}, '', window.location.pathname);
+          setResetToken(null);
+        }}
+      />
+    );
+  }
 
   if (isLoading) {
     return (
@@ -519,12 +702,16 @@ export default function App() {
   }
 
   return (
-    // h-screen, not min-h-screen: the shell must have a *definite* height for
-    // the content column's own overflow-y-auto to become the single scroll
+    // A definite height, not min-h-screen: the shell must have one for the
+    // content column's own overflow-y-auto to become the single scroll
     // container. With min-h-screen the column just grew past the viewport, so
     // a page that pins its own footer (the Clients pagination bar) had that
     // footer pushed off-screen and reachable only by scrolling the whole page.
-    <div className="h-screen bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
+    //
+    // dvh rather than vh: on a phone `100vh` is the viewport with the browser
+    // chrome *hidden*, so a pinned footer — the chat composer, the Clients
+    // pagination bar — sat behind the address bar until you scrolled.
+    <div className="h-dvh bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
       <Sidebar
         activeItem={activeSidebarItem}
         onSelectItem={(item) => setActiveSidebarItem(item)}
@@ -570,10 +757,10 @@ export default function App() {
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div>
                 <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">
-                  Team Time Tracking
+                  Mes tâches & chrono
                 </h1>
                 <p className="text-[11.5px] text-gray-500 mt-0.5">
-                  Suivi du temps de travail et coût calculé des collaborateurs en temps réel
+                  Gérez votre chrono et vos tâches en cours
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
@@ -590,7 +777,7 @@ export default function App() {
                     className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   >
                     <ClipboardCheck className="w-3.5 h-3.5" />
-                    Assigner une tâche
+                    Déléguer une tâche
                   </button>
                 )}
               </div>
@@ -650,7 +837,6 @@ export default function App() {
                 entries={timeEntries}
                 onEdit={(entry) => setEditingEntry(entry)}
                 onDelete={handleDeleteEntry}
-                onMore={(entry) => showToast(`Options pour ${entry.client}`)}
                 onSelectAsActive={handleSelectAsActive}
                 onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
                 totalEntries={totalEntries ?? undefined}
@@ -663,6 +849,18 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Mounted outside the page switch above so the clock and its controls
+          survive navigation — the whole point of it. */}
+      {hasPermission('VIEW') && floatingEntry && (
+        <FloatingTimer
+          entry={floatingEntry}
+          raised={activeSidebarItem === 'Messages'}
+          onResume={handleFloatingResume}
+          onPause={handleFloatingPause}
+          onStop={handleFloatingStop}
+        />
+      )}
 
       <EditTaskModal
         entry={editingEntry}
@@ -690,6 +888,45 @@ export default function App() {
         />
       )}
 
+      {switchPrompt && (() => {
+        const label = (e: TimeEntry) => e.description || e.taskType || e.pole || e.client;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <h3 className="text-[15px] font-bold text-gray-900 mb-1">Une tâche est déjà en cours</h3>
+              <p className="text-[13px] text-gray-600 mb-4">
+                Vous êtes sur <span className="font-semibold">{label(switchPrompt.from)}</span>
+                {switchPrompt.from.client ? <> ({switchPrompt.from.client})</> : null}.
+                Pour reprendre <span className="font-semibold">{label(switchPrompt.to)}</span>, que faut-il en faire ?
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => resolveSwitch('PAUSED')}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-navy text-white rounded-lg text-[13px] font-semibold hover:bg-navy-hover"
+                >
+                  <Pause className="w-4 h-4" /> Mettre en pause et basculer
+                </button>
+                <button
+                  onClick={() => resolveSwitch('COMPLETED')}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <Square className="w-4 h-4" /> Arrêter et basculer
+                </button>
+                <button
+                  onClick={() => setSwitchPrompt(null)}
+                  className="w-full px-4 py-2 text-[12.5px] font-medium text-gray-500 hover:text-gray-700"
+                >
+                  Annuler — rester sur la tâche en cours
+                </button>
+              </div>
+              <p className="text-[11.5px] text-gray-400 mt-3">
+                Une tâche mise en pause se reprend quand vous voulez ; une tâche arrêtée est clôturée.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
       {overtimeAlert && (() => {
         const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
         const hours = entry ? Math.floor(entry.dureeSeconds / OVERTIME_THRESHOLD_SECONDS) * 2 : 2;
@@ -699,7 +936,7 @@ export default function App() {
               <h3 className="text-[15px] font-bold text-gray-900 mb-1">Toujours sur cette tâche ?</h3>
               <p className="text-[13px] text-gray-600 mb-3">
                 Vous travaillez sur <span className="font-semibold">{entry?.pole || 'cette tâche'}</span>
-                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h sans interruption.
+                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h cumulées.
               </p>
               <p className="text-[12px] text-gray-400 mb-4">
                 Sans réponse, la tâche sera mise en pause automatiquement dans {overtimeSecondsLeft}s.

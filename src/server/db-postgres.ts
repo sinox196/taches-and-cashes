@@ -68,6 +68,9 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   messages: { desc: false },
   task_assignments: { desc: true },
   notifications: { desc: true },
+  push_subscriptions: { desc: false },
+  cash_journal_entries: { desc: false },
+  cash_categories: { desc: false },
   resource_templates: { desc: false },
   resource_template_items: { desc: false },
   client_resource_instances: { desc: true },
@@ -99,6 +102,9 @@ const TABLE_FOR: Record<string, string> = {
   messages: 'messages',
   taskAssignments: 'task_assignments',
   notifications: 'notifications',
+  pushSubscriptions: 'push_subscriptions',
+  cashJournalEntries: 'cash_journal_entries',
+  cashCategories: 'cash_categories',
   resourceTemplates: 'resource_templates',
   resourceTemplateItems: 'resource_template_items',
   clientResourceInstances: 'client_resource_instances',
@@ -233,6 +239,10 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`CREATE INDEX IF NOT EXISTS messages_to_idx         ON messages ((data->>'toUserId'))`);
   await q(`CREATE INDEX IF NOT EXISTS task_assignments_to_idx ON task_assignments ((data->>'assignedToUserId'))`);
   await q(`CREATE INDEX IF NOT EXISTS notifications_user_idx  ON notifications ((data->>'userId'))`);
+  // The endpoint identifies a push subscription everywhere: the upsert on
+  // subscribe, the delete when the push service reports it gone, and the
+  // lookup that authenticates a tap on a notification button.
+  await q(`CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions ((data->>'endpoint'))`);
   await q(`CREATE INDEX IF NOT EXISTS resource_template_items_template_idx ON resource_template_items ((data->>'templateId'))`);
   await q(`CREATE INDEX IF NOT EXISTS client_resource_instances_client_idx ON client_resource_instances ((data->>'clientId'))`);
   await q(`CREATE INDEX IF NOT EXISTS client_resource_item_statuses_instance_idx ON client_resource_item_statuses ((data->>'instanceId'))`);
@@ -335,6 +345,9 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const messages = tenantCollection('messages');
   const taskAssignments = tenantCollection('task_assignments');
   const notifications = tenantCollection('notifications');
+  const pushSubscriptions = tenantCollection('push_subscriptions');
+  const cashJournal = tenantCollection('cash_journal_entries');
+  const cashCategories = tenantCollection('cash_categories');
   const resourceTemplates = tenantCollection('resource_templates');
   const resourceTemplateItems = tenantCollection('resource_template_items');
   const clientResourceInstances = tenantCollection('client_resource_instances');
@@ -345,8 +358,11 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const echeanceStatusOptions = tenantCollection('echeance_status_options');
 
   const db: Database = {
+    // Case-insensitive: a self-serve signup's username is its email
+    // (lowercased when stored), and login must still match it however the
+    // visitor happens to capitalize it when typing it back in.
     getUserByUsername: async (username: string) => {
-      const rows = await q(`SELECT data FROM users WHERE data->>'username' = $1`, [String(username)]);
+      const rows = await q(`SELECT data FROM users WHERE LOWER(data->>'username') = LOWER($1)`, [String(username)]);
       return rows.length ? rows[0].data : undefined;
     },
     getUserById: users.byId,
@@ -355,6 +371,28 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getCompanyById: companies.byId,
     createCompany: companies.create,
     updateCompany: companies.update,
+    deleteCompany: async (id: string) => {
+      // Une seule transaction : une purge à moitié faite laisserait un tenant
+      // fantôme — des utilisateurs sans entreprise, ou l'inverse.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const table of TENANT_TABLES) {
+          await client.query(`DELETE FROM ${table} WHERE data->>'companyId' = $1`, [id]);
+        }
+        // Ces deux-là ont leur propre colonne company_id, pas un champ JSON.
+        await client.query('DELETE FROM leave_balances WHERE company_id = $1', [id]);
+        await client.query('DELETE FROM settings WHERE company_id = $1', [id]);
+        const res = await client.query('DELETE FROM companies WHERE id = $1', [id]);
+        await client.query('COMMIT');
+        return (res.rowCount ?? 0) > 0;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
 
     getAllUsers: users.all,
     createUser: users.create,
@@ -518,6 +556,33 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     createTaskAssignment: taskAssignments.create,
     updateTaskAssignment: taskAssignments.update,
     deleteTaskAssignment: taskAssignments.remove,
+
+    getAllPushSubscriptionsForCompany: pushSubscriptions.all,
+    getAllPushSubscriptions: async () => (await q(`SELECT data FROM push_subscriptions`)).map(r => r.data),
+    createPushSubscription: async (companyId: string, subscription: any) => {
+      const row = { ...subscription, companyId };
+      // Upsert on the endpoint, not the id — same reason as the JSON backend.
+      await q(
+        `INSERT INTO push_subscriptions (id, data) VALUES ($1, $2)
+         ON CONFLICT ((data->>'endpoint')) DO UPDATE SET data = EXCLUDED.data`,
+        [String(row.id), JSON.stringify(row)],
+      );
+      return row;
+    },
+    deletePushSubscriptionByEndpoint: async (endpoint: string) => {
+      const res = await pool.query(`DELETE FROM push_subscriptions WHERE data->>'endpoint' = $1`, [String(endpoint)]);
+      return (res.rowCount ?? 0) > 0;
+    },
+
+    getAllCashJournalEntries: cashJournal.all,
+    getCashJournalEntryById: cashJournal.byId,
+    createCashJournalEntry: cashJournal.create,
+    updateCashJournalEntry: cashJournal.update,
+    deleteCashJournalEntry: cashJournal.remove,
+
+    getAllCashCategories: cashCategories.all,
+    createCashCategory: cashCategories.create,
+    deleteCashCategory: cashCategories.remove,
 
     getAllNotifications: notifications.all,
     createNotification: notifications.create,

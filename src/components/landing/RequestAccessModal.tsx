@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
-import { X, Loader2, Mail, CheckCircle2, Lock, User, Phone, Building2 } from 'lucide-react';
+import { X, Loader2, Mail, CheckCircle2, Lock, Phone, Building2 } from 'lucide-react';
 import { friendlyError } from '../../utils/errors';
 import { useAuth } from '../../context/AuthContext';
+import { SECTEURS, type Secteur } from '../../constants/secteurs';
 
 interface RequestAccessModalProps {
   plan: string;
@@ -38,7 +39,7 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
   const [contactName, setContactName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [username, setUsername] = useState('');
+  const [secteur, setSecteur] = useState<Secteur>('CABINET');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -64,8 +65,8 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            companyName, contactName, contactEmail, phone, username, password, confirmPassword,
-            plan: PLAN_CODES[plan], website,
+            companyName, contactName, contactEmail, phone, password, confirmPassword,
+            plan: PLAN_CODES[plan], website, secteur,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -147,13 +148,13 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
             )}
 
             <div>
-              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Nom</label>
+              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Prénom &amp; nom</label>
               <input
                 required
                 value={contactName}
                 onChange={e => setContactName(e.target.value)}
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                placeholder="Votre nom"
+                placeholder="Votre prénom et nom"
               />
             </div>
             <div>
@@ -166,6 +167,9 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                 placeholder="vous@entreprise.com"
               />
+              {isSignup && (
+                <p className="mt-1 text-[11.5px] text-gray-500">Cette adresse sera aussi votre identifiant de connexion.</p>
+              )}
             </div>
 
             {isSignup && (
@@ -202,17 +206,16 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
             {isSignup ? (
               <>
                 <div>
-                  <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Nom d'utilisateur</label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input
-                      required
-                      value={username}
-                      onChange={e => setUsername(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                      placeholder="Identifiant de connexion"
-                    />
-                  </div>
+                  <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Secteur d'activité</label>
+                  <select
+                    value={secteur}
+                    onChange={e => setSecteur(e.target.value as Secteur)}
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                  >
+                    {SECTEURS.map(s => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Mot de passe</label>
@@ -221,6 +224,10 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
                     <input
                       required
                       type="password"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore
+                      data-form-type="other"
                       minLength={6}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
@@ -236,6 +243,10 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
                     <input
                       required
                       type="password"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore
+                      data-form-type="other"
                       value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
                       className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"

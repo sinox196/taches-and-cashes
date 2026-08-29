@@ -1,15 +1,27 @@
+// Loads .env before anything reads process.env. dotenv was already a
+// dependency but never imported, so a local .env did nothing; VAPID keys are
+// the first config a developer has to be able to set outside Railway. A
+// no-op in production, where the container has no .env and the platform
+// injects the variables directly.
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
 import { LEGACY_COMPANY_ID, TRIAL_DAYS, PLAN_SEAT_LIMITS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
-import { STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
+import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
+import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
+import { toPaymentMode, isCashMode } from './src/constants/paymentModes.js';
+import {
+  normalizeDisbursementLines, sumDisbursements, DISBURSEMENT_LINES_MAX,
+} from './src/constants/disbursements.js';
 import {
   DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
 } from './src/constants/presence.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendMail } from './src/server/email.js';
+import { initPush, pushEnabled, publicKey as pushPublicKey, sendPush } from './src/server/push.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-local-dev';
 
@@ -100,6 +112,19 @@ const filterKpiEntries = (entries: any[], body: any) => {
     return true;
   });
 };
+
+/**
+ * Un document compte-t-il dans le chiffre d'affaires du client ?
+ *
+ * Non pour un brouillon — il n'est pas émis, et le compter gonflerait les
+ * honoraires de documents qui n'existent pas encore. Non pour un « autre
+ * document (non facturable) », qui existe dans Cash mais n'est pas de la
+ * facturation. Une seule définition, parce qu'elle sert au grand-livre client,
+ * au tableau de bord et aux totaux de Cash : trois écrans qui prétendent
+ * montrer le même chiffre.
+ */
+const countsAsBilled = (inv: any) =>
+  inv.documentKind !== 'AUTRE_NON_FACTURABLE' && inv.status !== 'DRAFT';
 
 /** Bucket key used to group entries by client (falls back to the stored name). */
 const clientBucketKey = (t: any) =>
@@ -299,6 +324,7 @@ async function startServer() {
 
   // Initialize SQLite database
   const db = await initDb();
+  initPush();
   await seedResourceLibrary(db, LEGACY_COMPANY_ID);
 
   // The legacy cabinet's own admin doubles as the platform's operator (the
@@ -350,7 +376,14 @@ async function startServer() {
 
       const companyId = user.companyId || LEGACY_COMPANY_ID;
       const company = await expireTrialIfDue(await db.getCompanyById(companyId));
-      if (company && (company.status === 'EXPIRED' || company.status === 'SUSPENDED')) {
+      // Suspendu et essai terminé bloquent tous les deux la connexion, mais ne
+      // veulent pas dire la même chose : dans les deux cas les données restent
+      // intactes, seul l'accès est fermé.
+      if (company && company.status === 'SUSPENDED') {
+        res.status(403).json({ error: "Votre accès a été suspendu. Contactez-nous pour le rétablir." });
+        return;
+      }
+      if (company && company.status === 'EXPIRED') {
         res.status(403).json({ error: "Votre période d'essai est terminée. Contactez-nous pour activer un abonnement." });
         return;
       }
@@ -426,7 +459,7 @@ async function startServer() {
         shiftStart: user.shiftStart || null,
         shiftEnd: user.shiftEnd || null,
         isPlatformAdmin: !!user.isPlatformAdmin,
-        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt } : null,
+        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null } : null,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -441,7 +474,7 @@ async function startServer() {
       }
 
       // We should check the database to get the freshest permissions
-      db.getUserById(req.user.companyId, req.user.id).then((user: any) => {
+      db.getUserById(req.user.companyId, req.user.id).then(async (user: any) => {
         if (!user) {
           return res.status(401).json({ error: 'Unauthorized' });
         }
@@ -450,11 +483,50 @@ async function startServer() {
         if (!hasPerm) {
           return res.status(403).json({ error: 'Forbidden: Missing permission ' + permission });
         }
+
+        // Ressources Métier is gated by the company's own secteur, ahead of
+        // the ADMIN bypass above: its seed content (SARL formation
+        // checklists, CNSS échéances...) is specific to accounting/tax
+        // cabinets, so a company outside that secteur never gets it, admin
+        // included.
+        if (RESOURCES_PERMISSIONS.has(permission)) {
+          const company = await db.getCompanyById(req.user.companyId);
+          if (!companyHasResourcesModule(company?.secteur)) {
+            return res.status(403).json({ error: 'Module Ressources Métier non disponible pour ce secteur' });
+          }
+        }
+
         next();
       }).catch(() => {
         res.status(500).json({ error: 'Internal server error' });
       });
     };
+  };
+
+  /**
+   * The same check `requirePermission` makes, but asked *inside* a route
+   * rather than in front of it — for a permission that decides which fields
+   * a response carries instead of whether the route may be called at all.
+   * Re-reads the user row for the same reason: a permission taken away has
+   * to take effect on the next request, not on the next login.
+   */
+  const userCan = async (req: any, permission: string): Promise<boolean> => {
+    const user = await db.getUserById(req.user.companyId, req.user.id);
+    if (!user) return false;
+    return user.role === 'ADMIN' || JSON.parse(user.permissions).includes(permission);
+  };
+
+  /**
+   * The client ledger fields, stripped from a response when the viewer lacks
+   * VIEW_CLIENT_FINANCIALS. Hiding the columns in the table is not enough —
+   * without this the figures still ship over the wire, the same rule the
+   * ADMIN-only cost on time entries already follows.
+   */
+  const LEDGER_FIELDS = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer', 'journalEncaissements'];
+  const stripLedger = (client: any) => {
+    const out = { ...client };
+    for (const f of LEDGER_FIELDS) delete out[f];
+    return out;
   };
 
   /**
@@ -807,6 +879,55 @@ async function startServer() {
   };
 
   /**
+   * Brouillard de caisse rows that are encaissements for a client — an
+   * `entree` on a row tied to one. They are NOT copied onto the client:
+   * the journal stays the single record of the movement, and the client's
+   * encaissements are the manual list *plus* these, merged on read. Copying
+   * would mean two rows to keep in step every time the journal is edited.
+   *
+   * Keyed by the same `clientBucketKey()` the invoice totals use, so a row
+   * tied only by free-text client name still lands on the right client.
+   */
+  const journalEncaissementsByClient = (entries: any[]) => {
+    const byKey = new Map<string, any[]>();
+    for (const row of entries) {
+      const amount = round3(num(Number(row?.entree), 0));
+      if (amount <= 0) continue;
+      if (!row?.clientId && !row?.clientName) continue;
+      const key = clientBucketKey({ clientId: row.clientId, client: row.clientName });
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push({
+        id: row.id,
+        amount,
+        date: String(row.date || '').slice(0, 10),
+        note: String(row.label || '').trim(),
+        // What the Clients view keys off to render these differently from the
+        // ones typed there by hand — and to keep them read-only, since the
+        // journal owns them.
+        source: 'BROUILLARD',
+        paymentMethod: row.paymentMethod || '',
+        bankAccount: row.bankAccount || '',
+        reference: row.reference || '',
+        // Whether this encaissement actually passed through the till. The
+        // Clients view badges on this rather than on `source`: since the
+        // mode de règlement exists, a virement is recorded in Cash exactly
+        // like an espèce but never reaches the caisse, and badging every
+        // journal-sourced row "caisse" would have mislabelled it.
+        isCaisse: isCashMode(row.paymentMethod),
+      });
+    }
+    for (const list of byKey.values()) list.sort((a, b) => a.date.localeCompare(b.date));
+    return byKey;
+  };
+
+  /** The journal encaissements belonging to one client, from a prepared map. */
+  const journalFor = (byKey: Map<string, any[]>, client: any) =>
+    [...(byKey.get(String(client.id)) || []), ...(byKey.get(`name:${client.name}`) || [])]
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+  const sumAmounts = (rows: any[]) => round3(rows.reduce((s, r) => s + num(Number(r.amount), 0), 0));
+
+  /**
    * The client's running ledger — used by GET (batched, one invoice scan for
    * every returned row) and by POST/PUT below (a single client, so a direct
    * scan is cheap). Both must agree, since editing a client's own soldeAnterieur/
@@ -817,9 +938,7 @@ async function startServer() {
     const invoices = await db.getAllInvoices(companyId);
     let montantFacture = 0;
     for (const inv of invoices) {
-      // "Autre document (non facturable)" is explicitly excluded from the
-      // client's running balance — it exists in Cash but isn't billing.
-      if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
+      if (!countsAsBilled(inv)) continue;
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       if (key === String(client.id) || key === `name:${client.name}`) {
         montantFacture += num(Number(inv.totalNetToPay), 0);
@@ -827,14 +946,29 @@ async function startServer() {
     }
     montantFacture = round3(montantFacture);
     const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
-    const encaissements = sumEncaissements(client);
-    return { ...client, montantFacture, resteAPayer: round3(soldeAnterieur - encaissements + montantFacture) };
+    const journalEncaissements = journalFor(
+      journalEncaissementsByClient(await db.getAllCashJournalEntries(companyId)),
+      client,
+    );
+    const encaissements = round3(sumEncaissements(client) + sumAmounts(journalEncaissements));
+    return {
+      ...client,
+      montantFacture,
+      journalEncaissements,
+      resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
+    };
   };
 
   // GET /api/clients
   app.get('/api/clients', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
     try {
       let clients = await db.getAllClients(req.user.companyId);
+
+      // Whether this viewer gets the ledger at all. Decided once here because
+      // it governs three things, not just the response body: sorting and
+      // filtering by a ledger field would otherwise let someone without the
+      // permission read the figures back out of the row order.
+      const seesLedger = await userCan(req, 'VIEW_CLIENT_FINANCIALS');
 
       // Parse filters
       let filters: Record<string, string> = {};
@@ -845,6 +979,7 @@ async function startServer() {
           // ignore
         }
       }
+      if (!seesLedger) for (const f of LEDGER_FIELDS) delete filters[f];
 
       // 1. Global Search (q)
       const q = (req.query.q || '').toLowerCase();
@@ -896,7 +1031,8 @@ async function startServer() {
       // pass both params explicitly; this default only affects callers that
       // don't (the debounced client-search autocomplete used across Pointage/
       // assignment forms), where alphabetical is the more useful order.
-      const sortField = req.query.sortField || 'name';
+      const requestedSort = req.query.sortField || 'name';
+      const sortField = !seesLedger && LEDGER_FIELDS.includes(requestedSort) ? 'name' : requestedSort;
       const sortDir = req.query.sortDir || 'asc';
 
       clients.sort((a, b) => {
@@ -933,30 +1069,42 @@ async function startServer() {
       const allInvoices = await db.getAllInvoices(req.user.companyId);
       const montantFactureByClient = new Map<string, number>();
       for (const inv of allInvoices) {
-        // "Autre document (non facturable)" is explicitly excluded from the
-        // client's running balance — it exists in Cash but isn't billing.
-        if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
+        if (!countsAsBilled(inv)) continue;
         const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
         montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
       }
       // Enriched over every client matching the current search/filters, not
       // just the current page — the "Total Général" row needs the ledger
       // figures of clients that aren't currently visible too.
+      // Same single-scan treatment as the invoices above: the brouillard is
+      // read once for the whole request, then looked up per client.
+      const journalByClient = journalEncaissementsByClient(await db.getAllCashJournalEntries(req.user.companyId));
       const enrichedAll = clients.map((c: any) => {
         const montantFacture = round3(
           (montantFactureByClient.get(String(c.id)) || 0) +
           (montantFactureByClient.get(`name:${c.name}`) || 0),
         );
         const soldeAnterieur = num(Number(c.soldeAnterieur), 0);
-        const encaissements = sumEncaissements(c);
-        return { ...c, montantFacture, resteAPayer: round3(soldeAnterieur - encaissements + montantFacture) };
+        const journalEncaissements = journalFor(journalByClient, c);
+        const encaissements = round3(sumEncaissements(c) + sumAmounts(journalEncaissements));
+        return {
+          ...c,
+          montantFacture,
+          journalEncaissements,
+          resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
+        };
       });
 
       // If client didn't explicitly request pagination, maybe return array to preserve backward compatibility?
       // The user wants "Do not load the entire Clients database... Use pagination".
       // We will ALWAYS return pagination wrapper if page/limit is provided, else we return array.
       const startIndex = (page - 1) * limit;
-      const page_ = req.query.page ? enrichedAll.slice(startIndex, startIndex + limit) : enrichedAll;
+      const rows = req.query.page ? enrichedAll.slice(startIndex, startIndex + limit) : enrichedAll;
+
+      // Without VIEW_CLIENT_FINANCIALS the ledger never leaves the server:
+      // no per-row figures and no "Total Général", which is those same
+      // figures summed.
+      const page_ = seesLedger ? rows : rows.map(stripLedger);
 
       if (req.query.page) {
         // Sums across the whole filtered set, not the page — this is what the
@@ -965,11 +1113,13 @@ async function startServer() {
         const totals = enrichedAll.reduce((acc: any, c: any) => {
           acc.soldeAnterieur = round3(acc.soldeAnterieur + num(Number(c.soldeAnterieur), 0));
           acc.montantFacture = round3(acc.montantFacture + num(Number(c.montantFacture), 0));
-          acc.encaissements = round3(acc.encaissements + sumEncaissements(c));
+          // c.journalEncaissements is already attached above — reuse it rather
+          // than re-deriving, so the total can never drift from the rows.
+          acc.encaissements = round3(acc.encaissements + sumEncaissements(c) + sumAmounts(c.journalEncaissements || []));
           acc.resteAPayer = round3(acc.resteAPayer + num(Number(c.resteAPayer), 0));
           return acc;
         }, { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
-        res.json({ data: page_, total: clients.length, page, limit, totals });
+        res.json({ data: page_, total: clients.length, page, limit, ...(seesLedger ? { totals } : {}) });
       } else {
         res.json(page_);
       }
@@ -1033,7 +1183,7 @@ async function startServer() {
       if (!client) {
         return res.status(404).json({ error: 'Client not found' });
       }
-      res.json(client);
+      res.json((await userCan(req, 'VIEW_CLIENT_FINANCIALS')) ? client : stripLedger(client));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1050,7 +1200,12 @@ app.get('/api/kpi/users/search', authenticate, async (req: any, res: any) => {
   }
   const q = (req.query.q || '').toLowerCase();
   let users = await db.getAllUsers(req.user.companyId);
-  users = users.filter((u: any) => u.role !== 'ADMIN');
+  // Un administrateur pointe du temps et a désormais sa ligne dans le tableau
+  // de performance : il doit pouvoir filtrer dessus. Les autres lecteurs du
+  // tableau de bord ne le voient toujours pas — même règle que Pointage.
+  if (req.user.role !== 'ADMIN') {
+    users = users.filter((u: any) => u.role !== 'ADMIN');
+  }
   if (q) {
     users = users.filter((u: any) => 
       u.username.toLowerCase().includes(q) || 
@@ -1140,6 +1295,19 @@ app.post('/api/kpi/employee-tasks', authenticate, async (req: any, res: any) => 
     if (!Number.isFinite(userId)) return res.status(400).json({ error: 'A userId is required' });
 
     const isAdminViewer = req.user.role === 'ADMIN';
+
+    // Les tâches d'un administrateur ne sont pas montrées aux autres — même
+    // règle que `visibleEntriesFor()` dans Pointage. Le tableau de performance
+    // n'offre la ligne qu'à un ADMIN, mais cette route s'appelle avec un
+    // userId quelconque : le refus appartient au serveur, pas à l'absence de
+    // bouton.
+    if (!isAdminViewer) {
+      const target = await db.getUserById(req.user.companyId, userId);
+      if (target?.role === 'ADMIN' && userId !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
     const clients = await db.getAllClients(req.user.companyId) || [];
     const clientsById = new Map<number, any>(clients.map((c: any) => [c.id, c]));
 
@@ -1253,6 +1421,24 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const kpiSettings = await db.getSettings(req.user.companyId);
     const isAdminViewer = req.user.role === 'ADMIN';
 
+    /**
+     * Qui apparaît dans le tableau de performance.
+     *
+     * L'effectif (`employees`) reste ce qu'il était : un administrateur est un
+     * compte, pas une tête à compter, et le rentrer dans « Effectif »
+     * changerait un chiffre déjà en place. Mais un administrateur pointe du
+     * temps comme les autres, et ce temps entrait dans les totaux globaux sans
+     * qu'aucune ligne ne dise qui l'avait fait.
+     *
+     * Visible du seul ADMIN : « les tâches d'un administrateur ne sont pas
+     * montrées aux autres » vaut ici comme dans Pointage, sans quoi un
+     * SUPERVISEUR lirait dans ce tableau ce que `visibleEntriesFor()` lui
+     * refuse à l'écran d'à côté.
+     */
+    const performanceUsers = isAdminViewer
+      ? allUsers.filter((u: any) => STAFF_ROLES.includes(u.role) || u.role === 'ADMIN')
+      : employees;
+
     // Index once instead of scanning allUsers/clients per task. With thousands
     // of entries the repeated .find() calls were the dominant cost here.
     const usersById = new Map<number, any>(allUsers.map((u: any) => [u.id, u]));
@@ -1310,7 +1496,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     };
 
     // Calculate per employee stats
-    const employeeStats = employees.map((emp: any) => {
+    const employeeStats = performanceUsers.map((emp: any) => {
       if (filterUserIds && filterUserIds.length > 0 && !filterUserIds.includes(emp.id)) return null;
 
       const empTasks = timeEntries.filter((t: any) => t.userId === emp.id);
@@ -1337,10 +1523,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       
       const empClients = new Set();
       const clientTasksCount: any = {};
+      // Duration per client, summed alongside the count in the same pass —
+      // the "Clients Traités" list needs both, and this is the loop that
+      // already visits every one of this collaborator's tasks.
+      const clientDurationSeconds: any = {};
       empTasks.forEach((t: any) => {
         if (t.clientId) {
           empClients.add(t.clientId);
           clientTasksCount[t.clientId] = (clientTasksCount[t.clientId] || 0) + 1;
+          clientDurationSeconds[t.clientId] = (clientDurationSeconds[t.clientId] || 0) + accruedSeconds(t);
         }
       });
       
@@ -1365,12 +1556,15 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       const clientListDetails = Array.from(empClients).map((cid: any) => {
         const c = clientsById.get(cid);
+        const secs = clientDurationSeconds[cid] || 0;
         return {
           id: cid,
           name: c ? c.name : 'Unknown',
-          taskCount: clientTasksCount[cid]
+          taskCount: clientTasksCount[cid],
+          durationSeconds: secs,
+          durationFormatted: `${Math.floor(secs / 3600)}h${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}`,
         };
-      });
+      }).sort((a: any, b: any) => b.durationSeconds - a.durationSeconds);
 
       // The per-task breakdown is NOT inlined: 40 collaborators × their history
       // is the bulk of this payload. The drill-down modal loads it from
@@ -1463,6 +1657,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // name on one side and by id on the other would split into two rows.
     const invoiceBuckets = new Map<string, { netToPay: number; count: number }>();
     const allInvoices = await db.getAllInvoices(req.user.companyId) || [];
+    // One journal scan for the whole request, same as the invoice scan below.
+    const dashboardJournalByClient = journalEncaissementsByClient(await db.getAllCashJournalEntries(req.user.companyId) || []);
     // "Montant de facture" is a lifetime running-balance figure (same one
     // shown on the Clients page), not scoped to the dashboard's date filter —
     // computed here from the unfiltered `allInvoices` fetched above. Keyed
@@ -1474,7 +1670,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // "Autre document (non facturable)" is explicitly excluded from the
       // client's running balance and from the billing activity below — it
       // exists in Cash but isn't billing.
-      if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
+      if (!countsAsBilled(inv)) continue;
       const k = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       montantFactureByClient.set(k, round3((montantFactureByClient.get(k) || 0) + num(Number(inv.totalNetToPay), 0)));
       const ts = parseIsoDate(inv.issueDate);
@@ -1529,7 +1725,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // load; the rows below fetch it from /api/kpi/client-tasks on expand.
       const montantFacture = round3(montantFactureByClient.get(key) || 0);
       const soldeAnterieur = num(Number(clientRecord?.soldeAnterieur), 0);
-      const encaissements = sumEncaissements(clientRecord);
+      // Brouillard de caisse entrées count as encaissements on the Clients
+      // page, so they have to count here too — this block promises the same
+      // figures, and a dashboard that quietly disagreed with the ledger it
+      // claims to mirror is worse than one that showed nothing.
+      const encaissements = round3(
+        sumEncaissements(clientRecord) +
+        sumAmounts(clientRecord ? journalFor(dashboardJournalByClient, clientRecord) : (dashboardJournalByClient.get(key) || [])),
+      );
       return {
         id: first.clientId ?? key,
         key,
@@ -1586,10 +1789,491 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   }
 });
 
+/**
+ * ---------------------------------------------------------------------------
+ * Tableau de bord Direction — agrégats exécutifs.
+ * ---------------------------------------------------------------------------
+ *
+ * POST plutôt que GET, comme /api/kpi/dashboard juste au-dessus : les filtres
+ * voyagent dans le corps, ce qui permet de réutiliser `filterKpiEntries()` tel
+ * quel. Une seule implémentation des filtres pour le résumé et pour les
+ * drill-downs — sinon un détail finit par contredire la ligne d'où l'on a
+ * cliqué, et l'écran entier perd sa crédibilité.
+ *
+ * Ne renvoie QUE des agrégats, jamais de liste de tâches : le détail se charge
+ * au clic via /api/kpi/client-tasks et /api/kpi/employee-tasks, qui existent
+ * déjà. Inliner ces listes ici avait fait passer une charge utile de 219 Ko à
+ * 3,2 Mo à 300 clients / 6000 entrées.
+ */
+app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) => {
+  try {
+    if (!DASHBOARD_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const companyId = req.user.companyId;
+    const isAdminViewer = req.user.role === 'ADMIN';
+
+    const filterUserIds: number[] = req.body?.filterUserIds || [];
+    const filterClientIds: number[] = req.body?.filterClientIds || [];
+
+    /**
+     * Un filtre collaborateur restreint le temps mais pas les factures : une
+     * facture n'a pas d'auteur. Comparer les honoraires de tout le monde au
+     * coût d'une seule personne produit une marge spectaculairement fausse et
+     * parfaitement crédible — donc on ne la calcule pas du tout, et le client
+     * grise les blocs financiers en le disant.
+     */
+    const financialsFiltered = filterUserIds.length > 0;
+    const showMoney = isAdminViewer && !financialsFiltered;
+
+    const dayMs = 86400000;
+    const startTs = req.body?.startDate ? new Date(req.body.startDate).getTime() : 0;
+    const endTs = req.body?.endDate ? new Date(req.body.endDate).getTime() + dayMs - 1 : Date.now();
+
+    // Période précédente de MÊME DURÉE, immédiatement antérieure.
+    const spanMs = Math.max(dayMs, endTs - startTs);
+    const prevEndTs = startTs - 1;
+    const prevStartTs = startTs - spanMs;
+    const iso = (ts: number) => new Date(ts).toISOString().slice(0, 10);
+    const prevBody = { startDate: iso(prevStartTs), endDate: iso(prevEndTs), filterUserIds, filterClientIds };
+
+    const fmtTnd = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} TND`;
+
+    const [allUsers, allEntriesRaw, allInvoices, allClients, allLeaves, allJournal, echeanceCols, echeanceStatuses] =
+      await Promise.all([
+        db.getAllUsers(companyId),
+        db.getAllTimeEntries(companyId),
+        db.getAllInvoices(companyId),
+        db.getAllClients(companyId),
+        db.getAllLeaveRequests(companyId),
+        db.getAllCashJournalEntries(companyId),
+        db.getAllEcheanceColumns(companyId),
+        db.getAllEcheanceStatuses(companyId),
+      ]);
+
+    const settings = (await db.getSettings(companyId)) || {};
+    const employees = (allUsers || []).filter((u: any) => STAFF_ROLES.includes(u.role));
+
+    const entries = filterKpiEntries(allEntriesRaw || [], req.body);
+    const prevEntries = filterKpiEntries(allEntriesRaw || [], prevBody);
+
+    // ---- Temps et coût -----------------------------------------------------
+    /** Coût d'une tâche à SON taux historique, jamais au taux actuel. */
+    const taskCost = (t: any): number | null => {
+      const rate = typeof t.hourlyRate === 'number' ? t.hourlyRate : null;
+      return rate === null ? null : (accruedSeconds(t) / 3600) * rate;
+    };
+    const hoursOf = (rows: any[]) => round3(rows.reduce((s, t) => s + accruedSeconds(t), 0) / 3600);
+    /** Une tâche non chiffrée vaut `null`, pas zéro : elle est exclue du coût. */
+    const costOf = (rows: any[]) => round3(rows.reduce((s, t) => s + (taskCost(t) ?? 0), 0));
+
+    const heures = hoursOf(entries);
+    const heuresPrev = hoursOf(prevEntries);
+    /**
+     * Facturable / non facturable, lu sur le champ figé de chaque tâche. Une
+     * tâche antérieure à ce champ n'a pas de valeur : elle est comptée
+     * facturable, ce qui était l'hypothèse implicite jusqu'ici.
+     */
+    const nonFacturables = entries.filter((t: any) => t.facturable === false);
+    const heuresNonFacturables = hoursOf(nonFacturables);
+    const heuresFacturables = round3(heures - heuresNonFacturables);
+    const coutNonFacturable = costOf(nonFacturables);
+    // Le nombre de tâches, à côté des heures : « 12 tâches » se relie à ce que
+    // Pointage montre, là où « 30 h » ne se retrouve pas dans une liste.
+    const tachesNonFacturables = nonFacturables.length;
+    // Combien de clients sont à l'origine de ce temps — un seul client pro
+    // bono et douze clients mal paramétrés ne se corrigent pas pareil.
+    const clientsNonFacturables = new Set(
+      nonFacturables.map((t: any) => clientBucketKey(t)),
+    ).size;
+    const coutTemps = costOf(entries);
+    const coutTempsPrev = costOf(prevEntries);
+    const unpriced = entries.filter((t: any) => taskCost(t) === null);
+    const tachesSansTaux = unpriced.length;
+    const collabsSansTaux = new Set(unpriced.map((t: any) => t.userId)).size;
+
+    // ---- Honoraires --------------------------------------------------------
+    // Une devise saisie librement ne s'additionne pas à la TND : on n'agrège
+    // que la TND et on compte ce qui a été écarté, plutôt que de convertir à
+    // un taux qu'on ne stocke pas (Q-07).
+    const isBillable = countsAsBilled;
+    const isTnd = (inv: any) => String(inv.currency || 'TND').toUpperCase() === 'TND';
+    const invoiceTs = (inv: any) => (inv.issueDate ? new Date(inv.issueDate).getTime() : 0);
+
+    let devisesExclues = 0;
+    const invoicesInRange = (fromTs: number, toTs: number, countExcluded = false) =>
+      (allInvoices || []).filter((inv: any) => {
+        if (!isBillable(inv)) return false;
+        const ts = invoiceTs(inv);
+        if (ts < fromTs || ts > toTs) return false;
+        if (filterClientIds.length > 0) {
+          const cid = inv.clientId != null ? Number(inv.clientId) : null;
+          if (cid === null || !filterClientIds.includes(cid)) return false;
+        }
+        if (!isTnd(inv)) { if (countExcluded) devisesExclues += 1; return false; }
+        return true;
+      });
+
+    const periodInvoices = invoicesInRange(startTs, endTs, true);
+    const prevInvoices = invoicesInRange(prevStartTs, prevEndTs);
+    const sumNet = (rows: any[]) => round3(rows.reduce((s, i) => s + num(Number(i.totalNetToPay), 0), 0));
+    const honoraires = sumNet(periodInvoices);
+    const honorairesPrev = sumNet(prevInvoices);
+
+    // ---- Capacité nette ----------------------------------------------------
+    /**
+     * `regimeHoraire` est un volume HEBDOMADAIRE (48 h par défaut) — la même
+     * valeur que le coût horaire employeur multiplie par 4,33 pour un mois.
+     * Ramenée ici au jour ouvré : regimeHoraire / 5.
+     *
+     * Q-05 non tranchée : les jours fériés ne sont pas modélisés. La capacité
+     * est donc légèrement surévaluée sur un mois qui en contient, ce qui
+     * sous-évalue le taux d'occupation. L'interface le dit.
+     */
+    const workingDaysBetween = (fromTs: number, toTs: number) => {
+      let n = 0;
+      for (let ts = fromTs; ts <= toTs; ts += dayMs) {
+        const d = new Date(ts).getUTCDay();
+        if (d !== 0 && d !== 6) n += 1;
+      }
+      return n;
+    };
+    const scopedEmployees = filterUserIds.length > 0
+      ? employees.filter((u: any) => filterUserIds.includes(u.id))
+      : employees;
+
+    // Indexé une fois : un filter() par collaborateur serait un balayage par personne.
+    const leavesByUser = new Map<number, any[]>();
+    for (const l of (allLeaves || [])) {
+      if (l.status !== 'APPROVED') continue;
+      const arr = leavesByUser.get(l.userId) || [];
+      arr.push(l);
+      leavesByUser.set(l.userId, arr);
+    }
+    const absentDays = (userId: number, fromTs: number, toTs: number) =>
+      (leavesByUser.get(userId) || []).reduce((sum: number, l: any) => {
+        const s = Math.max(new Date(l.startDate).getTime(), fromTs);
+        const e = Math.min(new Date(l.endDate).getTime(), toTs);
+        return e >= s ? sum + workingDaysBetween(s, e) : sum;
+      }, 0);
+
+    const capacityOf = (u: any, fromTs: number, toTs: number) => {
+      const weekly = num(Number(u.regimeHoraire), 0);
+      if (weekly <= 0) return 0;
+      const open = workingDaysBetween(fromTs, toTs) - absentDays(u.id, fromTs, toTs);
+      return round3(Math.max(0, open) * (weekly / 5));
+    };
+    const capaciteNette = round3(scopedEmployees.reduce((s: number, u: any) => s + capacityOf(u, startTs, endTs), 0));
+    const capaciteNettePrev = round3(scopedEmployees.reduce((s: number, u: any) => s + capacityOf(u, prevStartTs, prevEndTs), 0));
+
+    // ---- Grand-livre client ------------------------------------------------
+    // Mêmes chiffres que la page Clients, calculés de la même façon, pour que
+    // les deux écrans ne puissent pas se contredire. C'est un stock, pas une
+    // grandeur de période.
+    const journalByClient = journalEncaissementsByClient(allJournal || []);
+    const netAllTime = new Map<string, number>();
+    for (const inv of (allInvoices || [])) {
+      if (!isBillable(inv) || !isTnd(inv)) continue;
+      const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
+      netAllTime.set(key, round3((netAllTime.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+    }
+    let resteAEncaisser = 0;
+    const resteByClientId = new Map<string, number>();
+    for (const c of (allClients || [])) {
+      const facture = round3((netAllTime.get(String(c.id)) || 0) + (netAllTime.get(`name:${c.name}`) || 0));
+      const enc = round3(sumEncaissements(c) + sumAmounts(journalFor(journalByClient, c)));
+      const reste = round3(num(Number(c.soldeAnterieur), 0) - enc + facture);
+      resteByClientId.set(String(c.id), reste);
+      if (reste > 0) resteAEncaisser = round3(resteAEncaisser + reste);
+    }
+
+    /**
+     * Créances échues — un MAJORANT, pas un chiffre exact (Q-04 non tranchée).
+     * Aucun règlement ne porte d'`invoiceId` : on ne sait pas si une facture
+     * précise est soldée. On somme donc les factures dont `dueDate` est
+     * dépassée, PLAFONNÉES au reste réellement dû par le client — sans ce
+     * plafond, un client à jour dont les vieilles factures sont payées serait
+     * compté comme en retard.
+     */
+    const today = Date.now();
+    const overdueByClient = new Map<string, number>();
+    for (const inv of (allInvoices || [])) {
+      if (!isBillable(inv) || !isTnd(inv) || !inv.dueDate) continue;
+      // Fin de journée : une facture due aujourd'hui n'est pas en retard.
+      if (new Date(inv.dueDate).getTime() + dayMs - 1 >= today) continue;
+      const key = String(inv.clientId ?? '');
+      if (!key) continue;
+      overdueByClient.set(key, round3((overdueByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+    }
+    let creancesEchues = 0;
+    for (const [cid, overdue] of overdueByClient) {
+      const reste = resteByClientId.get(cid) ?? 0;
+      if (reste > 0) creancesEchues = round3(creancesEchues + Math.min(overdue, reste));
+    }
+
+    // ---- Rentabilité par client -------------------------------------------
+    const clientAgg = new Map<string, any>();
+    const bump = (key: string, name: string, clientId: number | null) => {
+      let row = clientAgg.get(key);
+      if (!row) {
+        row = { key, clientId, name: name || 'Sans client', heures: 0, cout: 0, honoraires: 0,
+                heuresPrev: 0, honorairesPrev: 0, tachesSansTaux: 0 };
+        clientAgg.set(key, row);
+      }
+      if (row.clientId == null && clientId != null) row.clientId = clientId;
+      return row;
+    };
+    for (const t of entries) {
+      const row = bump(clientBucketKey(t), t.client, t.clientId ?? null);
+      row.heures = round3(row.heures + accruedSeconds(t) / 3600);
+      const c = taskCost(t);
+      if (c === null) row.tachesSansTaux += 1; else row.cout = round3(row.cout + c);
+    }
+    for (const t of prevEntries) {
+      bump(clientBucketKey(t), t.client, t.clientId ?? null).heuresPrev += accruedSeconds(t) / 3600;
+    }
+    for (const inv of periodInvoices) {
+      const row = bump(clientBucketKey({ clientId: inv.clientId, client: inv.clientName }), inv.clientName, inv.clientId ?? null);
+      row.honoraires = round3(row.honoraires + num(Number(inv.totalNetToPay), 0));
+    }
+    for (const inv of prevInvoices) {
+      const row = bump(clientBucketKey({ clientId: inv.clientId, client: inv.clientName }), inv.clientName, inv.clientId ?? null);
+      row.honorairesPrev = round3(row.honorairesPrev + num(Number(inv.totalNetToPay), 0));
+    }
+
+    const clientRows = Array.from(clientAgg.values()).map((r: any) => {
+      const marge = round3(r.honoraires - r.cout);
+      return {
+        ...r,
+        heuresPrev: round3(r.heuresPrev),
+        marge,
+        // Indéfini quand rien n'a été facturé : `null`, jamais 0 % ni −100 %.
+        tauxMarge: r.honoraires > 0 ? round3(marge / r.honoraires) : null,
+        honorairesParHeure: r.heures > 0 && r.honoraires > 0 ? round3(r.honoraires / r.heures) : null,
+        coutParHeure: r.heures > 0 ? round3(r.cout / r.heures) : null,
+        resteAPayer: r.clientId != null ? (resteByClientId.get(String(r.clientId)) ?? 0) : 0,
+      };
+    }).sort((a: any, b: any) => a.marge - b.marge);
+
+    // ---- Concentration -----------------------------------------------------
+    const byHon = clientRows.filter((r: any) => r.honoraires > 0).sort((a: any, b: any) => b.honoraires - a.honoraires);
+    const totalHon = round3(byHon.reduce((s: number, r: any) => s + r.honoraires, 0));
+    const share = (n: number) => (totalHon > 0 ? round3(n / totalHon) : 0);
+    const concentration = {
+      total: totalHon,
+      top1: byHon[0] ? { name: byHon[0].name, part: share(byHon[0].honoraires) } : null,
+      top5Part: share(byHon.slice(0, 5).reduce((s: number, r: any) => s + r.honoraires, 0)),
+      rows: byHon.slice(0, 8).map((r: any) => ({ name: r.name, honoraires: r.honoraires, part: share(r.honoraires) })),
+    };
+
+    // ---- Collaborateurs ----------------------------------------------------
+    const entriesByUser = new Map<number, any[]>();
+    for (const t of entries) {
+      const arr = entriesByUser.get(t.userId) || []; arr.push(t); entriesByUser.set(t.userId, arr);
+    }
+    const prevByUser = new Map<number, any[]>();
+    for (const t of prevEntries) {
+      const arr = prevByUser.get(t.userId) || []; arr.push(t); prevByUser.set(t.userId, arr);
+    }
+    const collaborateurs = scopedEmployees.map((u: any) => {
+      const mine = entriesByUser.get(u.id) || [];
+      const h = hoursOf(mine);
+      const cap = capacityOf(u, startTs, endTs);
+      return {
+        userId: u.id,
+        name: u.fullName || u.username,
+        role: u.role,
+        heures: h,
+        heuresPrev: hoursOf(prevByUser.get(u.id) || []),
+        capacite: cap,
+        occupation: cap > 0 ? round3(h / cap) : null,
+        cout: costOf(mine),
+        clients: new Set(mine.map((t: any) => clientBucketKey(t))).size,
+        sansTaux: mine.filter((t: any) => taskCost(t) === null).length,
+        /**
+         * Rendement moyen des clients servis, pondéré par les heures.
+         * Ce n'est PAS « les honoraires de cette personne » : une facture n'a
+         * pas d'auteur (Q-02). C'est le rendement des dossiers sur lesquels
+         * elle a travaillé — utile pour l'affectation, pas pour la paie.
+         */
+        rendementClients: (() => {
+          let hs = 0, vs = 0;
+          for (const t of mine) {
+            const row = clientAgg.get(clientBucketKey(t));
+            const hph = row && row.heures > 0 && row.honoraires > 0 ? row.honoraires / row.heures : null;
+            if (hph === null) continue;
+            const th = accruedSeconds(t) / 3600;
+            hs += th; vs += th * hph;
+          }
+          return hs > 0 ? round3(vs / hs) : null;
+        })(),
+      };
+    }).sort((a: any, b: any) => b.heures - a.heures);
+
+    // ---- Opérationnel ------------------------------------------------------
+    const now = new Date();
+    const monthCols = (echeanceCols || []).filter(
+      (c: any) => Number(c.year) === now.getFullYear() && Number(c.month) === now.getMonth() + 1
+    );
+    // Seuls les clients que le cabinet suit réellement dans la grille comptent :
+    // multiplier par TOUS les clients produirait des milliers de « cellules
+    // vides » qui ne correspondent à aucun travail attendu.
+    const trackedClients = new Set((echeanceStatuses || []).map((s: any) => String(s.clientId)));
+    const filledThisMonth = new Set(
+      (echeanceStatuses || [])
+        .filter((s: any) => monthCols.some((c: any) => String(c.id) === String(s.columnId)))
+        .map((s: any) => `${s.clientId}|${s.columnId}`)
+    ).size;
+    const echeancesAttendues = monthCols.length * trackedClients.size;
+    const echeancesVides = Math.max(0, echeancesAttendues - filledThisMonth);
+
+    // Une tâche en pause avant l'ajout de `lastEditedAt` n'a pas de date de
+    // dernière action : on ne peut rien affirmer, on ne la compte pas.
+    const pausedLong = (allEntriesRaw || []).filter((t: any) =>
+      t.statut === 'PAUSED' && t.lastEditedAt && (today - new Date(t.lastEditedAt).getTime()) > 7 * dayMs
+    ).length;
+
+    // ---- Alertes -----------------------------------------------------------
+    // Les seuils viennent de `settings` : aucune constante en dur, même règle
+    // que les statuts d'échéance et les objets de caisse, déjà éditables.
+    const TH = {
+      margeMin: 0.30, deriveHeures: 1.30, concentration: 0.20,
+      surcharge: 0.95, sousCharge: 0.50, pauseJours: 7, echeanceJour: 25,
+      ...((settings as any).alertThresholds || {}),
+    };
+    const alerts: any[] = [];
+
+    if (showMoney) {
+      for (const r of clientRows) {
+        if (r.honoraires > 0 && r.marge < 0) {
+          alerts.push({ key: `A1-${r.key}`, code: 'A1', level: 'CRITIQUE', entity: 'client', entityId: r.clientId, entityName: r.name,
+            title: `${r.name} — marge négative`,
+            detail: `${fmtTnd(r.honoraires)} facturés pour ${fmtTnd(r.cout)} de temps consommé.`,
+            action: 'Arbitrer sous 7 jours : retarifer, plafonner le temps, ou sortir le client.' });
+        } else if (r.tauxMarge !== null && r.tauxMarge >= 0 && r.tauxMarge < TH.margeMin) {
+          alerts.push({ key: `A4-${r.key}`, code: 'A4', level: 'AVERTISSEMENT', entity: 'client', entityId: r.clientId, entityName: r.name,
+            title: `${r.name} — marge de ${Math.round(r.tauxMarge * 100)} %`,
+            detail: `Sous le seuil de ${Math.round(TH.margeMin * 100)} %. ${fmtTnd(r.honoraires)} facturés, ${r.heures} h consommées.`,
+            action: 'Inscrire à la revue de portefeuille.' });
+        }
+        // Dérive : plus d'heures pour des honoraires qui ne suivent pas.
+        // `honorairesPrev > 0` est nécessaire : sans facturation antérieure il
+        // n'y a pas de base « constante » à comparer, et un client jamais
+        // facturé relève d'un autre sujet (le travail non facturé, Q-03).
+        if (r.honorairesPrev > 0 && r.heuresPrev > 0
+            && r.heures > r.heuresPrev * TH.deriveHeures
+            && r.honoraires <= r.honorairesPrev * 1.05) {
+          alerts.push({ key: `A5-${r.key}`, code: 'A5', level: 'AVERTISSEMENT', entity: 'client', entityId: r.clientId, entityName: r.name,
+            title: `${r.name} — temps en forte hausse`,
+            detail: `${r.heures} h contre ${r.heuresPrev} h sur la période précédente, à honoraires stables.`,
+            action: "Comprendre la cause avant qu'elle ne devienne structurelle." });
+        }
+      }
+      if (concentration.top1 && concentration.top1.part > TH.concentration) {
+        alerts.push({ key: 'A6', code: 'A6', level: 'AVERTISSEMENT', entity: 'client', entityId: null,
+          title: `${concentration.top1.name} pèse ${Math.round(concentration.top1.part * 100)} % des honoraires`,
+          detail: `Au-delà du seuil de ${Math.round(TH.concentration * 100)} %. Une perte de ce client serait difficile à absorber.`,
+          action: 'Plan de prospection pour réduire la dépendance.' });
+      }
+    }
+
+    for (const c of collaborateurs) {
+      if (c.occupation === null) continue;
+      if (c.occupation > TH.surcharge) {
+        alerts.push({ key: `A7-${c.userId}`, code: 'A7', level: 'AVERTISSEMENT', entity: 'user', entityId: c.userId, entityName: c.name,
+          title: `${c.name} — ${Math.round(c.occupation * 100)} % d'occupation`,
+          detail: `${c.heures} h pointées pour ${c.capacite} h de capacité nette.`,
+          action: 'Redistribuer la charge.' });
+      } else if (c.occupation < TH.sousCharge && c.capacite > 0) {
+        alerts.push({ key: `A8-${c.userId}`, code: 'A8', level: 'AVERTISSEMENT', entity: 'user', entityId: c.userId, entityName: c.name,
+          title: `${c.name} — ${Math.round(c.occupation * 100)} % d'occupation`,
+          detail: `${c.heures} h pointées sur ${c.capacite} h disponibles.`,
+          action: "Vérifier d'abord le pointage, avant de conclure à la sous-charge." });
+      }
+    }
+
+    if (collabsSansTaux > 0 && isAdminViewer) {
+      alerts.push({ key: 'A11', code: 'A11', level: 'AVERTISSEMENT', entity: 'user', entityId: null,
+        title: `${collabsSansTaux} collaborateur${collabsSansTaux > 1 ? 's' : ''} sans coût employeur configuré`,
+        detail: `${tachesSansTaux} tâche${tachesSansTaux > 1 ? 's' : ''} exclue${tachesSansTaux > 1 ? 's' : ''} du coût — toutes les marges affichées sont surévaluées.`,
+        action: 'Compléter la fiche dans Utilisateurs.' });
+    }
+    if (now.getDate() >= TH.echeanceJour && echeancesVides > 0) {
+      alerts.push({ key: 'A3', code: 'A3', level: 'CRITIQUE', entity: 'echeance', entityId: null,
+        title: `${echeancesVides} échéance${echeancesVides > 1 ? 's' : ''} du mois non renseignée${echeancesVides > 1 ? 's' : ''}`,
+        detail: `Nous sommes le ${now.getDate()} du mois — risque de pénalité pour le client.`,
+        action: 'Affecter immédiatement.' });
+    }
+    if (pausedLong > 0) {
+      alerts.push({ key: 'A10', code: 'A10', level: 'INFO', entity: 'task', entityId: null,
+        title: `${pausedLong} tâche${pausedLong > 1 ? 's' : ''} en pause depuis plus de ${TH.pauseJours} jours`,
+        detail: "Une pause de plus d'une semaine est un oubli, pas une pause.",
+        action: 'Clôturer ou reprendre — cela fiabilise tout le reste de l\'écran.' });
+    }
+
+    const RANK: Record<string, number> = { CRITIQUE: 0, AVERTISSEMENT: 1, INFO: 2 };
+    alerts.sort((a, b) => RANK[a.level] - RANK[b.level]);
+
+    // ---- Réponse -----------------------------------------------------------
+    const ratio = (n: number, d: number) => (d > 0 ? round3(n / d) : null);
+    const marge = round3(honoraires - coutTemps);
+    const margePrev = round3(honorairesPrev - coutTempsPrev);
+
+    const payload: any = {
+      periode: { startDate: iso(startTs), endDate: iso(endTs), precedente: { startDate: prevBody.startDate, endDate: prevBody.endDate } },
+      financialsFiltered,
+      executive: {
+        heures, heuresPrev,
+        heuresFacturables, heuresNonFacturables,
+        tachesNonFacturables, clientsNonFacturables,
+        capaciteNette, capaciteNettePrev,
+        // Le taux d'utilisation au sens des cabinets : le temps refacturable
+        // rapporté à la capacité. Distinct du taux d'occupation — on peut être
+        // occupé à 95 % et facturable à 40 %.
+        utilisation: capaciteNette > 0 ? round3(heuresFacturables / capaciteNette) : null,
+        occupation: ratio(heures, capaciteNette),
+        occupationPrev: ratio(heuresPrev, capaciteNettePrev),
+        tachesSansTaux, collabsSansTaux,
+        clientsEnAlerte: new Set(alerts.filter(a => a.entity === 'client' && a.entityId != null).map(a => a.entityId)).size,
+        alertesCritiques: alerts.filter(a => a.level === 'CRITIQUE').length,
+        // Les montants sont retirés côté serveur pour un non-ADMIN, jamais
+        // seulement masqués à l'écran — même règle que le coût employeur et
+        // le grand-livre client.
+        ...(showMoney ? {
+          honoraires, honorairesPrev,
+          coutTemps, coutTempsPrev,
+          marge, margePrev,
+          tauxMarge: honoraires > 0 ? round3(marge / honoraires) : null,
+          tauxMargePrev: honorairesPrev > 0 ? round3(margePrev / honorairesPrev) : null,
+          honorairesParHeure: ratio(honoraires, heures),
+          coutParHeure: ratio(coutTemps, heures),
+          resteAEncaisser, creancesEchues, devisesExclues,
+          coutNonFacturable,
+        } : {}),
+      },
+      alerts: alerts.slice(0, 10),
+      alertsTotal: alerts.length,
+      collaborateurs: collaborateurs.map((c: any) =>
+        isAdminViewer ? c : { ...c, cout: undefined, rendementClients: undefined }),
+      operationnel: { echeancesVides, echeancesAttendues, tachesEnPause: pausedLong },
+    };
+    if (showMoney) {
+      payload.clients = clientRows;
+      payload.concentration = concentration;
+    }
+
+    res.json(payload);
+  } catch (error) {
+    console.error('Dashboard executive error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 
   app.post('/api/clients', authenticate, requirePermission('CREATE_CLIENTS'), async (req: any, res: any) => {
     try {
-      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements } = req.body;
+      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements, nonFacturable } = req.body;
 
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Client name is required' });
@@ -1608,6 +2292,10 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: status || 'Active',
         notes: notes || '',
         customFields: customFields || {},
+        // Le travail fait pour ce client n'est pas refacturé. Chaque tâche en
+        // hérite à sa création, et le fige : changer d'avis plus tard ne
+        // réécrit pas l'historique.
+        nonFacturable: !!nonFacturable,
         soldeAnterieur: num(Number(soldeAnterieur), 0),
         encaissements: normalizeEncaissements(encaissements),
         createdAt: new Date().toISOString(),
@@ -1615,7 +2303,8 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         createdBy: req.user.id
       });
 
-      res.status(201).json(await enrichClientLedger(req.user.companyId, newClient));
+      const created = await enrichClientLedger(req.user.companyId, newClient);
+      res.status(201).json((await userCan(req, 'VIEW_CLIENT_FINANCIALS')) ? created : stripLedger(created));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1625,11 +2314,18 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   app.put('/api/clients/:id', authenticate, requirePermission('EDIT_CLIENTS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements } = req.body;
+      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements, nonFacturable } = req.body;
 
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Client name is required' });
       }
+
+      // A caller who cannot see the ledger cannot overwrite it either: their
+      // form never received soldeAnterieur/encaissements, so taking them from
+      // the body would silently zero a client's balance every time someone
+      // edited a phone number.
+      const seesLedger = await userCan(req, 'VIEW_CLIENT_FINANCIALS');
+      const current = seesLedger ? null : await db.getClientById(req.user.companyId, id);
 
       const updates = {
         name: name.trim(),
@@ -1643,17 +2339,19 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: status || 'Active',
         notes: notes || '',
         customFields: customFields || {},
-        soldeAnterieur: num(Number(soldeAnterieur), 0),
-        encaissements: normalizeEncaissements(encaissements),
+        nonFacturable: !!nonFacturable,
+        soldeAnterieur: seesLedger ? num(Number(soldeAnterieur), 0) : num(Number(current?.soldeAnterieur), 0),
+        encaissements: seesLedger ? normalizeEncaissements(encaissements) : normalizeEncaissements(current?.encaissements),
         updatedAt: new Date().toISOString()
       };
-      
+
       const updated = await db.updateClient(req.user.companyId, id, updates);
       if (!updated) {
         return res.status(404).json({ error: 'Client not found' });
       }
 
-      res.json(await enrichClientLedger(req.user.companyId, updated));
+      const saved = await enrichClientLedger(req.user.companyId, updated);
+      res.json(seesLedger ? saved : stripLedger(saved));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -2116,7 +2814,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     // net-to-pay math — same rule as the retenue à la source above.
     const stampDuty = invoice.showStampDuty === false ? 0 : num(Number(invoice.stampDuty), 0); // (6)
     const netToPay = round3(totalTTC - withholdingAmount + stampDuty);              // (7)
-    const disbursements = num(Number(invoice.disbursements), 0);                    // (8)
+    // (8) — plusieurs lignes possibles ; le montant qui entre dans la cascade
+    // est leur somme, jamais un champ saisi à part qui pourrait la contredire.
+    // Un document d'avant cette version est relu comme une ligne unique.
+    const disbursementsLines = normalizeDisbursementLines(invoice);
+    const disbursements = sumDisbursements(disbursementsLines);                     // (8)
     const advances = num(Number(invoice.advances), 0);                              // (9)
     const totalNetToPay = round3(netToPay + disbursements - advances);              // (10)
 
@@ -2131,10 +2833,34 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       withholdingAmount,
       stampDuty,
       netToPay,
+      disbursementsLines,
       disbursements,
       advances,
       totalNetToPay,
     };
+  };
+
+  /**
+   * Refuse un lot de lignes de débours qui ne tient pas dans la cascade.
+   *
+   * Le normalisateur tronque au-delà de la limite ; le faire en silence
+   * ferait disparaître un montant que l'utilisateur a bien saisi, et la
+   * facture partirait pour moins que ce qui est dû. Mieux vaut refuser.
+   */
+  const disbursementsError = (body: any): string | null => {
+    const raw = body?.disbursementsLines;
+    if (raw === undefined || raw === null) return null;
+    if (!Array.isArray(raw)) return 'Les débours doivent être une liste de lignes.';
+    if (raw.length > DISBURSEMENT_LINES_MAX) {
+      return `Pas plus de ${DISBURSEMENT_LINES_MAX} lignes de débours par document.`;
+    }
+    if (raw.some((l: any) => !Number.isFinite(Number(l?.amount)))) {
+      return 'Chaque ligne de débours doit porter un montant.';
+    }
+    if (raw.some((l: any) => Number(l?.amount) < 0)) {
+      return 'Un débours ne peut pas être négatif — utilisez « Moins avances perçues ».';
+    }
+    return null;
   };
 
   /**
@@ -2176,6 +2902,186 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     return null;
   };
 
+  // ---------------------------------------------------------
+  // Brouillard de caisse — the cash daybook. One row per movement:
+  // `entree` (money in) or `sortie` (money out). A row with an `entree`
+  // tied to a client is also that client's encaissement on the Clients
+  // page — merged on read by journalEncaissementsByClient(), never copied
+  // onto the client, so there is exactly one record of the movement.
+  // ---------------------------------------------------------
+
+  /** Shared by create and update, so a row can never be saved two ways. */
+  const normalizeJournalEntry = (body: any) => {
+    const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+    const entree = round3(num(Number(body?.entree), 0));
+    const sortie = round3(num(Number(body?.sortie), 0));
+    return {
+      date: text(body?.date, 10),
+      label: text(body?.label, 200),
+      // Both are kept: the id links to a real client record, the name is what
+      // the cabinet actually typed and is the fallback the ledger matches on
+      // when a row was never linked to one (same rule invoices already use).
+      clientId: body?.clientId ? Number(body.clientId) : null,
+      clientName: text(body?.clientName, 160),
+      // Free text, not an enum: the cabinet's own sheet already carries a
+      // long, growing list (Transport, Loyer, Femme de ménage, STEG, …) and
+      // a closed list would just mean a code change every time it grows.
+      // The UI offers the known ones as suggestions.
+      category: text(body?.category, 60),
+      // Mode de règlement. Normalised to one of the known ids so the caisse
+      // rule below can rely on it; a row saved before the field existed, or
+      // one carrying free text from an older client, normalises to '' and
+      // reads as cash — see isCashMode().
+      paymentMethod: toPaymentMode(body?.paymentMethod),
+      // Only meaningful for a non-cash mode: an Espèce règlement goes to the
+      // till, not to an account, so the field is blanked rather than kept as
+      // a stale value from before the mode was switched.
+      bankAccount: isCashMode(toPaymentMode(body?.paymentMethod)) ? '' : text(body?.bankAccount, 80),
+      reference: text(body?.reference, 60),
+      entree: entree > 0 ? entree : 0,
+      sortie: sortie > 0 ? sortie : 0,
+    };
+  };
+
+  const validateJournalEntry = (row: any): string | null => {
+    if (!row.date) return 'La date est obligatoire';
+    if (!row.label && !row.clientName && !row.category) return 'Un libellé, une catégorie ou un client est obligatoire';
+    // A row with no amount is deliberately allowed: the cabinet's own journal
+    // records a bill received (STEG, OOREDOO, loyer…) before it is paid, and
+    // the running balance simply carries through unchanged.
+    // Both amounts at once is a different matter — a data-entry slip, since
+    // one line cannot be a receipt and a payment.
+    if (row.entree > 0 && row.sortie > 0) return 'Une ligne ne peut pas être à la fois une entrée et une sortie';
+    return null;
+  };
+
+  /**
+   * The objets a journal row can carry. Seeded on first read with the
+   * cabinet's own list and extended by them from the picker — held as rows,
+   * not a constant, precisely so adding one never needs a code change.
+   */
+  const SEED_CASH_CATEGORIES = [
+    'Encaissement client',
+    'Alimentation de caisse',
+    'Femme de ménage',
+    'Loyer',
+    "Produits d'hygiène",
+    'Fournitures de bureau',
+    'Transport',
+    'STEG',
+    'SONEDE',
+    'Télécommunications',
+    'OOREDOO',
+    'TELECOM',
+    'Dépannage client',
+    'Remboursement dépannage client',
+    'Autres',
+  ];
+
+  app.get('/api/cash-categories', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+    try {
+      let rows = await db.getAllCashCategories(req.user.companyId);
+      if (rows.length === 0) {
+        for (const label of SEED_CASH_CATEGORIES) {
+          await db.createCashCategory(req.user.companyId, { id: genId('cashcat'), label });
+        }
+        rows = await db.getAllCashCategories(req.user.companyId);
+      }
+      // Alphabetical, accent-aware — the picker shows them in this order.
+      res.json(rows.slice().sort((a: any, b: any) => String(a.label).localeCompare(String(b.label), 'fr')));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/cash-categories', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const label = String(req.body?.label ?? '').trim().slice(0, 60);
+      if (!label) return res.status(400).json({ error: "L'objet ne peut pas être vide" });
+
+      const existing = await db.getAllCashCategories(req.user.companyId);
+      // Case-insensitive: "transport" and "Transport" are one objet, not two
+      // near-identical entries cluttering the list.
+      const clash = existing.find((c: any) => String(c.label).toLowerCase() === label.toLowerCase());
+      if (clash) return res.json(clash);
+
+      res.status(201).json(await db.createCashCategory(req.user.companyId, { id: genId('cashcat'), label }));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/cash-categories/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteCashCategory(req.user.companyId, req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      // Rows already carrying the deleted objet keep it: the label is stored
+      // on the row, so history stays readable. Same rule as a deleted
+      // échéance status option.
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/cash-journal', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+    try {
+      const rows = (await db.getAllCashJournalEntries(req.user.companyId))
+        .slice()
+        .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/cash-journal', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const row = normalizeJournalEntry(req.body);
+      const invalid = validateJournalEntry(row);
+      if (invalid) return res.status(400).json({ error: invalid });
+
+      const created = await db.createCashJournalEntry(req.user.companyId, {
+        id: genId('caisse'),
+        ...row,
+        createdBy: req.user.id,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(created);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/cash-journal/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getCashJournalEntryById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+
+      const row = normalizeJournalEntry({ ...existing, ...req.body });
+      const invalid = validateJournalEntry(row);
+      if (invalid) return res.status(400).json({ error: invalid });
+
+      res.json(await db.updateCashJournalEntry(req.user.companyId, req.params.id, row));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/cash-journal/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteCashJournalEntry(req.user.companyId, req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
       const all = await db.getAllInvoices(req.user.companyId);
@@ -2194,7 +3100,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // currency because a document can be issued in USD/EUR: adding those to
       // dinars would produce a number that means nothing.
       const totalsByCurrency: Record<string, { totalHT: number; totalNetToPay: number; count: number }> = {};
+      let draftCount = 0;
       for (const inv of filtered) {
+        // Un brouillon figure dans la liste mais pas dans le total : il n'est
+        // pas émis. Il est compté à part pour que le décompte de la ligne de
+        // total ne semble pas se tromper.
+        if (inv.status === 'DRAFT') { draftCount += 1; continue; }
         const currency = String(inv.currency || 'TND');
         const acc = totalsByCurrency[currency] || { totalHT: 0, totalNetToPay: 0, count: 0 };
         acc.totalHT = round3(acc.totalHT + num(Number(inv.totalHT), 0));
@@ -2203,7 +3114,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         totalsByCurrency[currency] = acc;
       }
 
-      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset, totalsByCurrency });
+      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset, totalsByCurrency, draftCount });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -2261,12 +3172,26 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         : 'FACTURE_LEGALE';
       const all = await db.getAllInvoices(req.user.companyId);
 
+      /**
+       * Un brouillon n'est pas un document émis : il ne prend aucun numéro de
+       * la séquence légale, n'est soumis à aucune règle de chronologie, et ne
+       * compte nulle part comme honoraires. Il prendra son numéro à
+       * l'émission, à sa place dans l'ordre — c'est tout l'intérêt : préparer
+       * une facture sans percer un trou dans la numérotation ni gonfler le
+       * chiffre d'affaires de documents qui n'existent pas encore.
+       */
+      const isDraft = body.status === 'DRAFT';
+
       // Only a legal invoice is bound to the sequence. Both "autre" kinds
       // carry a free reference (bon de livraison, reçu, note interne…), so
       // neither follows the sequence nor consumes a number from it — doing so
       // would punch gaps in the legal numbering.
       let number: string;
-      if (kind !== 'FACTURE_LEGALE') {
+      if (isDraft) {
+        // Numéro provisoire, jamais celui de la séquence — et unique, pour
+        // que deux brouillons ne se marchent pas dessus.
+        number = `BR-${Date.now()}`;
+      } else if (kind !== 'FACTURE_LEGALE') {
         number = String(body.number ?? '').trim();
         if (!number) {
           return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
@@ -2281,12 +3206,16 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         if (dateError) return res.status(400).json({ error: dateError });
       }
 
+      const debError = disbursementsError(body);
+      if (debError) return res.status(400).json({ error: debError });
+
       const totals = computeInvoiceTotals(body);
-      if (kind === 'FACTURE_LEGALE') number = await db.nextInvoiceNumber(req.user.companyId);
+      if (kind === 'FACTURE_LEGALE' && !isDraft) number = await db.nextInvoiceNumber(req.user.companyId);
 
       const invoice = await db.createInvoice(req.user.companyId, {
         id: `inv-${Date.now()}`,
         number,
+        status: isDraft ? 'DRAFT' : 'ISSUED',
         documentKind: kind,
         title: String(body.title || 'Facture').trim(),
         billingMode: body.billingMode === 'DETAILLEE' ? 'DETAILLEE' : 'FORFAIT',
@@ -2309,6 +3238,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         attestationNumber: String(body.attestationNumber || '').trim(),
         attestationDate: body.attestationDate ? String(body.attestationDate).slice(0, 10) : '',
         bonCommandeNumber: String(body.bonCommandeNumber || '').trim(),
+        // Le libellé unique d'avant les lignes multiples. Vidé sur tout
+        // document écrit par cette version : `disbursementsLines` est le seul
+        // porteur désormais, et laisser les deux garnis ferait deux copies de
+        // la même information à tenir d'accord.
+        disbursementsLabel: '',
         // Masks the Retenue à la source / Timbre fiscal lines on the printed
         // document — and, unlike showDueDate, also drops them from the actual
         // net-to-pay math (see computeInvoiceTotals).
@@ -2341,9 +3275,16 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       const merged = { ...existing, ...req.body };
 
+      // Le statut ne se change pas par une simple modification : on émet un
+      // brouillon par /issue, qui seul sait attribuer un numéro.
+      merged.status = existing.status || 'ISSUED';
+      const editingDraft = merged.status === 'DRAFT';
+
       // A legal invoice's number belongs to the sequence and is never
       // reassigned; a free document's may be corrected.
-      if (merged.documentKind !== 'FACTURE_LEGALE') {
+      if (editingDraft) {
+        merged.number = existing.number;
+      } else if (merged.documentKind !== 'FACTURE_LEGALE') {
         const wanted = String(req.body?.number ?? existing.number ?? '').trim();
         if (!wanted) {
           return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
@@ -2371,22 +3312,129 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       }
       // Editing bypassed the ordering rule entirely, so a legal invoice created
       // in order could be moved to any date afterwards.
-      if (merged.documentKind === 'FACTURE_LEGALE') {
+      if (merged.documentKind === 'FACTURE_LEGALE' && !editingDraft) {
         const dateError = legalSequenceDateError(
           await db.getAllInvoices(req.user.companyId), existing.id, Number(merged.number), merged.issueDate,
         );
         if (dateError) return res.status(400).json({ error: dateError });
       }
+      const debError = disbursementsError(req.body);
+      if (debError) return res.status(400).json({ error: debError });
       const totals = computeInvoiceTotals(merged);
 
       const updated = await db.updateInvoice(req.user.companyId, req.params.id, {
         ...merged,
         ...totals,
+        // Le libellé unique d'avant les lignes multiples, vidé dès qu'un
+        // document passe par cette version pour qu'il ne reste qu'un porteur.
+        // Après computeInvoiceTotals, jamais avant : c'est lui qui relit ce
+        // libellé pour en faire la ligne unique d'un document hérité, et le
+        // vider d'abord effacerait l'indication en modifiant une vieille
+        // facture à laquelle on ne touchait pas les débours.
+        disbursementsLabel: '',
         updatedAt: new Date().toISOString(),
       });
       res.json(updated);
     } catch (error) {
       console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Émettre un brouillon : c'est ici, et seulement ici, qu'il prend son numéro.
+   *
+   * Le numéro est attribué au moment de l'émission, donc à sa vraie place dans
+   * la séquence — un brouillon préparé lundi et émis vendredi ne réserve pas
+   * un numéro toute la semaine, et ne laisse pas de trou s'il est abandonné.
+   */
+  app.post('/api/invoices/:id/issue', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+      if (existing.status !== 'DRAFT') {
+        return res.status(409).json({ error: 'Ce document est déjà émis.' });
+      }
+
+      const all = await db.getAllInvoices(req.user.companyId);
+      let number = existing.number;
+
+      if (existing.documentKind === 'FACTURE_LEGALE') {
+        // Même règle qu'à la création : une facture émise maintenant est la
+        // dernière de la séquence, donc Infinity.
+        const dateError = legalSequenceDateError(all, existing.id, Infinity, existing.issueDate);
+        if (dateError) return res.status(400).json({ error: dateError });
+        number = await db.nextInvoiceNumber(req.user.companyId);
+      } else {
+        // Un autre document porte une référence libre : elle est demandée à
+        // l'émission si le brouillon n'en portait pas encore de vraie.
+        const wanted = String(req.body?.number ?? '').trim();
+        if (!wanted) {
+          return res.status(400).json({ error: 'Le numéro du document est obligatoire pour l\'émettre.' });
+        }
+        if (all.some((i: any) => i.id !== existing.id && i.number === wanted)) {
+          return res.status(400).json({ error: `Le numéro « ${wanted} » est déjà utilisé.` });
+        }
+        number = wanted;
+      }
+
+      res.json(await db.updateInvoice(req.user.companyId, existing.id, {
+        status: 'ISSUED',
+        number,
+        issuedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      console.error('Issue invoice error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Transformer un autre document en facture légale.
+   *
+   * Le document prend le prochain numéro de la séquence légale — il ne garde
+   * pas sa référence libre, qui n'appartient pas à la séquence — et se place
+   * donc en dernier. La règle de chronologie s'applique dès cet instant : une
+   * facture légale ne peut pas porter une date antérieure à celle qui la
+   * précède, quelle que soit la façon dont elle est née.
+   */
+  app.post('/api/invoices/:id/convert-to-legal', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+      if (existing.documentKind === 'FACTURE_LEGALE') {
+        return res.status(409).json({ error: 'Ce document est déjà une facture légale.' });
+      }
+      if (existing.status === 'DRAFT') {
+        return res.status(409).json({ error: 'Émettez le brouillon en facture légale plutôt que de le convertir.' });
+      }
+
+      const all = await db.getAllInvoices(req.user.companyId);
+      const dateError = legalSequenceDateError(all, existing.id, Infinity, existing.issueDate);
+      if (dateError) {
+        return res.status(400).json({
+          error: `${dateError} Corrigez la date du document avant de le convertir.`,
+        });
+      }
+
+      const number = await db.nextInvoiceNumber(req.user.companyId);
+      // La cascade est recalculée : passer en facture légale peut changer la
+      // retenue et le timbre, donc le net à payer.
+      const totals = computeInvoiceTotals({ ...existing, documentKind: 'FACTURE_LEGALE' });
+      const updated = await db.updateInvoice(req.user.companyId, existing.id, {
+        documentKind: 'FACTURE_LEGALE',
+        number,
+        // Garde la trace de ce qu'il était : la référence libre d'origine
+        // reste retrouvable, sans quoi le document devient introuvable pour
+        // qui le connaissait sous son ancien numéro.
+        convertedFromNumber: existing.number,
+        convertedAt: new Date().toISOString(),
+        ...totals,
+      });
+      console.warn(`[cash] document ${existing.number} converti en facture légale n° ${number}, par ${req.user.username}`);
+      res.json(updated);
+    } catch (error) {
+      console.error('Convert invoice error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -3290,6 +4338,31 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       res.status(201).json(message);
       sendToUser(req.user.companyId, toUserId, { type: 'message', message });
       sendToUser(req.user.companyId, req.user.id, { type: 'message', message });
+
+      // Pushed straight from here rather than through notify(): a message
+      // must not become a notification row — the bell derives its message
+      // counts from the thread's own readAt, and a row per message would be
+      // a second "is this read" record to keep in sync with it. Tag matches
+      // the bell's own `msg-<senderId>` so the app-open and app-closed paths
+      // collapse into one OS notification instead of stacking two.
+      if (pushEnabled()) {
+        (async () => {
+          const subs = (await db.getAllPushSubscriptionsForCompany(req.user.companyId)).filter((s: any) => s.userId === toUserId);
+          if (!subs.length) return;
+          const sender = await db.getUserById(req.user.companyId, req.user.id);
+          const senderName = sender?.fullName || sender?.username || 'Collaborateur';
+          const payload = {
+            title: `Nouveau message — ${senderName}`,
+            body: body.length > 120 ? body.slice(0, 117) + '…' : body,
+            nav: 'Messages',
+            tag: `msg-${req.user.id}`,
+          };
+          for (const sub of subs) {
+            const { expired } = await sendPush(sub, payload);
+            if (expired) await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+          }
+        })().catch((error) => console.error('[push] message fan-out failed:', error));
+      }
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -3360,6 +4433,9 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         ...e,
         dureeSeconds: secs,
         userName: usersById.get(e.userId)?.username || 'Unknown',
+        // Resolved off the same map as userName rather than with a second
+        // lookup per row — the scale rules forbid a find() inside this loop.
+        lastEditedByName: e.lastEditedBy ? (usersById.get(e.lastEditedBy)?.username || 'Unknown') : undefined,
       };
       if (!forAdmin) {
         delete base.hourlyRate;
@@ -3472,6 +4548,77 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   });
 
   /**
+   * The caller's own current task — the RUNNING one, or failing that their
+   * most recent PAUSED one so it can be resumed. Exists for the floating
+   * chronometer, which is mounted on every page: the SSE stream only runs
+   * while Pointage is open (it pushes a whole page of every user's entries,
+   * far too much to hold open everywhere), so the widget polls this instead.
+   * One row, own rows only — bounded no matter how large the history is.
+   */
+  app.get('/api/time-entries/active', authenticate, async (req: any, res: any) => {
+    try {
+      const mine = (await db.getAllTimeEntries(req.user.companyId))
+        .filter((e: any) => e.userId === req.user.id);
+      // Newest-first ordering is load-bearing here: createTimeEntry prepends,
+      // so the first PAUSED row is the most recent one.
+      const entry = mine.find((e: any) => e.statut === 'RUNNING')
+        || mine.find((e: any) => e.statut === 'PAUSED');
+      if (!entry) return res.json({ entry: null });
+      const [enriched] = await enrichEntries(req.user.companyId, [entry], req.user.role === 'ADMIN');
+      res.json({ entry: enriched });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Web Push — how an ordinary notification (task assigned, a leave
+  // decision, a new message) reaches a device with the browser closed.
+  //
+  // The running chronometer used to be delivered here too: a 15-minute sweep
+  // redrawing an ongoing notification with Pause / Arrêter on every device
+  // whose owner had a task running, plus an unauthenticated
+  // POST /api/push/timer-action for those buttons. All of it was removed at
+  // the user's request — the app no longer puts the timer in front of
+  // someone who has left the browser. The chronometer lives in the app: the
+  // floating card on every page, and Pointage.
+  // ---------------------------------------------------------
+
+  /** Readable by any authenticated user: the browser needs it to subscribe. */
+  app.get('/api/push/public-key', authenticate, (_req: any, res: any) => {
+    res.json({ key: pushEnabled() ? pushPublicKey() : null });
+  });
+
+  app.post('/api/push/subscribe', authenticate, async (req: any, res: any) => {
+    try {
+      const { endpoint, keys } = req.body || {};
+      if (!endpoint || !keys?.p256dh || !keys?.auth) {
+        return res.status(400).json({ error: 'Abonnement invalide' });
+      }
+      await db.createPushSubscription(req.user.companyId, {
+        id: genId('push'),
+        userId: req.user.id,
+        endpoint: String(endpoint),
+        keys: { p256dh: String(keys.p256dh), auth: String(keys.auth) },
+        createdAt: new Date().toISOString(),
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/push/unsubscribe', authenticate, async (req: any, res: any) => {
+    try {
+      await db.deletePushSubscriptionByEndpoint(String(req.body?.endpoint || ''));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * The one place a time entry is actually created — used by the normal
    * "démarrer une tâche" POST below and by starting an assigned task, so the
    * historical-rate snapshot, server-owned timestamps and the one-running-
@@ -3482,8 +4629,38 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * `id: undefined`, which no route could then update or delete and which
    * broke React's keys in the table.
    */
-  const createRunningEntryForUser = async (companyId: string, userId: number, fields: any) => {
+  /**
+   * Which kind of device a request came from — recorded on a time entry so
+   * the team can see that a task was started or changed from a phone rather
+   * than at a desk.
+   *
+   * `Sec-CH-UA-Mobile` is the browser telling us directly and is preferred
+   * where it exists (Chromium, so most Android phones); the User-Agent regex
+   * is the fallback that covers Safari/iOS and Firefox. Both are self-reported
+   * by the browser and trivially spoofable — this is a convenience for
+   * reading the timesheet, never evidence, and nothing is gated on it.
+   */
+  const deviceFromRequest = (req: any): 'MOBILE' | 'DESKTOP' => {
+    const hint = String(req.headers?.['sec-ch-ua-mobile'] || '');
+    if (hint === '?1') return 'MOBILE';
+    if (hint === '?0') return 'DESKTOP';
+    const ua = String(req.headers?.['user-agent'] || '');
+    return /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile|Silk/i.test(ua) ? 'MOBILE' : 'DESKTOP';
+  };
+
+  const createRunningEntryForUser = async (companyId: string, userId: number, fields: any, via?: 'MOBILE' | 'DESKTOP') => {
     const userFull = await db.getUserById(companyId, userId);
+    /**
+     * Facturable ou non — figé ici, à la création, comme `pole` et
+     * `hourlyRate` le sont déjà. Cocher « non facturable » sur un client plus
+     * tard ne doit pas requalifier rétroactivement le travail déjà pointé, ni
+     * le décocher rendre facturable ce qui ne l'était pas.
+     */
+    let facturable = true;
+    if (fields.clientId != null) {
+      const client = await db.getClientById(companyId, Number(fields.clientId));
+      if (client?.nonFacturable) facturable = false;
+    }
     const settings = await db.getSettings(companyId) || {};
     // Snapshot the author's employer cost. Reads resolve it live as well, so
     // this is only a record of the rate in force when the task was created.
@@ -3508,12 +4685,16 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       userId,
       hourlyRate,
       lastStartedAt: Date.now(),
+      facturable,
+      // The device the task was started from. Never rewritten afterwards —
+      // editing a task from a laptop doesn't change where it was started.
+      ...(via ? { createdVia: via } : {}),
     });
   };
 
   app.post('/api/time-entries', authenticate, async (req: any, res: any) => {
     try {
-      const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, req.body);
+      const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, req.body, deviceFromRequest(req));
       res.json(entry);
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
@@ -3534,11 +4715,19 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
 
       let updates = { ...req.body };
 
-      if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
+      // Only a body that actually carries `statut` is a status transition.
+      // Without this guard the `else if` below fired on *any* PUT that
+      // omitted it — folding the elapsed time in and nulling `lastStartedAt`
+      // on a task that stays RUNNING, which freezes its clock. Nothing hit it
+      // while every caller happened to send the whole entry back, but
+      // updating one field of a running task is a reasonable thing to do.
+      const isStatusChange = req.body.statut !== undefined;
+
+      if (isStatusChange && req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
          updates.lastStartedAt = Date.now();
          // Back in progress: an end time would be misleading.
          if (updates.heureFin === undefined) updates.heureFin = '';
-      } else if (req.body.statut !== 'RUNNING' && existing.statut === 'RUNNING') {
+      } else if (isStatusChange && req.body.statut !== 'RUNNING' && existing.statut === 'RUNNING') {
          // Stopping or pausing
          if (existing.lastStartedAt) {
             const added = Math.floor((Date.now() - existing.lastStartedAt) / 1000);
@@ -3558,6 +4747,22 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // resuming someone else's) pauses whatever else that person had running.
       if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
         await pauseOtherRunningEntries(req.user.companyId, existing.userId, entryId);
+      }
+
+      // Who last touched this task, from what kind of device, and when.
+      // `lastEditedBy` matters as much as the device: an admin pausing
+      // someone else's task from a laptop must not read as that collaborator
+      // having done it themselves.
+      //
+      // A write that only carries `overtimeAckCycle` is skipped — that is the
+      // 2h popup recording itself, not somebody editing the task, and letting
+      // it through would mark a task "modified" that nobody touched.
+      const bodyKeys = Object.keys(req.body);
+      const isSilentWrite = bodyKeys.length > 0 && bodyKeys.every(k => k === 'overtimeAckCycle' || k === 'id');
+      if (!isSilentWrite) {
+        updates.lastEditedVia = deviceFromRequest(req);
+        updates.lastEditedBy = req.user.id;
+        updates.lastEditedAt = new Date().toISOString();
       }
 
       const updated = await db.updateTimeEntry(req.user.companyId, entryId, updates);
@@ -3593,6 +4798,24 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
   // ---------------------------------------------------------
 
   /**
+   * Where clicking a pushed notification lands. Mirrors TYPE_META in
+   * NotificationBell.tsx — the service worker has no access to that map, so
+   * the destination has to travel inside the push payload itself.
+   */
+  const PUSH_NAV_FOR_TYPE: Record<string, string> = {
+    TASK_ASSIGNED: 'Dashboard',
+    TASK_REMINDER: 'Dashboard',
+    LEAVE_REQUEST: 'HR',
+    LEAVE_DECISION: 'HR',
+    ABSENCE_REQUEST: 'HR',
+    ABSENCE_DECISION: 'HR',
+    LOAN_REQUEST: 'HR',
+    LOAN_DECISION: 'HR',
+    ADVANCE_REQUEST: 'HR',
+    ADVANCE_DECISION: 'HR',
+  };
+
+  /**
    * The one place a notification is created. `type` picks where the bell
    * sends the user when they click it (see NOTIFICATION_LINK in the client).
    *
@@ -3602,15 +4825,33 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
    * hoisted through the whole scope; a `const` would not be.
    */
   async function notify(companyId: string, userId: number, type: string, title: string, body: string) {
-    await db.createNotification(companyId, {
-      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      userId,
-      type,
-      title,
-      body,
-      readAt: null,
-      createdAt: new Date().toISOString(),
-    });
+    const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await db.createNotification(companyId, { id, userId, type, title, body, readAt: null, createdAt: new Date().toISOString() });
+
+    // Reaches a closed browser the same way the chronometer does — this is a
+    // second, independent use of that same push infrastructure (subscribe/
+    // sendPush/pushEnabled), not a competing one: one device subscription
+    // already receives both kinds of push.
+    //
+    // Deliberately not awaited: the notification row is already durable and
+    // the bell shows it either way, so a slow round-trip to the push service
+    // must not sit in front of the HTTP response of whoever triggered this
+    // (an approver clicking "Approuver" would otherwise wait on it).
+    if (pushEnabled()) {
+      (async () => {
+        const subs = (await db.getAllPushSubscriptionsForCompany(companyId)).filter((s: any) => s.userId === userId);
+        for (const sub of subs) {
+          // Tag matches the one NotificationBell.tsx builds for this same row
+          // — `notif-${n.id}`, and `id` here already starts with `notif-`
+          // (see the id generated just above), so this is genuinely
+          // `notif-notif-…`, not a typo. With the app open, the client's own
+          // poll already draws this; the identical tag is what makes the two
+          // collapse into one notification instead of stacking two.
+          const { expired } = await sendPush(sub, { title, body, nav: PUSH_NAV_FOR_TYPE[type] || 'Dashboard', tag: `notif-${id}` });
+          if (expired) await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+        }
+      })().catch((error) => console.error('[push] notify() fan-out failed:', error));
+    }
   }
 
   const NOTIFICATIONS_PAGE_SIZE = 50;
@@ -3805,7 +5046,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         taskTypeId: assignment.taskTypeId,
         description: assignment.description,
         statut: 'RUNNING',
-      });
+      }, deviceFromRequest(req));
 
       const updated = await db.updateTaskAssignment(req.user.companyId, assignment.id, {
         status: 'STARTED',
@@ -4435,12 +5676,12 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const contactName = text(req.body?.contactName, 120);
       const contactEmail = text(req.body?.contactEmail, 160);
       const phone = text(req.body?.phone, 40);
-      const username = text(req.body?.username, 60);
       const password = String(req.body?.password ?? '');
       const confirmPassword = String(req.body?.confirmPassword ?? '');
       const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : 'FREELANCE';
+      const secteur: Secteur = SECTEURS.some(s => s.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
 
-      if (!companyName || !contactName || !contactEmail || !phone || !username) {
+      if (!companyName || !contactName || !contactEmail || !phone) {
         return res.status(400).json({ error: 'Tous les champs sont requis' });
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
@@ -4452,8 +5693,14 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       if (password !== confirmPassword) {
         return res.status(400).json({ error: 'Les mots de passe ne correspondent pas' });
       }
+
+      // No separate username at signup — the email itself is the login
+      // identifier, lowercased so a differently-cased retype at login still
+      // matches (usernames are otherwise compared as typed everywhere else
+      // in this app, but those are hand-picked short names, not emails).
+      const username = contactEmail.toLowerCase();
       if (await db.getUserByUsername(username)) {
-        return res.status(400).json({ error: "Ce nom d'utilisateur est déjà pris" });
+        return res.status(400).json({ error: 'Cette adresse email est déjà utilisée' });
       }
 
       const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -4463,6 +5710,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         status: 'TRIAL',
         plan,
         seatLimit: PLAN_SEAT_LIMITS[plan] || 1,
+        secteur,
         createdAt: new Date().toISOString(),
         trialEndsAt,
         contactName, contactEmail, phone,
@@ -4515,11 +5763,106 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
+  /**
+   * Forgot password. The only email attached to a company is its own
+   * `contactEmail` — the address entered once at signup; individual
+   * collaborator accounts have no email of their own — so this always
+   * resets that company's ADMIN account. Always responds the same way
+   * whether or not the email matched anything, so it can't be used to
+   * probe which addresses have an account.
+   */
+  app.post('/api/auth/forgot-password', async (req: any, res: any) => {
+    try {
+      const email = String(req.body?.email ?? '').trim().toLowerCase();
+      if (email) {
+        const companies = await db.getAllCompanies();
+        const company = companies.find((c: any) => (c.contactEmail || '').toLowerCase() === email);
+        if (company) {
+          const users = await db.getAllUsers(company.id);
+          const admin = users.find((u: any) => u.role === 'ADMIN');
+          if (admin) {
+            // `pwd` pins the token to the password hash it was issued against —
+            // once the reset actually happens (or the password changes any
+            // other way) the hash moves on and the same emailed link can't be
+            // replayed for the rest of its 1h validity.
+            const resetToken = jwt.sign(
+              { purpose: 'password_reset', userId: admin.id, companyId: company.id, pwd: admin.password },
+              JWT_SECRET, { expiresIn: '1h' },
+            );
+            const link = `https://taches-and-cash.com/?reset=${resetToken}`;
+            // No `from` override here — the SMTP account is only authorized
+            // to send as whatever SMTP_FROM/SMTP_USER is configured with
+            // (support@taches-and-cash.com was rejected by the relay with a
+            // 550 "sender address rejected"); every other transactional
+            // email in this app already relies on that same default.
+            await sendMail({
+              to: company.contactEmail,
+              fromName: 'Tâches & Cash — Support',
+              replyTo: 'support@taches-and-cash.com',
+              subject: 'Réinitialisation de votre mot de passe',
+              html: `
+                <p>Bonjour ${escapeHtml(company.contactName || '')},</p>
+                <p>Vous avez demandé la réinitialisation de votre mot de passe Tâches &amp; Cash.</p>
+                <p><a href="${link}">Cliquez ici pour choisir un nouveau mot de passe</a></p>
+                <p>Ce lien expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>
+                <p style="margin-top:24px;padding-top:16px;border-top:1px solid #E6E9EE;color:#8A93A0;font-size:12px;">
+                  Tâches &amp; Cash — <a href="mailto:support@taches-and-cash.com">support@taches-and-cash.com</a>
+                </p>
+              `,
+            }).catch(() => {});
+          }
+        }
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/auth/reset-password', async (req: any, res: any) => {
+    try {
+      const token = String(req.body?.token ?? '');
+      const password = String(req.body?.password ?? '');
+      const confirmPassword = String(req.body?.confirmPassword ?? '');
+
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+      }
+      if (password !== confirmPassword) {
+        return res.status(400).json({ error: 'Les mots de passe ne correspondent pas' });
+      }
+
+      let payload: any;
+      try {
+        payload = jwt.verify(token, JWT_SECRET);
+      } catch {
+        return res.status(400).json({ error: 'Lien invalide ou expiré. Demandez un nouveau lien.' });
+      }
+      if (payload?.purpose !== 'password_reset') {
+        return res.status(400).json({ error: 'Lien invalide ou expiré. Demandez un nouveau lien.' });
+      }
+
+      const user = await db.getUserById(payload.companyId, payload.userId);
+      if (!user || payload.pwd !== user.password) {
+        return res.status(400).json({ error: 'Lien invalide ou expiré. Demandez un nouveau lien.' });
+      }
+
+      const hashed = await bcrypt.hash(password, 10);
+      await db.updateUser(payload.companyId, payload.userId, { password: hashed });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // ---------------------------------------------------------
   // Platform admin — cross-tenant. Confirming a company's payment, sending
-  // the platform's own RIB, and editing that RIB are the only actions here;
-  // everything else about a company's own data stays reachable only through
-  // its own scoped routes above.
+  // the platform's own RIB, editing that RIB, and managing a company's own
+  // users are the only actions here; everything else about a company's own
+  // data stays reachable only through its own scoped routes above.
   // ---------------------------------------------------------
 
   /** Every real customer company (the legacy cabinet itself is excluded — it isn't one). */
@@ -4532,6 +5875,134 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')),
       );
     } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Modifier une entreprise depuis la console plateforme.
+   *
+   * Liste blanche de champs : le corps ne peut pas écrire `id`, `createdAt`
+   * ni quoi que ce soit d'autre. `status` et `plan` restent hors de portée —
+   * ils se changent par les actions dédiées (confirmation de paiement), qui
+   * portent leurs propres effets de bord ; les laisser modifiables ici
+   * ouvrirait un second chemin capable d'activer un compte sans paiement.
+   */
+  app.put('/api/platform/companies/:id', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const id = String(req.params.id);
+      if (id === LEGACY_COMPANY_ID) {
+        return res.status(403).json({ error: "L'entreprise historique ne se modifie pas depuis cette console." });
+      }
+      const company = await db.getCompanyById(id);
+      if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      const name = text(req.body?.name, 160);
+      if (!name) return res.status(400).json({ error: "Le nom de l'entreprise est obligatoire" });
+
+      const updates: any = {
+        name,
+        contactName: text(req.body?.contactName, 120),
+        contactEmail: text(req.body?.contactEmail, 160),
+        phone: text(req.body?.phone, 40),
+        secteur: text(req.body?.secteur, 80) || company.secteur,
+      };
+      // Le nombre de sièges reste modifiable à la main : un cabinet peut en
+      // négocier plus que son offre n'en donne. Absent du corps, on garde
+      // l'existant plutôt que de le remettre à la valeur de l'offre.
+      if (req.body?.seatLimit !== undefined && req.body.seatLimit !== '') {
+        const seats = Number(req.body.seatLimit);
+        if (!Number.isFinite(seats) || seats < 1) {
+          return res.status(400).json({ error: 'Le nombre de sièges doit être un entier positif' });
+        }
+        updates.seatLimit = Math.floor(seats);
+      }
+      // Prolonger ou raccourcir un essai — la seule date que la console a une
+      // raison de toucher.
+      if (req.body?.trialEndsAt !== undefined) {
+        const d = String(req.body.trialEndsAt || '').slice(0, 10);
+        updates.trialEndsAt = d ? new Date(`${d}T23:59:59Z`).toISOString() : null;
+      }
+
+      res.json(await db.updateCompany(id, updates));
+    } catch (error) {
+      console.error('Platform update company error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Ouvrir ou fermer l'accès d'une entreprise.
+   *
+   * Route à part, et pas un champ de plus dans le PUT : suspendre est une
+   * décision d'exploitation, réactiver ne doit jamais pouvoir *créer* un
+   * abonnement payé. On suspend en mémorisant le statut d'avant, et on le
+   * restaure tel quel — un essai suspendu redevient un essai, pas un compte
+   * actif.
+   *
+   * Aucune donnée n'est touchée : seule la connexion est refusée.
+   */
+  app.put('/api/platform/companies/:id/access', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const id = String(req.params.id);
+      if (id === LEGACY_COMPANY_ID) {
+        return res.status(403).json({ error: "L'entreprise historique ne peut pas être suspendue." });
+      }
+      const company = await db.getCompanyById(id);
+      if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      const active = req.body?.active !== false;
+      if (active) {
+        if (company.status !== 'SUSPENDED') return res.json(company);
+        // Restaure ce qu'il y avait avant la suspension. À défaut (compte
+        // suspendu avant que ce champ n'existe), on retombe sur EXPIRED :
+        // c'est le statut qui ne donne aucun droit non payé, donc le seul
+        // repli honnête.
+        const restored = company.statusBeforeSuspension || 'EXPIRED';
+        return res.json(await db.updateCompany(id, { status: restored, statusBeforeSuspension: null }));
+      }
+      if (company.status === 'SUSPENDED') return res.json(company);
+      console.warn(`[platform] accès suspendu : ${company.name} (${id}), par ${req.user.username}`);
+      res.json(await db.updateCompany(id, { status: 'SUSPENDED', statusBeforeSuspension: company.status }));
+    } catch (error) {
+      console.error('Platform access toggle error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Supprimer une entreprise et TOUTES ses données.
+   *
+   * Irréversible et sans corbeille : la confirmation est donc exigée dans la
+   * requête elle-même (`confirmName` doit répondre au nom exact), et pas
+   * seulement dans une boîte de dialogue du navigateur — une console
+   * plateforme s'appelle aussi au curl.
+   */
+  app.delete('/api/platform/companies/:id', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const id = String(req.params.id);
+      if (id === LEGACY_COMPANY_ID) {
+        return res.status(403).json({ error: "L'entreprise historique ne peut pas être supprimée." });
+      }
+      const company = await db.getCompanyById(id);
+      if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      const confirmName = String(req.query.confirmName ?? req.body?.confirmName ?? '').trim();
+      if (confirmName !== String(company.name || '').trim()) {
+        return res.status(400).json({
+          error: "Confirmation invalide : renvoyez le nom exact de l'entreprise dans `confirmName`.",
+        });
+      }
+
+      const users = await db.getAllUsers(id);
+      const ok = await db.deleteCompany(id);
+      if (!ok) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      console.warn(`[platform] entreprise supprimée : ${company.name} (${id}), ${users.length} utilisateur(s), par ${req.user.username}`);
+      res.json({ success: true, deletedUsers: users.length });
+    } catch (error) {
+      console.error('Platform delete company error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -4640,6 +6111,63 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       res.json({ company: updated, emailSent: sent });
     } catch (error) {
       console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Every user of one customer company — cross-tenant, so scoped through :id rather than the caller's own companyId. */
+  app.get('/api/platform/companies/:id/users', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.params.id);
+      if (!company) return res.status(404).json({ error: 'Not found' });
+      const users = await db.getAllUsers(company.id);
+      res.json(users.map(publicUser).sort((a: any, b: any) => a.username.localeCompare(b.username)));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/platform/companies/:id/users/:userId', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const userId = parseInt(req.params.userId, 10);
+      const user = await db.getUserById(req.params.id, userId);
+      if (!user) return res.status(404).json({ error: 'Not found' });
+
+      const updates: any = {};
+
+      const username = typeof req.body?.username === 'string' ? req.body.username.trim() : undefined;
+      if (username && username !== user.username) {
+        const existing = await db.getUserByUsername(username);
+        if (existing) return res.status(400).json({ error: "Ce nom d'utilisateur est déjà pris" });
+        updates.username = username;
+      }
+
+      if (typeof req.body?.role === 'string' && ROLES.some(r => r.id === req.body.role)) {
+        updates.role = req.body.role;
+      }
+
+      if (typeof req.body?.password === 'string' && req.body.password) {
+        if (req.body.password.length < 6) {
+          return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+        }
+        updates.password = await bcrypt.hash(req.body.password, 10);
+      }
+
+      const updated = await db.updateUser(req.params.id, userId, updates);
+      res.json(publicUser(updated));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/platform/companies/:id/users/:userId', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const userId = parseInt(req.params.userId, 10);
+      const success = await db.deleteUser(req.params.id, userId);
+      if (!success) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });

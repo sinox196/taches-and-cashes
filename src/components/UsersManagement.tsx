@@ -7,6 +7,7 @@ import { ROLES, roleMeta, type Role } from '../constants/roles';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
 import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import { ExportButton } from './ExportButton';
 
 const PERMISSIONS_GROUPED = [
   {
@@ -27,7 +28,7 @@ const PERMISSIONS_GROUPED = [
       { id: 'EDIT_CLIENTS', label: 'Modifier clients', desc: 'Peut modifier les clients existants' },
       { id: 'DELETE_CLIENTS', label: 'Supprimer clients', desc: 'Peut archiver/supprimer des clients' },
       { id: 'MANAGE_CLIENT_FIELDS', label: 'Gérer champs', desc: 'Peut gérer les champs personnalisés' },
-      { id: 'VIEW_CLIENT_FINANCIALS', label: 'Voir totaux financiers', desc: 'Peut voir la barre "Total Général" (soldes, facturé, encaissé, reste à payer) sur la liste des clients' },
+      { id: 'VIEW_CLIENT_FINANCIALS', label: 'Voir totaux financiers', desc: 'Peut voir les colonnes Solde antérieur, Montant de facture, Encaissements et Reste à payer sur la liste des clients, ainsi que la barre "Total Général". Sans cette permission, ces chiffres ne sont pas envoyés au navigateur.' },
     ]
   },
   {
@@ -292,7 +293,7 @@ export const UsersManagement: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1000px] w-full mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">
             {t('users.title')}
@@ -301,13 +302,25 @@ export const UsersManagement: React.FC = () => {
             {t('users.subtitle')}
           </p>
         </div>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <ExportButton
+          fileName="utilisateurs"
+          rows={users}
+          columns={[
+            { header: 'Utilisateur', value: (u: any) => u.username },
+            { header: 'Rôle', value: (u: any) => roleMeta(u.role).label },
+            { header: 'Permissions', value: (u: any) => (u.role === 'ADMIN' ? 'Accès complet' : (u.permissions || []).join(' | ')) },
+            { header: 'Solde congés (jours)', value: (u: any) => u.soldeConge ?? '' },
+          ]}
+        />
         <button
           onClick={handleOpenCreate}
-          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors shrink-0 whitespace-nowrap"
         >
           <Plus className="w-4 h-4" />
           <span>{t('users.add')}</span>
         </button>
+        </div>
       </div>
 
       <PresenceSettingsCard />
@@ -318,7 +331,11 @@ export const UsersManagement: React.FC = () => {
             <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         ) : (
-          <table className="w-full text-left border-collapse">
+          // Five columns, one of them a bag of permission chips: it does not
+          // fit a phone, so it scrolls sideways instead of being clipped by
+          // the card's own overflow-hidden.
+          <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[760px]">
             <thead>
               <tr className="bg-[#F9FAFB] border-b border-gray-200">
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -370,7 +387,7 @@ export const UsersManagement: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => handleOpenEdit(user)}
                         className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
@@ -396,6 +413,7 @@ export const UsersManagement: React.FC = () => {
               )}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -439,6 +457,10 @@ export const UsersManagement: React.FC = () => {
                   </label>
                   <input
                     type="password"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore
+                    data-form-type="other"
                     required={!editingUserId}
                     value={formPassword}
                     onChange={e => setFormPassword(e.target.value)}

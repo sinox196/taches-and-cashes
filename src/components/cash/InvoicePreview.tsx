@@ -4,6 +4,7 @@ import { X, Printer, Download, Pencil, Trash2 } from 'lucide-react';
 import { amountToFrenchWords } from '../../utils/amountToWords';
 import { useAuth } from '../../context/AuthContext';
 import { downloadInvoicePdf, printInvoicePdf, CompanyBlock } from './invoicePdf';
+import { normalizeDisbursementLines } from '../../constants/disbursements';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -51,6 +52,9 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
   const custom = Object.entries(invoice.customFields || {});
   const currency = invoice.currency || 'TND';
   const currencySuffix = CURRENCY_SUFFIX[currency] || currency;
+  // Même normalisation que l'éditeur et le PDF : l'aperçu et le document
+  // imprimé ne peuvent pas afficher des débours différents.
+  const debLines = normalizeDisbursementLines(invoice);
 
   // The issuer block belongs on every document, so it is loaded once here and
   // handed to the PDF as well as rendered below.
@@ -246,7 +250,22 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                 <Row label="Timbre fiscal" value={money(invoice.stampDuty)} />
               )}
               <Row label="Net à payer" value={money(invoice.netToPay)} strong />
-              {invoice.disbursements > 0 && <Row label="Remboursement de débours" value={`+ ${money(invoice.disbursements)}`} />}
+              {debLines.length === 1 && (
+                <Row
+                  label={debLines[0].label
+                    ? `Remboursement de débours — ${debLines[0].label}`
+                    : 'Remboursement de débours'}
+                  value={`+ ${money(debLines[0].amount)}`}
+                />
+              )}
+              {debLines.length > 1 && (
+                <>
+                  <Row label="Remboursement de débours" value={`+ ${money(invoice.disbursements)}`} />
+                  {debLines.map((l, i) => (
+                    <Row key={i} label={`\u00a0\u00a0\u00a0\u00a0${l.label || 'Débours'}`} value={money(l.amount)} />
+                  ))}
+                </>
+              )}
               {invoice.advances > 0 && <Row label="Moins avances perçues" value={`− ${money(invoice.advances)}`} />}
               <div className="flex justify-between px-4 py-3 bg-navy text-white">
                 <span className="font-bold">Montant de facture</span>

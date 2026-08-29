@@ -60,7 +60,8 @@ export async function initDb(): Promise<Database> {
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
   'absenceAuthorizations', 'loans', 'advances', 'attendanceRecords', 'leaveBalances', 'timeEntries', 'messages',
-  'taskAssignments', 'notifications', 'resourceTemplates', 'resourceTemplateItems',
+  'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories',
+  'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
 ];
@@ -84,6 +85,9 @@ async function initJsonDb(): Promise<Database> {
     if (!db.messages) db.messages = [];
     if (!db.taskAssignments) db.taskAssignments = [];
     if (!db.notifications) db.notifications = [];
+    if (!db.pushSubscriptions) db.pushSubscriptions = [];
+    if (!db.cashJournalEntries) db.cashJournalEntries = [];
+    if (!db.cashCategories) db.cashCategories = [];
     if (!db.resourceTemplates) db.resourceTemplates = [];
     if (!db.resourceTemplateItems) db.resourceTemplateItems = [];
     if (!db.clientResourceInstances) db.clientResourceInstances = [];
@@ -175,7 +179,11 @@ async function initJsonDb(): Promise<Database> {
   };
 
   const impl: Database = {
-    getUserByUsername: async (username: string) => db.users.find((u: any) => u.username === username),
+    // Case-insensitive: a self-serve signup's username is its email
+    // (lowercased when stored), and login must still match it however the
+    // visitor happens to capitalize it when typing it back in.
+    getUserByUsername: async (username: string) =>
+      db.users.find((u: any) => String(u.username).toLowerCase() === String(username).toLowerCase()),
     getUserById: async (companyId: string, id: number) => findScoped(db.users, companyId, id),
 
     getAllCompanies: async () => db.companies,
@@ -191,6 +199,28 @@ async function initJsonDb(): Promise<Database> {
       db.companies[index] = { ...db.companies[index], ...updates };
       await saveDb();
       return db.companies[index];
+    },
+
+    deleteCompany: async (id: string) => {
+      const index = db.companies.findIndex((c: any) => c.id === id);
+      if (index === -1) return false;
+      // Purge générique : toute collection dont les lignes portent un
+      // companyId. Balayer les clés plutôt que de les lister une à une, pour
+      // qu'une collection ajoutée plus tard soit purgée sans qu'on ait à y
+      // repenser — l'oubli laisserait les données d'un tenant supprimé
+      // visibles par le suivant si un id venait à être réutilisé.
+      for (const key of Object.keys(db)) {
+        if (key === 'companies' || key === 'orders') continue;
+        if (Array.isArray(db[key])) {
+          db[key] = db[key].filter((row: any) => row?.companyId !== id);
+        }
+      }
+      // settingsByCompany est indexé par `id`, pas par `companyId` : le filtre
+      // générique ci-dessus ne l'attrape pas.
+      db.settingsByCompany = (db.settingsByCompany || []).filter((s: any) => s.id !== id);
+      db.companies.splice(index, 1);
+      await saveDb();
+      return true;
     },
 
     getAllUsers: async (companyId: string) => scoped(db.users, companyId),
@@ -500,6 +530,64 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.taskAssignments, companyId, id);
       if (index === -1) return false;
       db.taskAssignments.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllPushSubscriptionsForCompany: async (companyId: string) => scoped(db.pushSubscriptions, companyId),
+    getAllPushSubscriptions: async () => db.pushSubscriptions,
+    createPushSubscription: async (companyId: string, subscription: any) => {
+      const row = { ...subscription, companyId };
+      // Keyed by endpoint, not id: re-subscribing the same device (permission
+      // re-granted, new login) must replace its row rather than pile up dead
+      // duplicates that every later push then tries and fails to reach.
+      db.pushSubscriptions = db.pushSubscriptions.filter((s: any) => s.endpoint !== row.endpoint);
+      db.pushSubscriptions.push(row);
+      await saveDb();
+      return row;
+    },
+    deletePushSubscriptionByEndpoint: async (endpoint: string) => {
+      const before = db.pushSubscriptions.length;
+      db.pushSubscriptions = db.pushSubscriptions.filter((s: any) => s.endpoint !== endpoint);
+      if (db.pushSubscriptions.length === before) return false;
+      await saveDb();
+      return true;
+    },
+
+    getAllCashJournalEntries: async (companyId: string) => scoped(db.cashJournalEntries, companyId),
+    getCashJournalEntryById: async (companyId: string, id: string) => findScoped(db.cashJournalEntries, companyId, id),
+    createCashJournalEntry: async (companyId: string, entry: any) => {
+      const row = { ...entry, companyId };
+      db.cashJournalEntries.push(row);
+      await saveDb();
+      return row;
+    },
+    updateCashJournalEntry: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.cashJournalEntries, companyId, id);
+      if (index === -1) return null;
+      db.cashJournalEntries[index] = { ...db.cashJournalEntries[index], ...updates };
+      await saveDb();
+      return db.cashJournalEntries[index];
+    },
+    deleteCashJournalEntry: async (companyId: string, id: string) => {
+      const index = indexScoped(db.cashJournalEntries, companyId, id);
+      if (index === -1) return false;
+      db.cashJournalEntries.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllCashCategories: async (companyId: string) => scoped(db.cashCategories, companyId),
+    createCashCategory: async (companyId: string, category: any) => {
+      const row = { ...category, companyId };
+      db.cashCategories.push(row);
+      await saveDb();
+      return row;
+    },
+    deleteCashCategory: async (companyId: string, id: string) => {
+      const index = indexScoped(db.cashCategories, companyId, id);
+      if (index === -1) return false;
+      db.cashCategories.splice(index, 1);
       await saveDb();
       return true;
     },

@@ -136,7 +136,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm overflow-y-auto">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg my-4">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-[14px] font-bold text-gray-900">Assigner une tâche</h2>
+          <h2 className="text-[14px] font-bold text-gray-900">Déléguer une tâche</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100">
             <X className="w-5 h-5" />
           </button>
@@ -305,7 +305,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
                 className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {saving && <Loader className="w-4 h-4 animate-spin" />}
-                Assigner
+                Déléguer
               </button>
             </div>
           </form>

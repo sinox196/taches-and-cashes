@@ -109,12 +109,14 @@ export const ResourcesManagement: React.FC = () => {
       </div>
 
       {TABS.length > 1 && (
-        <div className="flex gap-1 border-b border-gray-200">
+        // Scrolls sideways on a narrow screen rather than wrapping — four
+        // labels ("Documents des modèles" among them) never fit a phone.
+        <div className="flex gap-1 border-b border-gray-200 overflow-x-auto shrink-0">
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-3.5 py-2.5 text-[13px] font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
+              className={`px-3.5 py-2.5 text-[13px] font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors shrink-0 whitespace-nowrap ${
                 tab === t.id ? 'border-navy text-navy' : 'border-transparent text-gray-500 hover:text-gray-800'
               }`}
             >

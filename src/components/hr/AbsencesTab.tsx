@@ -3,10 +3,14 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { AbsenceAuthorization } from '../../types';
 import { Plus, Check, X, Clock, AlertCircle } from 'lucide-react';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
+import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
 
 export const AbsencesTab: React.FC = () => {
   const { token, hasPermission, user } = useAuth();
-  const [auths, setAuths] = useState<(AbsenceAuthorization & { userName?: string, approverName?: string, approvedByName?: string })[]>([]);
+  type AuthRow = AbsenceAuthorization & { userName?: string; approverName?: string; approvedByName?: string };
+  const [auths, setAuths] = useState<AuthRow[]>([]);
   const [approvers, setApprovers] = useState<{id: number, name: string, role: string}[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   
@@ -15,7 +19,7 @@ export const AbsencesTab: React.FC = () => {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [duration, setDuration] = useState(1);
-  const [reason, setReason] = useState('Personal appointment');
+  const [reason, setReason] = useState('Rendez-vous personnel');
   const [comment, setComment] = useState('');
   const [approverId, setApproverId] = useState('');
   const [timeError, setTimeError] = useState('');
@@ -43,6 +47,10 @@ export const AbsencesTab: React.FC = () => {
       setDuration(0);
     }
   }, [startTime, endTime]);
+
+  // Filtre année/mois + pagination, partagés par les quatre onglets RH.
+  const authDate = React.useCallback((r: AuthRow) => r.date, []);
+  const pager = usePeriodPage<AuthRow>(auths, authDate);
 
   const [approvalModalId, setApprovalModalId] = useState<number | null>(null);
   const [approvalComment, setApprovalComment] = useState('');
@@ -130,7 +138,7 @@ export const AbsencesTab: React.FC = () => {
         fetchAuths();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to approve');
+        alert(err.error || "Échec de l'approbation");
       }
     } catch (error) {
       console.error(error);
@@ -153,7 +161,7 @@ export const AbsencesTab: React.FC = () => {
         fetchAuths();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to reject');
+        alert(err.error || "Échec du refus");
       }
     } catch (error) {
       console.error(error);
@@ -171,7 +179,7 @@ export const AbsencesTab: React.FC = () => {
         fetchAuths();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to cancel');
+        alert(err.error || "Échec de l'annulation");
       }
     } catch (error) {
       console.error(error);
@@ -189,21 +197,33 @@ export const AbsencesTab: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center mb-4">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Autorisations d'absence</h2>
+        <div className="flex flex-wrap items-center gap-2 self-start">
+            <PeriodFilter page={pager} />
+            <ExportButton fileName="autorisations-absence" rows={pager.filtered} columns={[
+                { header: 'Employé', value: (r: any) => r.userName || '' },
+                { header: 'Responsable', value: (r: any) => r.approverName || '' },
+                { header: 'Date', value: (r: any) => r.date },
+                { header: 'De', value: (r: any) => r.startTime || '' },
+                { header: 'À', value: (r: any) => r.endTime || '' },
+                { header: 'Motif', value: (r: any) => r.reason || '' },
+                { header: 'Statut', value: (r: any) => r.status },
+            ]} />
         {hasPermission('CREATE_ABSENCE_AUTHORIZATION') && (
           <button
             onClick={() => setIsCreating(true)}
-            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2"
+            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2 self-start shrink-0 whitespace-nowrap"
           >
             <Plus className="w-4 h-4" />
             Nouvelle autorisation
           </button>
         )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">
+      <div className="overflow-auto flex-1 min-h-0 border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0">
             <tr>
@@ -217,14 +237,14 @@ export const AbsencesTab: React.FC = () => {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {auths.length === 0 ? (
+            {pager.pageRows.length === 0 ? (
               <tr>
                 <td colSpan={hasPermission('MANAGE_ABSENCE_AUTHORIZATIONS') ? 6 : 5} className="px-6 py-8 text-center text-sm text-gray-500">
                   Aucune autorisation trouvée.
                 </td>
               </tr>
             ) : (
-              auths.map((auth) => (
+              pager.pageRows.map((auth) => (
                 <tr key={auth.id} className="hover:bg-gray-50">
                   {hasPermission('MANAGE_ABSENCE_AUTHORIZATIONS') && (
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -285,6 +305,8 @@ export const AbsencesTab: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      <PaginationBar page={pager} unit="autorisations" />
 
       {/* Approval Modal */}
       {approvalModalId && (
@@ -442,11 +464,11 @@ export const AbsencesTab: React.FC = () => {
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900"
                     required
                   >
-                    <option value="Personal appointment">Rendez-vous personnel</option>
-                    <option value="Administrative procedure">Démarche administrative</option>
-                    <option value="Medical appointment">Rendez-vous médical</option>
-                    <option value="Family reason">Raison familiale</option>
-                    <option value="Other">Autre</option>
+                    <option value="Rendez-vous personnel">Rendez-vous personnel</option>
+                    <option value="Démarche administrative">Démarche administrative</option>
+                    <option value="Rendez-vous médical">Rendez-vous médical</option>
+                    <option value="Raison familiale">Raison familiale</option>
+                    <option value="Autre">Autre</option>
                   </select>
                 </div>
 

@@ -39,7 +39,7 @@ function toPlainText(html: string): string {
     .trim();
 }
 
-export async function sendMail(opts: { to: string; subject: string; html: string; from?: string; replyTo?: string }): Promise<{ sent: boolean }> {
+export async function sendMail(opts: { to: string; subject: string; html: string; from?: string; fromName?: string; replyTo?: string }): Promise<{ sent: boolean }> {
   const t = getTransporter();
   const rawFrom = opts.from || process.env.SMTP_FROM || process.env.SMTP_USER;
   if (!t || !rawFrom) {
@@ -48,8 +48,11 @@ export async function sendMail(opts: { to: string; subject: string; html: string
   }
   // A bare address ("from") reads as bulk/automated mail to both spam
   // filters and the inbox UI; a named sender ("Name <address>") is what a
-  // legitimate first-party sender looks like.
-  const from = rawFrom.includes('<') ? rawFrom : `"Tâches & Cash" <${rawFrom}>`;
+  // legitimate first-party sender looks like. `fromName` only relabels the
+  // display name — the actual envelope address always stays whatever the
+  // SMTP account is authorized to send as (most relays reject `MAIL FROM`
+  // for anything else with a 550, regardless of what this header says).
+  const from = rawFrom.includes('<') ? rawFrom : `"${opts.fromName || 'Tâches & Cash'}" <${rawFrom}>`;
   try {
     await t.sendMail({
       from,

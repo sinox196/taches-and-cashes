@@ -1,16 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
 import { MultiSelectAutocomplete } from '../dashboard/MultiSelectAutocomplete';
 import { formatCostTND } from '../../utils/formatters';
+import { paymentModeLabel } from '../../constants/paymentModes';
 
 export interface EncaissementEntry {
   id: string;
   amount: number;
   date: string;
   note?: string;
+  /** Present only on entries merged in from the Brouillard de caisse. */
+  source?: 'BROUILLARD';
+  /** Mode de règlement, on entries recorded in Cash. */
+  paymentMethod?: string;
+  /** Whether the money actually passed through the till. Set server-side from
+   *  the mode: a virement is an encaissement but not a caisse movement. */
+  isCaisse?: boolean;
 }
 
 export interface Client {
@@ -35,10 +45,19 @@ export interface Client {
   /** A client can be paid in several instalments, so this is a list — the
    *  displayed total is the sum of these entries' amounts. */
   encaissements: EncaissementEntry[];
+  /** Encaissements coming from the Brouillard de caisse (Cash). Attached
+   *  server-side and NOT editable here: the journal owns them, and the
+   *  movement is recorded once, there. */
+  journalEncaissements?: EncaissementEntry[];
   /** Derived server-side: the sum of this client's own invoices' totals. */
   montantFacture?: number;
   /** Derived server-side: soldeAnterieur - sum(encaissements) + montantFacture. */
   resteAPayer?: number;
+  /**
+   * Le travail fait pour ce client n'est pas refacturé. Chaque tâche fige la
+   * valeur à sa création, donc cocher la case n'agit que sur la suite.
+   */
+  nonFacturable?: boolean;
 }
 
 // A client saved before this list existed has `encaissements` stored as a
@@ -83,7 +102,7 @@ export const ClientsManagement: React.FC = () => {
   const [formData, setFormData] = useState<Partial<Client>>({
     customFields: {},
     name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '',
-    soldeAnterieur: '' as any, encaissements: [],
+    soldeAnterieur: '' as any, encaissements: [], nonFacturable: false,
   });
   const [formError, setFormError] = useState('');
   const [newFieldName, setNewFieldName] = useState('');
@@ -255,12 +274,23 @@ export const ClientsManagement: React.FC = () => {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
 
+  /**
+   * VIEW_CLIENT_FINANCIALS gates the ledger columns themselves, not just the
+   * "Total Général" bar: without it Solde antérieur, Montant de facture,
+   * Encaissements and Reste à payer are not offered in the columns picker,
+   * not rendered in the table, and — the part that actually matters — not
+   * sent by the server either.
+   */
+  const seesFinancials = hasPermission('VIEW_CLIENT_FINANCIALS');
+
   const standardColumns = [
     { key: 'name', label: 'Client / Nom' },
-    { key: 'soldeAnterieur', label: 'Solde antérieur' },
-    { key: 'montantFacture', label: 'Montant de facture' },
-    { key: 'encaissements', label: 'Encaissements' },
-    { key: 'resteAPayer', label: 'Reste à payer' },
+    ...(seesFinancials ? [
+      { key: 'soldeAnterieur', label: 'Solde antérieur' },
+      { key: 'montantFacture', label: 'Montant de facture' },
+      { key: 'encaissements', label: 'Encaissements' },
+      { key: 'resteAPayer', label: 'Reste à payer' },
+    ] : []),
     { key: 'taxId', label: 'Matricule' },
     { key: 'address', label: 'Adresse' },
     { key: 'contact', label: 'Contact (Email/Tél)' },
@@ -296,7 +326,7 @@ export const ClientsManagement: React.FC = () => {
 
   const handleOpenCreate = () => {
     setEditingClient(null);
-    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {}, soldeAnterieur: '' as any, encaissements: [] });
+    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {}, soldeAnterieur: '' as any, encaissements: [], nonFacturable: false });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -329,21 +359,17 @@ export const ClientsManagement: React.FC = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const addEncaissement = () => setFormData(prev => ({
-    ...prev,
-    encaissements: [
-      ...(prev.encaissements || []),
-      { id: `local-${Date.now()}`, amount: '' as any, date: new Date().toISOString().slice(0, 10), note: '' },
-    ],
-  }));
-  const updateEncaissement = (id: string, patch: Partial<EncaissementEntry>) => setFormData(prev => ({
-    ...prev,
-    encaissements: (prev.encaissements || []).map(e => (e.id === id ? { ...e, ...patch } : e)),
-  }));
-  const removeEncaissement = (id: string) => setFormData(prev => ({
-    ...prev,
-    encaissements: (prev.encaissements || []).filter(e => e.id !== id),
-  }));
+  /**
+   * What the form shows for Encaissements — a read-only total and nothing
+   * else, covering both the entries stored on the client and the ones merged
+   * in from Cash. The manual
+   * editor that used to sit here is gone: encaissements are recorded in Cash
+   * (Règlements clients), so there is one place to enter a payment and one
+   * record of it. Entries already stored on a client are still counted, still
+   * listed in the drawer, and still round-trip through save untouched.
+   */
+  const totalEncaissements =
+    sumEncaissements(formData.encaissements) + sumEncaissements(formData.journalEncaissements);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -453,6 +479,33 @@ export const ClientsManagement: React.FC = () => {
           />
 
           <div className="flex gap-2 relative">
+            {/* Exporte la page affichée, filtres compris. Les colonnes du
+                ledger ne sortent que si l'utilisateur a le droit de les voir :
+                le serveur ne les lui envoie même pas. */}
+            <ExportButton
+              fileName="clients"
+              rows={filteredClients}
+              columns={[
+                { header: 'Client / Nom', value: (c: Client) => c.name },
+                { header: 'Type', value: (c: Client) => (c.type === 'Company' ? 'Entreprise' : 'Particulier') },
+                { header: 'Matricule / CIN', value: (c: Client) => c.taxId || '' },
+                { header: 'Email', value: (c: Client) => c.email || '' },
+                { header: 'Téléphone', value: (c: Client) => c.phone || '' },
+                { header: 'Adresse', value: (c: Client) => c.address || '' },
+                { header: 'Ville', value: (c: Client) => c.city || '' },
+                { header: 'Pays', value: (c: Client) => c.country || '' },
+                { header: 'Statut', value: (c: Client) => (c.status === 'Active' ? 'Actif' : 'Inactif') },
+                { header: 'Non facturable', value: (c: Client) => (c.nonFacturable ? 'Oui' : 'Non') },
+                ...(seesFinancials ? [
+                  { header: 'Solde antérieur', value: (c: Client) => csvNumber(Number(c.soldeAnterieur) || 0) },
+                  { header: 'Montant de facture', value: (c: Client) => csvNumber(c.montantFacture ?? 0) },
+                  { header: 'Encaissements', value: (c: Client) => csvNumber(sumEncaissements(c.encaissements) + sumEncaissements(c.journalEncaissements)) },
+                  { header: 'Reste à payer', value: (c: Client) => csvNumber(c.resteAPayer ?? 0) },
+                ] : []),
+                // Les colonnes libres du cabinet suivent, dans l'ordre du tableau.
+                ...availableFields.map(f => ({ header: f, value: (c: Client) => c.customFields?.[f] ?? '' })),
+              ]}
+            />
             <div className="relative">
               <button
                 onClick={() => {
@@ -470,7 +523,11 @@ export const ClientsManagement: React.FC = () => {
               </button>
 
               {isFilterOpen && (
-                <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4">
+                // Anchored left below sm: right-aligning a 288px panel to a
+                // button whose right edge sits ~110px in pushed half of it off
+                // the left of a phone screen, taking the field labels and the
+                // "Ajouter le filtre" button with it.
+                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-2 w-[min(18rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-[13px] font-bold text-gray-900">Ajouter un filtre</h3>
                     <button onClick={() => setIsFilterOpen(false)} className="text-gray-400 hover:text-gray-600">
@@ -584,7 +641,7 @@ export const ClientsManagement: React.FC = () => {
               </button>
 
               {isColumnsOpen && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4 max-h-[300px] overflow-y-auto">
+                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-2 w-[min(16rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4 max-h-[300px] overflow-y-auto">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-[13px] font-bold text-gray-900">Affichage des colonnes</h3>
                     <button onClick={() => setIsColumnsOpen(false)} className="text-gray-400 hover:text-gray-600">
@@ -679,7 +736,7 @@ export const ClientsManagement: React.FC = () => {
                       >
                         <div className={`flex items-center gap-1 ${FINANCIAL_KEYS.includes(col.key) ? 'justify-end' : ''}`}>
                           {col.label}
-                          <div className={`flex flex-col opacity-0 group-hover:opacity-100 transition-opacity ${sortField === col.key ? '!opacity-100' : ''}`}>
+                          <div className={`flex flex-col opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity ${sortField === col.key ? '!opacity-100' : ''}`}>
                             <ChevronRight className={`w-3 h-3 -rotate-90 -mb-1.5 ${sortField === col.key && sortDir === 'asc' ? 'text-gray-900' : 'text-gray-400'}`} />
                             <ChevronRight className={`w-3 h-3 rotate-90 ${sortField === col.key && sortDir === 'desc' ? 'text-gray-900' : 'text-gray-400'}`} />
                           </div>
@@ -690,7 +747,7 @@ export const ClientsManagement: React.FC = () => {
                       Actions
                     </th>
                   </tr>
-                  {hasPermission('VIEW_CLIENT_FINANCIALS') && (
+                  {seesFinancials && (
                     <tr className="bg-gray-100 border-b border-gray-200">
                       {allTableColumns.filter(c => visibleColumns.includes(c.key)).map((col, i) => {
                         const isFinancial = FINANCIAL_KEYS.includes(col.key);
@@ -762,21 +819,31 @@ export const ClientsManagement: React.FC = () => {
                           );
                         }
                         if (col.key === 'encaissements') {
-                          const total = sumEncaissements(client.encaissements);
                           const entries = Array.isArray(client.encaissements) ? client.encaissements : [];
+                          const journal = client.journalEncaissements || [];
+                          const count = entries.length + journal.length;
+                          // The displayed total must match the server's own
+                          // resteAPayer, which counts both sources.
+                          const total = sumEncaissements(client.encaissements) + sumEncaissements(journal);
+                          // The cell shows the **total encaissé and nothing
+                          // else** — not a count of versements, which said
+                          // nothing about how much the client has actually
+                          // paid and competed with the figure that does. It
+                          // is read-only here: encaissements are recorded in
+                          // Cash (Règlements clients), never typed into this
+                          // table. Clicking opens the drawer, the one place
+                          // the dated list is shown, each entry marked caisse
+                          // or not — a fixed-height cell, so one client with
+                          // fifty small versements can't stretch its row past
+                          // every other.
                           return (
-                            <td key={col.key} className="px-5 py-3 text-right font-mono text-gray-700 bg-emerald-50/25">
+                            <td
+                              key={col.key}
+                              onClick={() => setViewingClient(client)}
+                              title={count > 0 ? 'Voir le détail des encaissements' : undefined}
+                              className={`px-5 py-3 text-right font-mono text-gray-700 bg-emerald-50/25 ${count > 0 ? 'cursor-pointer hover:bg-emerald-50/50' : ''}`}
+                            >
                               {formatCostTND(total)}
-                              {entries.length > 0 && (
-                                <div className="text-[10px] text-gray-400 font-sans mt-1 space-y-0.5">
-                                  {entries.map(entry => (
-                                    <div key={entry.id} className="whitespace-nowrap">
-                                      {formatCostTND(Number(entry.amount) || 0)}
-                                      {entry.date && <> · {new Date(entry.date).toLocaleDateString('fr-FR')}</>}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
                             </td>
                           );
                         }
@@ -932,72 +999,63 @@ export const ClientsManagement: React.FC = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Solde antérieur</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={formData.soldeAnterieur || ''}
-                    onChange={e => handleFormChange('soldeAnterieur', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                    placeholder="0.000"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[12px] font-semibold text-gray-700">Encaissements</label>
-                    <button
-                      type="button"
-                      onClick={addEncaissement}
-                      className="text-[11px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" /> Ajouter un versement
-                    </button>
+                {seesFinancials && (
+                  <div>
+                    <label className="block text-[12px] font-semibold text-gray-700 mb-1">Solde antérieur</label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      value={formData.soldeAnterieur || ''}
+                      onChange={e => handleFormChange('soldeAnterieur', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                      placeholder="0.000"
+                    />
                   </div>
-                  {(formData.encaissements || []).length === 0 ? (
-                    <p className="text-[12px] text-gray-400 italic border border-dashed border-gray-200 rounded-lg px-3 py-2.5">
-                      Aucun encaissement enregistré.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {(formData.encaissements || []).map(entry => (
-                        <div key={entry.id} className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            step="0.001"
-                            value={entry.amount === 0 ? '' : entry.amount}
-                            onChange={e => updateEncaissement(entry.id, { amount: e.target.value === '' ? ('' as any) : parseFloat(e.target.value) })}
-                            className="w-1/3 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                            placeholder="Montant"
-                          />
-                          <input
-                            type="date"
-                            value={entry.date || ''}
-                            onChange={e => updateEncaissement(entry.id, { date: e.target.value })}
-                            className="w-1/3 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                          />
-                          <input
-                            type="text"
-                            value={entry.note || ''}
-                            onChange={e => updateEncaissement(entry.id, { note: e.target.value })}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                            placeholder="Référence (facultatif)"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeEncaissement(entry.id)}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                      <p className="text-[11px] text-gray-500 text-right">
-                        Total : <span className="font-semibold text-gray-800">{sumEncaissements(formData.encaissements).toLocaleString('fr-FR')} TND</span>
-                      </p>
+                )}
+
+                {/* Encaissements are recorded in Cash (Règlements clients),
+                    never typed in here: the movement lives in one place, and a
+                    second entry point would mean two records of one payment.
+                    This is the read-only total, which is all this form needs
+                    to show. */}
+                {seesFinancials && (
+                  <div className="md:col-span-2">
+                    <label className="block text-[12px] font-semibold text-gray-700 mb-1">Encaissements</label>
+                    <div className="flex items-center justify-between gap-3 px-3 py-2.5 border border-gray-200 bg-gray-50 rounded-lg">
+                      <span className="text-[12px] text-gray-500">Total encaissé</span>
+                      <span className="text-[13px] font-mono font-semibold text-gray-800">
+                        {formatCostTND(totalEncaissements)}
+                      </span>
                     </div>
-                  )}
+                    <p className="text-[10.5px] text-gray-500 mt-1.5">
+                      Les encaissements se saisissent dans Cash → Règlements clients.
+                    </p>
+                  </div>
+                )}
+
+                {/* Non facturable — décidé au niveau du client parce que c'est
+                    la relation qui est gratuite, pas telle ou telle tâche.
+                    Chaque tâche fige la valeur à sa création : cocher la case
+                    plus tard ne requalifie pas le travail déjà pointé. */}
+                <div className="md:col-span-2">
+                  <label className="flex items-start gap-2.5 p-3 rounded-lg border border-gray-200 bg-gray-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!formData.nonFacturable}
+                      onChange={e => handleFormChange('nonFacturable', e.target.checked)}
+                      className="mt-0.5 rounded border-gray-300"
+                    />
+                    <span>
+                      <span className="block text-[12.5px] font-semibold text-gray-800">
+                        Les tâches de ce client ne sont pas facturées
+                      </span>
+                      <span className="block text-[11px] text-gray-500 mt-0.5">
+                        Le temps pointé reste chiffré à son coût employeur — il est bien réel — mais il est
+                        signalé comme non facturable dans le pointage et compté à part du temps facturable.
+                        Ne s'applique qu'aux tâches créées après.
+                      </span>
+                    </span>
+                  </label>
                 </div>
 
                 <div>
@@ -1306,6 +1364,64 @@ export const ClientsManagement: React.FC = () => {
                 </div>
               </section>
 
+              {/* Encaissements — every dated entry, both the manually typed
+                  ones and those merged in from the Brouillard de caisse. This
+                  is the only place the full list is shown; the table cell
+                  only ever gives the total, so one client with many small
+                  versements can't stretch that row past every other. */}
+              {seesFinancials && (() => {
+                const manual = Array.isArray(viewingClient.encaissements) ? viewingClient.encaissements : [];
+                const journal = viewingClient.journalEncaissements || [];
+                const all = [...manual.map(e => ({ ...e, source: undefined as string | undefined })), ...journal]
+                  .slice()
+                  .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+                if (all.length === 0) return null;
+                return (
+                  <section>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                        Encaissements ({all.length})
+                      </h3>
+                      <span className="text-[12px] font-mono font-semibold text-gray-700">
+                        {formatCostTND(sumEncaissements(manual) + sumEncaissements(journal))}
+                      </span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                      {all.map(entry => (
+                        <div
+                          key={entry.id}
+                          className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 text-[12px]"
+                        >
+                          <div className="flex items-center gap-2 text-gray-500">
+                            <span>{entry.date ? new Date(entry.date).toLocaleDateString('fr-FR') : '—'}</span>
+                            {entry.note && <span className="text-gray-400 italic truncate max-w-[140px]">{entry.note}</span>}
+                            {/* Says whether this encaissement went through
+                                the caisse or not — a virement is recorded in
+                                Cash exactly like an espèce but never reaches
+                                the till, so badging every Cash-sourced entry
+                                "caisse" would have mislabelled it. */}
+                            {entry.source === 'BROUILLARD' && (
+                              entry.isCaisse === false ? (
+                                <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-[9px] font-semibold uppercase tracking-wide shrink-0">
+                                  {paymentModeLabel(entry.paymentMethod) || 'hors caisse'}
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-turquoise/10 text-turquoise text-[9px] font-semibold uppercase tracking-wide shrink-0">
+                                  caisse
+                                </span>
+                              )
+                            )}
+                          </div>
+                          <span className="font-mono font-semibold text-gray-800 shrink-0">
+                            {formatCostTND(Number(entry.amount) || 0)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })()}
+
               {/* Notes */}
               {viewingClient.notes && (
                 <section>
@@ -1355,7 +1471,7 @@ export const ClientsManagement: React.FC = () => {
             </div>
 
             <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex justify-between items-center text-[11px] text-gray-400">
-              <span>Créé le {new Date(viewingClient.createdAt).toLocaleDateString()}</span>
+              <span>Créé le {new Date(viewingClient.createdAt).toLocaleDateString('fr-FR')}</span>
               {hasPermission('EDIT_CLIENTS') && (
                 <button
                   onClick={(e) => {

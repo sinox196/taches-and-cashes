@@ -135,8 +135,8 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
     <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden flex flex-col">
       <div className="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-[15px] font-bold text-gray-900">Performance des collaborateurs</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Vue consolidée des activités opérationnelles, durées, coûts et RH</p>
+          <h2 className="text-[15px] font-bold text-gray-900">Suivi & performance de l'équipe</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Synthèse du temps produit, du coût salarial et de la charge par collaborateur.</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -149,11 +149,11 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
             onChange={(e) => handleSort(e.target.value as SortField)}
             className="text-[12px] bg-gray-50 border border-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer font-medium"
           >
-            <option value="duration">Durée totale</option>
+            <option value="duration">Temps passé</option>
             {isAdmin && <option value="cost">Coût employeur</option>}
-            <option value="tasks">Nombre de tâches</option>
+            <option value="tasks">Total tâches</option>
             <option value="completed">Tâches terminées</option>
-            <option value="clients">Nombre de clients</option>
+            <option value="clients">Nbr clients</option>
             <option value="completionRate">Taux de réalisation</option>
             <option value="leavesTaken">Congés pris</option>
             <option value="authorizations">Autorisations</option>
@@ -187,9 +187,9 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
               </th>
               <th 
                 onClick={() => handleSort('tasks')}
-                className="px-3 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center"
+                className="px-3 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-200/60 transition-colors text-center bg-gray-100/60"
               >
-                Tâches {renderSortIcon('tasks')}
+                Total Tâches {renderSortIcon('tasks')}
               </th>
               <th 
                 onClick={() => handleSort('completed')}
@@ -205,21 +205,22 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
               </th>
               <th 
                 onClick={() => handleSort('paused')}
-                className="px-3 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center"
+                className="px-3 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-green-100/60 transition-colors text-center bg-green-50/40"
               >
-                Paused {renderSortIcon('paused')}
+                En pause {renderSortIcon('paused')}
               </th>
               <th 
                 onClick={() => handleSort('clients')}
-                className="px-3 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center"
+                className="px-3 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-orange-100/60 transition-colors text-center bg-orange-50/40"
               >
-                Clients {renderSortIcon('clients')}
+                Nbr Clients {renderSortIcon('clients')}
               </th>
               <th 
                 onClick={() => handleSort('duration')}
-                className="px-4 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center bg-blue-50/40"
+                className="px-4 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-blue-100/60 transition-colors text-center bg-blue-50/40"
+                title="Cliquez sur une ligne pour voir le détail par client"
               >
-                Durée totale {renderSortIcon('duration')}
+                Temps passé {renderSortIcon('duration')}
               </th>
               {isAdmin && (
                 <th
@@ -237,9 +238,9 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
               </th>
               <th 
                 onClick={() => handleSort('leavesRemaining')}
-                className="px-3 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-gray-100 transition-colors text-center"
+                className="px-3 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-yellow-100/60 transition-colors text-center bg-yellow-50/40"
               >
-                Congés restants {renderSortIcon('leavesRemaining')}
+                Solde congés {renderSortIcon('leavesRemaining')}
               </th>
               <th 
                 onClick={() => handleSort('authorizations')}
@@ -305,8 +306,12 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                     </span>
                   </td>
 
-                  {/* Tâches */}
-                  <td className="px-3 py-3 text-center font-semibold text-gray-800">{emp.tasks?.total || 0}</td>
+                  {/* Total Tâches */}
+                  <td className="px-3 py-3 text-center bg-gray-50/30">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-semibold text-[12px]">
+                      {emp.tasks?.total || 0}
+                    </span>
+                  </td>
 
                   {/* Terminées */}
                   <td className="px-3 py-3 text-center font-semibold text-emerald-600">{emp.tasks?.completed || 0}</td>
@@ -314,27 +319,39 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                   {/* En cours */}
                   <td className="px-3 py-3 text-center font-semibold text-amber-600">{emp.tasks?.inProgress || 0}</td>
 
-                  {/* Paused */}
-                  <td className="px-3 py-3 text-center font-medium text-gray-500">{emp.tasks?.paused || 0}</td>
+                  {/* En pause */}
+                  <td className="px-3 py-3 text-center bg-green-50/20">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-green-50 text-green-700 font-semibold text-[12px]">
+                      {emp.tasks?.paused || 0}
+                    </span>
+                  </td>
 
-                  {/* Clients traités — click to see which tasks, and their status */}
-                  <td className="px-3 py-3 text-center">
+                  {/* Nbr Clients — click to see which tasks, and their status */}
+                  <td className="px-3 py-3 text-center bg-orange-50/20">
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); onClientsClick?.(emp); }}
                       disabled={!(emp.clients?.totalHandled)}
                       title={emp.clients?.totalHandled ? 'Voir les tâches réalisées et leur statut' : 'Aucun client traité'}
-                      className="font-semibold text-blue-600 underline decoration-dotted underline-offset-4 hover:text-blue-800 disabled:text-gray-400 disabled:no-underline disabled:cursor-default"
+                      className="inline-flex items-center px-2 py-0.5 rounded bg-orange-50 text-orange-700 font-semibold text-[12px] underline decoration-dotted underline-offset-4 hover:text-orange-900 disabled:bg-gray-100 disabled:text-gray-400 disabled:no-underline disabled:cursor-default"
                     >
                       {emp.clients?.totalHandled || 0}
                     </button>
                   </td>
 
-                  {/* Durée totale */}
-                  <td className="px-4 py-3 text-center font-bold text-gray-900 bg-blue-50/20">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-900 font-mono text-[12px]">
+                  {/* Temps passé — click to see it broken down by client, the same
+                      drill-down "Nbr Clients" opens: each client group there
+                      already shows its own total duration in its header. */}
+                  <td className="px-4 py-3 text-center bg-blue-50/20">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onClientsClick?.(emp); }}
+                      disabled={!durSecs}
+                      title={durSecs ? 'Voir le détail du temps passé par client' : 'Aucun temps enregistré'}
+                      className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-900 font-bold font-mono text-[12px] underline decoration-dotted underline-offset-4 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:no-underline disabled:cursor-default"
+                    >
                       {formattedDuration}
-                    </span>
+                    </button>
                   </td>
 
                   {/* Coût employeur — each task at the rate in force when it was logged */}
@@ -368,9 +385,11 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                     {daysTaken} j
                   </td>
 
-                  {/* Congés restants */}
-                  <td className="px-3 py-3 text-center font-medium text-gray-600">
-                    {remainingDays} j
+                  {/* Solde congés */}
+                  <td className="px-3 py-3 text-center bg-yellow-50/20">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-yellow-50 text-yellow-800 font-semibold text-[12px]">
+                      {remainingDays} j
+                    </span>
                   </td>
 
                   {/* Autorisations */}

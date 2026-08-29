@@ -41,7 +41,11 @@ export const HRManagement: React.FC = () => {
   }
 
   return (
-    <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
+    // `min-h-0` : sans lui, un enfant `flex-1` ne peut pas descendre sous la
+    // taille de son contenu, la page grandit, et la barre de pagination du
+    // tableau se retrouve sous la ligne de flottaison. Même montage que la
+    // page Clients.
+    <main className="p-4 sm:p-6 lg:p-8 flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t('hr.title')}</h1>
@@ -70,17 +74,19 @@ export const HRManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1 min-h-[500px]">
-        <div className="flex border-b border-gray-200">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1 min-h-0">
+        {/* Scrolls sideways below sm: four tabs sharing 390px squeezed
+            "Autorisations d'absence" onto two lines and clipped the rest. */}
+        <div className="flex border-b border-gray-200 overflow-x-auto shrink-0">
           <button
             onClick={() => setActiveTab('leaves')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'leaves' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'leaves' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {t('hr.tabs.leaves')}
           </button>
           <button
             onClick={() => setActiveTab('absences')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'absences' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'absences' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {t('hr.tabs.absences')}
           </button>
@@ -92,19 +98,23 @@ export const HRManagement: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab('loans')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'loans' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'loans' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Prêts
           </button>
           <button
             onClick={() => setActiveTab('advances')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'advances' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'advances' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Avances
           </button>
         </div>
 
-        <div className="p-4 flex-1 overflow-auto">
+        {/* Ne défile plus lui-même : chaque onglet fait défiler son tableau et
+            garde sa barre de pagination en dehors, comme le Brouillard de
+            caisse. Un `overflow-auto` ici ferait défiler la barre avec le
+            contenu, et il faudrait descendre tout en bas pour l'atteindre. */}
+        <div className="p-4 flex-1 min-h-0 flex flex-col">
           {activeTab === 'leaves' ? <LeavesTab />
             : activeTab === 'absences' ? <AbsencesTab />
             : activeTab === 'attendance' ? <AttendanceTab />

@@ -73,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
     <aside
-      className={`w-[212px] min-w-[212px] bg-navy text-white flex flex-col justify-between h-screen select-none font-sans flex-shrink-0
+      className={`w-[212px] min-w-[212px] bg-navy text-white flex flex-col justify-between h-dvh overflow-y-auto select-none font-sans flex-shrink-0
         fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-out
         ${open ? 'translate-x-0' : '-translate-x-full'}
         lg:sticky lg:top-0 lg:z-30 lg:translate-x-0`}

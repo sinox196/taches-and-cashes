@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, X, Check, Wallet, CheckCircle2, Ban, Clock, AlertCircle } from 'lucide-react';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
+import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
 
 interface Loan {
   id: number;
@@ -33,6 +36,11 @@ export const LoansTab: React.FC = () => {
   const canManage = hasPermission('MANAGE_LOANS_ADVANCES');
   const [loans, setLoans] = useState<Loan[]>([]);
   const [approvers, setApprovers] = useState<{ id: number; name: string; role: string }[]>([]);
+
+  // Filtre année/mois + pagination, partagés par les quatre onglets RH.
+  // La date qui situe la ligne est celle de l'octroi.
+  const rowDate = React.useCallback((r: Loan) => r.dateGranted, []);
+  const pager = usePeriodPage<Loan>(loans, rowDate);
   const [isCreating, setIsCreating] = useState(false);
   const [repayModalId, setRepayModalId] = useState<number | null>(null);
   const [repayAmount, setRepayAmount] = useState<number | ''>('');
@@ -112,7 +120,7 @@ export const LoansTab: React.FC = () => {
         body: JSON.stringify({ comment: approvalComment }),
       });
       if (res.ok) { setApprovalModalId(null); setApprovalComment(''); fetchLoans(); }
-      else { const err = await res.json(); alert(err.error || 'Failed to approve'); }
+      else { const err = await res.json(); alert(err.error || "Échec de l'approbation"); }
     } catch { /* ignore */ }
   };
 
@@ -124,7 +132,7 @@ export const LoansTab: React.FC = () => {
         body: JSON.stringify({ comment: rejectionReason }),
       });
       if (res.ok) { setRejectionModalId(null); setRejectionReason(''); fetchLoans(); }
-      else { const err = await res.json(); alert(err.error || 'Failed to reject'); }
+      else { const err = await res.json(); alert(err.error || "Échec du refus"); }
     } catch { /* ignore */ }
   };
 
@@ -136,7 +144,7 @@ export const LoansTab: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) fetchLoans();
-      else { const err = await res.json(); alert(err.error || 'Failed to cancel'); }
+      else { const err = await res.json(); alert(err.error || "Échec de l'annulation"); }
     } catch { /* ignore */ }
   };
 
@@ -149,20 +157,30 @@ export const LoansTab: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center mb-4">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Prêts</h2>
+        <div className="flex flex-wrap items-center gap-2 self-start">
+            <PeriodFilter page={pager} />
+            <ExportButton fileName="prets" rows={pager.filtered} columns={[
+                { header: 'Employé', value: (r: any) => r.userName || '' },
+                { header: 'Date', value: (r: any) => r.date || r.createdAt?.slice(0, 10) || '' },
+                { header: 'Montant', value: (r: any) => csvNumber(Number(r.amount) || 0) },
+                { header: 'Motif', value: (r: any) => r.reason || '' },
+                { header: 'Statut', value: (r: any) => r.status },
+            ]} />
         {hasPermission('CREATE_LOAN_REQUEST') && (
           <button
             onClick={() => setIsCreating(true)}
-            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2"
+            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2 self-start shrink-0 whitespace-nowrap"
           >
             <Plus className="w-4 h-4" /> Demander un prêt
           </button>
         )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">
+      <div className="overflow-auto flex-1 min-h-0 border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0">
             <tr>
@@ -178,12 +196,12 @@ export const LoansTab: React.FC = () => {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {loans.length === 0 ? (
+            {pager.pageRows.length === 0 ? (
               <tr>
                 <td colSpan={canManage ? 9 : 8} className="px-6 py-8 text-center text-sm text-gray-500">Aucun prêt trouvé.</td>
               </tr>
             ) : (
-              loans.map(loan => (
+              pager.pageRows.map(loan => (
                 <tr key={loan.id} className="hover:bg-gray-50">
                   {canManage && <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{loan.userName}</td>}
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{loan.approverName}</td>
@@ -245,6 +263,8 @@ export const LoansTab: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      <PaginationBar page={pager} unit="prêts" />
 
       {/* Approval modal */}
       {approvalModalId && (

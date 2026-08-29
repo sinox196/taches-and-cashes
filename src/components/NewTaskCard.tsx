@@ -149,7 +149,7 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
     <>
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <h3 className="text-[11px] font-extrabold text-gray-800 mb-4 tracking-[0.05em] uppercase">
-            Démarrer nouvelle tâche
+            Démarrer une nouvelle tâche
           </h3>
           <form onSubmit={handleSubmit} className="space-y-3.5">
             {/* Field: Client */}

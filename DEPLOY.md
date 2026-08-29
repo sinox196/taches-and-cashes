@@ -16,6 +16,9 @@ Local development still needs no database running.
 | `JWT_SECRET` | **yes** | Set it once and never change it — rotating it invalidates every issued login token, and everyone gets `401` until they log in again. |
 | `NODE_ENV` | yes | `production`, so the server serves `dist/` instead of running Vite. |
 | `PORT` | no | Set by the platform; the app binds it. Defaults to 3000 locally. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | no | Transactional email (signup notice, RIB, payment confirmation, password reset). Unset, sends are logged and skipped instead of failing. **`SMTP_FROM` must be an address the relay is authorised to send as** — anything else is rejected with `550 sender address rejected`. |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | no | Web Push. Without them the running chronometer still shows in the app, the tab title and (while the browser is open) a system notification — but it cannot reach a **closed** browser. Generate once with `node -e "console.log(JSON.stringify(require('web-push').generateVAPIDKeys()))"` and never rotate them: changing the keys silently invalidates every device subscription already issued. |
+| `VAPID_SUBJECT` | no | `mailto:` address for the push service to contact. Defaults to `mailto:support@taches-and-cash.com`. |
 
 ## Railway (the production target)
 

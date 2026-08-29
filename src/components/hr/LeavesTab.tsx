@@ -3,15 +3,22 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { LeaveRequest } from '../../types';
 import { Plus, Check, X, Clock, AlertCircle } from 'lucide-react';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
+import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
 
 export const LeavesTab: React.FC = () => {
   const { token, hasPermission, user } = useAuth();
-  const [leaves, setLeaves] = useState<(LeaveRequest & { userName?: string, approverName?: string, approvedByName?: string })[]>([]);
+  // Nommé une fois : le hook de pagination lit le type des lignes sur ce
+  // tableau, et un callback annoté avec un type légèrement différent
+  // (`LeaveRequest` nu) suffit à faire retomber l'inférence sur `unknown`.
+  type LeaveRow = LeaveRequest & { userName?: string; approverName?: string; approvedByName?: string };
+  const [leaves, setLeaves] = useState<LeaveRow[]>([]);
   const [approvers, setApprovers] = useState<{id: number, name: string, role: string}[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   
   // Form state
-  const [type, setType] = useState('Annual leave');
+  const [type, setType] = useState('Congé annuel');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [duration, setDuration] = useState(1);
@@ -68,6 +75,11 @@ export const LeavesTab: React.FC = () => {
     }
   }, [token]);
 
+  // Filtre année/mois + pagination, partagés par les quatre onglets RH.
+  // La date qui compte pour un congé est celle de son début.
+  const leaveDate = React.useCallback((r: LeaveRow) => r.startDate, []);
+  const pager = usePeriodPage<LeaveRow>(leaves, leaveDate);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (dateError) {
@@ -123,7 +135,7 @@ export const LeavesTab: React.FC = () => {
         window.dispatchEvent(new Event('refresh-hr-balance'));
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to approve');
+        alert(err.error || "Échec de l'approbation");
       }
     } catch (error) {
       console.error(error);
@@ -147,7 +159,7 @@ export const LeavesTab: React.FC = () => {
         window.dispatchEvent(new Event('refresh-hr-balance'));
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to reject');
+        alert(err.error || "Échec du refus");
       }
     } catch (error) {
       console.error(error);
@@ -167,7 +179,7 @@ export const LeavesTab: React.FC = () => {
         window.dispatchEvent(new Event('refresh-hr-balance'));
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to cancel');
+        alert(err.error || "Échec de l'annulation");
       }
     } catch (error) {
       console.error(error);
@@ -185,21 +197,34 @@ export const LeavesTab: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center mb-4">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Demandes de congés</h2>
+        <div className="flex flex-wrap items-center gap-2 self-start">
+            <PeriodFilter page={pager} />
+            <ExportButton fileName="conges" rows={pager.filtered} columns={[
+                { header: 'Employé', value: (r: any) => r.userName || '' },
+                { header: 'Responsable', value: (r: any) => r.approverName || '' },
+                { header: 'Type', value: (r: any) => r.type },
+                { header: 'Du', value: (r: any) => r.startDate },
+                { header: 'Au', value: (r: any) => r.endDate },
+                { header: 'Durée (jours)', value: (r: any) => r.duration },
+                { header: 'Motif', value: (r: any) => r.reason || '' },
+                { header: 'Statut', value: (r: any) => r.status },
+            ]} />
         {hasPermission('CREATE_LEAVE_REQUEST') && (
           <button
             onClick={() => setIsCreating(true)}
-            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2"
+            className="bg-navy text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-navy-hover transition-colors flex items-center gap-2 self-start shrink-0 whitespace-nowrap"
           >
             <Plus className="w-4 h-4" />
             Nouvelle demande
           </button>
         )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">
+      <div className="overflow-auto flex-1 min-h-0 border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0">
             <tr>
@@ -213,14 +238,14 @@ export const LeavesTab: React.FC = () => {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {leaves.length === 0 ? (
+            {pager.pageRows.length === 0 ? (
               <tr>
                 <td colSpan={hasPermission('MANAGE_LEAVE_REQUESTS') ? 6 : 5} className="px-6 py-8 text-center text-sm text-gray-500">
                   Aucune demande trouvée.
                 </td>
               </tr>
             ) : (
-              leaves.map((leave) => (
+              pager.pageRows.map((leave) => (
                 <tr key={leave.id} className="hover:bg-gray-50">
                   {hasPermission('MANAGE_LEAVE_REQUESTS') && (
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -278,6 +303,8 @@ export const LeavesTab: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      <PaginationBar page={pager} unit="demandes" />
 
       {/* Approval Modal */}
       {approvalModalId && (
@@ -370,10 +397,10 @@ export const LeavesTab: React.FC = () => {
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900"
                     required
                   >
-                    <option value="Annual leave">Congé annuel</option>
-                    <option value="Sick leave">Congé maladie</option>
-                    <option value="Exceptional leave">Congé exceptionnel</option>
-                    <option value="Other">Autre</option>
+                    <option value="Congé annuel">Congé annuel</option>
+                    <option value="Congé maladie">Congé maladie</option>
+                    <option value="Congé exceptionnel">Congé exceptionnel</option>
+                    <option value="Autre">Autre</option>
                   </select>
                 </div>
                 

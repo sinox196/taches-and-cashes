@@ -23,6 +23,13 @@ export interface Database {
   getCompanyById(id: string): Promise<any | undefined>;
   createCompany(company: any): Promise<any>;
   updateCompany(id: string, updates: any): Promise<any | null>;
+  /**
+   * Supprime une entreprise ET tout ce qui lui appartient : utilisateurs,
+   * clients, temps, factures, caisse, ressources, RH, paramètres. Irréversible.
+   * `orders` n'est pas touché — une demande d'accès précède l'entreprise et ne
+   * porte pas de companyId.
+   */
+  deleteCompany(id: string): Promise<boolean>;
 
   getAllUsers(companyId: string): Promise<any[]>;
   createUser(companyId: string, user: any): Promise<any>;
@@ -104,6 +111,38 @@ export interface Database {
   deleteTaskAssignment(companyId: string, id: string): Promise<boolean>;
 
   /** Generic per-user notifications — new message, task assigned, HR events. */
+  /**
+   * Web Push subscriptions, one row per device. `getAllPushSubscriptions` is
+   * the one legitimately cross-tenant read in the interface: the chronometer
+   * push job sweeps every company, then fans each push out to that
+   * subscription's own owner.
+   */
+  getAllPushSubscriptionsForCompany(companyId: string): Promise<any[]>;
+  getAllPushSubscriptions(): Promise<any[]>;
+  createPushSubscription(companyId: string, subscription: any): Promise<any>;
+  deletePushSubscriptionByEndpoint(endpoint: string): Promise<boolean>;
+
+  /**
+   * Brouillard de caisse — the cash daybook. Each row is one movement:
+   * `entree` (money in) or `sortie` (money out). A row with an `entree` tied
+   * to a client is what feeds that client's encaissements in the Clients
+   * view, so the two are never entered twice.
+   */
+  getAllCashJournalEntries(companyId: string): Promise<any[]>;
+  getCashJournalEntryById(companyId: string, id: string): Promise<any | undefined>;
+  createCashJournalEntry(companyId: string, entry: any): Promise<any>;
+  updateCashJournalEntry(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteCashJournalEntry(companyId: string, id: string): Promise<boolean>;
+
+  /**
+   * The picklist of "objets" in the brouillard (Transport, Loyer, STEG…).
+   * A collection rather than a hardcoded array because the cabinet adds its
+   * own — the same reason `echeanceStatusOption` is admin-editable.
+   */
+  getAllCashCategories(companyId: string): Promise<any[]>;
+  createCashCategory(companyId: string, category: any): Promise<any>;
+  deleteCashCategory(companyId: string, id: string): Promise<boolean>;
+
   getAllNotifications(companyId: string): Promise<any[]>;
   createNotification(companyId: string, notification: any): Promise<any>;
   updateNotification(companyId: string, id: string, updates: any): Promise<any | null>;
@@ -233,6 +272,13 @@ export const emptyDb = () => ({
   taskAssignments: [],
   // Per-user notifications: new message, task assigned, HR events.
   notifications: [],
+  // Web Push subscriptions, one per device — how a running chronometer
+  // reaches a phone whose browser is closed.
+  pushSubscriptions: [],
+  // Brouillard de caisse — one row per cash movement (entrée / sortie).
+  cashJournalEntries: [],
+  // The picklist of objets used by those rows.
+  cashCategories: [],
   // Ressources Métier — see the interface comments above for what each holds.
   resourceTemplates: [],
   resourceTemplateItems: [],
