@@ -15,6 +15,8 @@ interface AttendanceRecord {
   checkoutAt: string | null;
   checkoutViaPhone: boolean | null;
   checkoutLateMinutes: number | null;
+  /** Break allowance snapshotted from the user's shift at check-in. Absent on rows written before the field existed. */
+  breakMinutes?: number | null;
 }
 
 interface TodayResponse {
@@ -26,12 +28,32 @@ interface TodayResponse {
   record: AttendanceRecord | null;
 }
 
-/** "60" -> "1 h", "90" -> "1 h 30". */
+/**
+ * "45" -> "45 min", "60" -> "1 h", "90" -> "1 h 30", "543" -> "9 h 03".
+ * Shared by the pause and présence columns. Les minutes sont sur deux
+ * chiffres : « 9 h 3 » se lit comme une durée tronquée, pas comme 9 h 03.
+ */
 const formatBreak = (minutes: number) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   if (!h) return `${m} min`;
-  return m ? `${h} h ${m}` : `${h} h`;
+  return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+};
+
+/**
+ * Temps écoulé entre les deux pointages, en minutes.
+ *
+ * `null` tant que la journée n'est pas close par une sortie — une présence
+ * calculée sur une sortie absente se lirait comme « 0 » alors que la personne
+ * est encore là. La pause n'est **pas** déduite ici : la colonne dit ce que
+ * les deux pointages disent, et la colonne pause d'à côté porte ce qui s'en
+ * retranche (le net est dans l'info-bulle).
+ */
+const presenceMinutes = (r: AttendanceRecord): number | null => {
+  if (!r.checkinAt || !r.checkoutAt) return null;
+  const ms = new Date(r.checkoutAt).getTime() - new Date(r.checkinAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.round(ms / 60000);
 };
 
 const time = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
@@ -206,9 +228,9 @@ export const AttendanceTab: React.FC = () => {
             {actionError && <p className="mt-3 text-[12px] text-red-600 font-medium">{actionError}</p>}
             {record && (
               <div className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-[12px] text-gray-600">
-                <span>Arrivée : <span className="font-semibold text-gray-900">{time(record.checkinAt)}</span> {record.checkinViaPhone && <Smartphone className="w-3.5 h-3.5 inline text-gray-400 ml-1" title="Pointé depuis un téléphone" />} — {punctualityBadge(record.checkinLateMinutes, tolerance, 'checkin')}</span>
+                <span>Heure entrée : <span className="font-semibold text-gray-900">{time(record.checkinAt)}</span> {record.checkinViaPhone && <Smartphone className="w-3.5 h-3.5 inline text-gray-400 ml-1" title="Pointé depuis un téléphone" />} — {punctualityBadge(record.checkinLateMinutes, tolerance, 'checkin')}</span>
                 {record.checkoutAt && (
-                  <span>Départ : <span className="font-semibold text-gray-900">{time(record.checkoutAt)}</span> {record.checkoutViaPhone && <Smartphone className="w-3.5 h-3.5 inline text-gray-400 ml-1" title="Pointé depuis un téléphone" />} — {punctualityBadge(record.checkoutLateMinutes, tolerance, 'checkout')}</span>
+                  <span>Heure sortie : <span className="font-semibold text-gray-900">{time(record.checkoutAt)}</span> {record.checkoutViaPhone && <Smartphone className="w-3.5 h-3.5 inline text-gray-400 ml-1" title="Pointé depuis un téléphone" />} — {punctualityBadge(record.checkoutLateMinutes, tolerance, 'checkout')}</span>
                 )}
               </div>
             )}
@@ -222,18 +244,23 @@ export const AttendanceTab: React.FC = () => {
             <tr>
               {isTeamViewer && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employé</th>}
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrivée</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Départ</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Heure entrée</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Heure sortie</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Durée de pause</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Durée de présence</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ponctualité</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {isLoading ? (
-              <tr><td colSpan={isTeamViewer ? 5 : 4} className="px-6 py-8 text-center text-sm text-gray-500">Chargement…</td></tr>
+              <tr><td colSpan={isTeamViewer ? 7 : 6} className="px-6 py-8 text-center text-sm text-gray-500">Chargement…</td></tr>
             ) : pager.pageRows.length === 0 ? (
-              <tr><td colSpan={isTeamViewer ? 5 : 4} className="px-6 py-8 text-center text-sm text-gray-500">Aucun pointage trouvé.</td></tr>
+              <tr><td colSpan={isTeamViewer ? 7 : 6} className="px-6 py-8 text-center text-sm text-gray-500">Aucun pointage trouvé.</td></tr>
             ) : (
-              pager.pageRows.map(r => (
+              pager.pageRows.map(r => {
+                const presence = presenceMinutes(r);
+                const pause = r.breakMinutes ?? null;
+                return (
                 <tr key={r.id} className="hover:bg-gray-50">
                   {isTeamViewer && <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{r.userName}</td>}
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.date}</td>
@@ -243,6 +270,20 @@ export const AttendanceTab: React.FC = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                     {time(r.checkoutAt)} {r.checkoutViaPhone && <Smartphone className="w-3.5 h-3.5 inline text-gray-400 ml-1" title="Via téléphone" />}
                   </td>
+                  {/* Pause ftour figée à l'entrée — « — » sur une ligne écrite avant que le champ existe. */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                    {pause == null ? <span className="text-gray-300">—</span> : formatBreak(pause)}
+                  </td>
+                  {/* Présence = sortie − entrée, pause non déduite (le net est dans l'info-bulle). */}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {presence == null ? (
+                      <span className="text-gray-300" title="Journée non close : aucune sortie pointée.">—</span>
+                    ) : (
+                      <span title={pause ? `Pause déduite : ${formatBreak(pause)} — net ${formatBreak(Math.max(0, presence - pause))}` : undefined}>
+                        {formatBreak(presence)}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-[12px]">
                     <div className="flex flex-col gap-0.5">
                       {punctualityBadge(r.checkinLateMinutes, tolerance, 'checkin')}
@@ -250,7 +291,8 @@ export const AttendanceTab: React.FC = () => {
                     </div>
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
