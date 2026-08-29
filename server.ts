@@ -458,6 +458,7 @@ async function startServer() {
         regimeHoraire: user.regimeHoraire,
         shiftStart: user.shiftStart || null,
         shiftEnd: user.shiftEnd || null,
+        breakMinutes: user.breakMinutes ?? null,
         isPlatformAdmin: !!user.isPlatformAdmin,
         company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null } : null,
       });
@@ -718,7 +719,7 @@ async function startServer() {
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd } = req.body;
+      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes } = req.body;
 
       const existing = await db.getUserByUsername(username);
       if (existing) {
@@ -764,6 +765,7 @@ async function startServer() {
         coutHoraireEmployeur,
         shiftStart: shiftStart || null,
         shiftEnd: shiftEnd || null,
+        breakMinutes: typeof breakMinutes === 'number' && Number.isFinite(breakMinutes) ? breakMinutes : null,
       });
 
       // The admin sets the annual leave allowance from this same form.
@@ -782,7 +784,7 @@ async function startServer() {
   app.put('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd } = req.body;
+      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes } = req.body;
       
       const simSalaire = typeof salaireBrut === 'number' ? salaireBrut : 0;
       const simRegime = typeof regimeHoraire === 'number' ? regimeHoraire : 0;
@@ -810,6 +812,7 @@ async function startServer() {
         coutHoraireEmployeur,
         shiftStart: shiftStart || null,
         shiftEnd: shiftEnd || null,
+        breakMinutes: typeof breakMinutes === 'number' && Number.isFinite(breakMinutes) ? breakMinutes : null,
       };
 
       if (password) {
@@ -4104,6 +4107,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       res.json({
         shiftStart: me?.shiftStart || null,
         shiftEnd: me?.shiftEnd || null,
+        breakMinutes: me?.breakMinutes ?? null,
         toleranceMinutes: PUNCTUALITY_TOLERANCE_MIN,
         record,
       });
@@ -4136,6 +4140,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         checkoutLateMinutes: null,
         shiftStart: me?.shiftStart || null,
         shiftEnd: me?.shiftEnd || null,
+        breakMinutes: me?.breakMinutes ?? null,
       });
       res.status(201).json(record);
     } catch (error) {

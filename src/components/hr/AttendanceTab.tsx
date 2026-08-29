@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogIn, LogOut, Smartphone, Clock, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { LogIn, LogOut, Smartphone, Clock, CheckCircle2, AlertTriangle, X, Coffee } from 'lucide-react';
+import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
+import { MultiSelectFilterDropdown } from '../MultiSelectFilterDropdown';
 
 interface AttendanceRecord {
   id: number;
@@ -18,9 +20,19 @@ interface AttendanceRecord {
 interface TodayResponse {
   shiftStart: string | null;
   shiftEnd: string | null;
+  /** Meal-break allowance in minutes, set per user on the Équipe page. */
+  breakMinutes: number | null;
   toleranceMinutes: number;
   record: AttendanceRecord | null;
 }
+
+/** "60" -> "1 h", "90" -> "1 h 30". */
+const formatBreak = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m} min`;
+  return m ? `${h} h ${m}` : `${h} h`;
+};
 
 const time = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
 
@@ -63,8 +75,12 @@ export const AttendanceTab: React.FC = () => {
       .catch(() => {});
   };
 
+  // A full year, not the 30 days this started with: the année/mois filter
+  // below can only ever narrow what was fetched, so a shorter window would
+  // make picking any earlier month read as "aucun pointage". 365 is also the
+  // server's own cap on `days`.
   const fetchLog = () => {
-    fetch('/api/attendance?days=30', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/attendance?days=365', { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.json())
       .then(data => setRecords(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -76,6 +92,25 @@ export const AttendanceTab: React.FC = () => {
     fetchToday();
     fetchLog();
   }, [token]);
+
+  // Collaborateur filter, then année/mois + pagination. The collaborator
+  // narrowing happens *before* usePeriodPage so the page count and the
+  // "X sur Y" footer describe what is actually on screen. Only a team viewer
+  // gets it — everyone else has exactly one name in their own log.
+  const [collabFilter, setCollabFilter] = useState<string[]>([]);
+  const uniqueCollaborateurs = useMemo(
+    () => Array.from(new Set(records.map(r => r.userName || 'Inconnu'))).sort((a: string, b: string) => a.localeCompare(b)),
+    [records],
+  );
+  const scopedRecords = useMemo(
+    () => (collabFilter.length === 0
+      ? records
+      : records.filter(r => collabFilter.includes(r.userName || 'Inconnu'))),
+    [records, collabFilter],
+  );
+
+  const recordDate = React.useCallback((r: AttendanceRecord) => r.date, []);
+  const pager = usePeriodPage<AttendanceRecord>(scopedRecords, recordDate);
 
   const handleCheckin = async () => {
     setActionError('');
@@ -118,12 +153,25 @@ export const AttendanceTab: React.FC = () => {
   const record = today?.record;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center mb-4">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Pointage</h2>
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          {isTeamViewer && (
+            <MultiSelectFilterDropdown
+              allLabel="Tous (Collabs)"
+              searchPlaceholder="Rechercher un collaborateur…"
+              options={uniqueCollaborateurs}
+              selected={collabFilter}
+              onChange={next => { setCollabFilter(next); pager.setPage(1); }}
+              widthClass="max-w-[150px]"
+            />
+          )}
+          <PeriodFilter page={pager} />
+        </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5">
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5 shrink-0">
         {today && !today.shiftStart && !today.shiftEnd ? (
           <p className="text-sm text-gray-500">Aucun shift n'est configuré pour vous. Contactez un administrateur (page Équipe).</p>
         ) : (
@@ -131,6 +179,12 @@ export const AttendanceTab: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 text-[13px] text-gray-600 mb-4">
               <Clock className="w-4 h-4 text-gray-400" />
               Shift : {today?.shiftStart || '—'} - {today?.shiftEnd || '—'}
+              {today?.breakMinutes ? (
+                <span className="inline-flex items-center gap-1 text-gray-500">
+                  <Coffee className="w-3.5 h-3.5 text-gray-400" />
+                  Pause ftour : {formatBreak(today.breakMinutes)}
+                </span>
+              ) : null}
               <span className="text-gray-400">(tolérance {tolerance} min)</span>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -162,7 +216,7 @@ export const AttendanceTab: React.FC = () => {
         )}
       </div>
 
-      <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">
+      <div className="overflow-auto flex-1 min-h-0 border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0">
             <tr>
@@ -176,10 +230,10 @@ export const AttendanceTab: React.FC = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {isLoading ? (
               <tr><td colSpan={isTeamViewer ? 5 : 4} className="px-6 py-8 text-center text-sm text-gray-500">Chargement…</td></tr>
-            ) : records.length === 0 ? (
-              <tr><td colSpan={isTeamViewer ? 5 : 4} className="px-6 py-8 text-center text-sm text-gray-500">Aucun pointage sur les 30 derniers jours.</td></tr>
+            ) : pager.pageRows.length === 0 ? (
+              <tr><td colSpan={isTeamViewer ? 5 : 4} className="px-6 py-8 text-center text-sm text-gray-500">Aucun pointage trouvé.</td></tr>
             ) : (
-              records.map(r => (
+              pager.pageRows.map(r => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   {isTeamViewer && <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{r.userName}</td>}
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.date}</td>
@@ -201,6 +255,8 @@ export const AttendanceTab: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      <PaginationBar page={pager} unit="pointages" />
 
       {runningTaskWarning && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">

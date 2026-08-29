@@ -13,6 +13,8 @@ export interface User {
   /** Admin-set shift boundaries, "HH:MM" — drives the pointage punctuality gate. */
   shiftStart?: string | null;
   shiftEnd?: string | null;
+  /** Meal-break ("pause ftour") allowance in minutes, deducted from the shift's paid hours. */
+  breakMinutes?: number | null;
   cnss?: number;
   tfp?: number;
   foprolos?: number;

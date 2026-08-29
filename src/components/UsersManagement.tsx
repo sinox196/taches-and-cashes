@@ -98,6 +98,8 @@ export const UsersManagement: React.FC = () => {
   /** "HH:MM" shift boundaries — drive the pointage check-in/check-out gate. Empty = no shift, no gate. */
   const [formShiftStart, setFormShiftStart] = useState('');
   const [formShiftEnd, setFormShiftEnd] = useState('');
+  /** Pause ftour, en minutes — déduite des heures du shift. */
+  const [formBreakMinutes, setFormBreakMinutes] = useState<number | ''>('');
   /** Days already consumed — read-only context so the admin sets the allowance knowingly. */
   const [formCongesUtilises, setFormCongesUtilises] = useState<number>(0);
   const [globalSettings, setGlobalSettings] = useState<any>(null);
@@ -156,6 +158,7 @@ export const UsersManagement: React.FC = () => {
     setFormCongesUtilises(0);
     setFormShiftStart('');
     setFormShiftEnd('');
+    setFormBreakMinutes('');
     setFormError('');
     setIsModalOpen(true);
   };
@@ -177,6 +180,8 @@ export const UsersManagement: React.FC = () => {
     setFormCongesUtilises(typeof user.congesUtilises === 'number' ? user.congesUtilises : 0);
     setFormShiftStart(user.shiftStart || '');
     setFormShiftEnd(user.shiftEnd || '');
+    setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
+    setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
     setFormError('');
     setIsModalOpen(true);
   };
@@ -229,6 +234,7 @@ export const UsersManagement: React.FC = () => {
         soldeConge: formSoldeConge === '' ? 0 : Number(formSoldeConge),
         shiftStart: formShiftStart || null,
         shiftEnd: formShiftEnd || null,
+        breakMinutes: formBreakMinutes === '' ? null : Number(formBreakMinutes),
       };
       if (formPassword) payload.password = formPassword;
       if (!editingUserId) payload.username = formUsername;
@@ -290,6 +296,27 @@ export const UsersManagement: React.FC = () => {
   const coutTotalEmployeur = simSalaire + montantsCharges + simPrimes;
   const heuresMensuelles = simRegime * 4.33;
   const coutHoraireEmployeur = heuresMensuelles > 0 ? coutTotalEmployeur / heuresMensuelles : 0;
+
+  /**
+   * Durée effective du shift, pause ftour déduite — affichée sous le champ
+   * pour que l'admin voie tout de suite ce qu'il vient de configurer. `null`
+   * tant que le shift n'est pas complet : sans les deux bornes il n'y a rien
+   * à calculer. Un shift qui passe minuit est traité comme allant au
+   * lendemain (l'équipe de nuit existe), pas comme une durée négative.
+   */
+  const heuresTravaillees = (() => {
+    if (!formShiftStart || !formShiftEnd) return null;
+    const [sh, sm] = formShiftStart.split(':').map(Number);
+    const [eh, em] = formShiftEnd.split(':').map(Number);
+    if ([sh, sm, eh, em].some(n => !Number.isFinite(n))) return null;
+    let minutes = (eh * 60 + em) - (sh * 60 + sm);
+    if (minutes <= 0) minutes += 24 * 60;
+    minutes -= typeof formBreakMinutes === 'number' ? formBreakMinutes : 0;
+    if (minutes <= 0) return '0 h';
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+  })();
 
   return (
     <div className="flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1000px] w-full mx-auto p-4 sm:p-6 lg:p-8">
@@ -545,9 +572,26 @@ export const UsersManagement: React.FC = () => {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                       />
                     </div>
+                    <div>
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Pause ftour (minutes)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="5"
+                        value={formBreakMinutes}
+                        onChange={e => setFormBreakMinutes(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        placeholder="Ex: 60"
+                      />
+                      {heuresTravaillees !== null && (
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          Temps de travail effectif : {heuresTravaillees}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <p className="text-[11px] text-gray-400 mt-2">
-                    Laissez vide pour ne pas assujettir ce collaborateur au pointage. Une tolérance de 15 minutes s'applique à l'arrivée comme au départ.
+                    Laissez vide pour ne pas assujettir ce collaborateur au pointage. Une tolérance de 15 minutes s'applique à l'arrivée comme au départ ; la pause ftour est déduite du temps de travail.
                   </p>
 
                   <h3 className="text-[13px] font-bold text-gray-800 mt-8 mb-4">Configuration des charges & Heures</h3>
