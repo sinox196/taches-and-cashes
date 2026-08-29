@@ -310,7 +310,10 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     row('Timbre fiscal', money(invoice.stampDuty));
   }
   row('Net à payer', money(invoice.netToPay), true);
-  if (invoice.disbursements > 0) row('Remboursement de débours', `+ ${money(invoice.disbursements)}`);
+  if (invoice.disbursements > 0) {
+    const label = String(invoice.disbursementsLabel || '').trim();
+    row(label ? `Remboursement de débours — ${label}` : 'Remboursement de débours', `+ ${money(invoice.disbursements)}`);
+  }
   if (invoice.advances > 0) row('Moins avances perçues', `- ${money(invoice.advances)}`);
 
   y = Math.max(y, breakdownBottom);

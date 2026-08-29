@@ -3,6 +3,8 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { LeaveRequest } from '../../types';
 import { Plus, Check, X, Clock, AlertCircle } from 'lucide-react';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 
 export const LeavesTab: React.FC = () => {
   const { token, hasPermission, user } = useAuth();
@@ -188,6 +190,17 @@ export const LeavesTab: React.FC = () => {
     <div className="flex flex-col h-full">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Demandes de congés</h2>
+        <div className="flex items-center gap-2 self-start">
+            <ExportButton fileName="conges" rows={leaves} columns={[
+                { header: 'Employé', value: (r: any) => r.userName || '' },
+                { header: 'Responsable', value: (r: any) => r.approverName || '' },
+                { header: 'Type', value: (r: any) => r.type },
+                { header: 'Du', value: (r: any) => r.startDate },
+                { header: 'Au', value: (r: any) => r.endDate },
+                { header: 'Durée (jours)', value: (r: any) => r.duration },
+                { header: 'Motif', value: (r: any) => r.reason || '' },
+                { header: 'Statut', value: (r: any) => r.status },
+            ]} />
         {hasPermission('CREATE_LEAVE_REQUEST') && (
           <button
             onClick={() => setIsCreating(true)}
@@ -197,6 +210,7 @@ export const LeavesTab: React.FC = () => {
             Nouvelle demande
           </button>
         )}
+        </div>
       </div>
 
       <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">

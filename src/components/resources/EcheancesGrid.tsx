@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, X, Search, Loader2, Trash2, Pencil, Check, Table2, CalendarDays } from 'lucide-react';
 import { friendlyError } from '../../utils/errors';
+import { ExportButton } from '../ExportButton';
 
 const MONTH_NAMES = [
   'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
@@ -442,6 +443,26 @@ export const EcheancesGrid: React.FC = () => {
           <button onClick={() => { setAddingColumn(false); setNewLabel(''); }} className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-600 hover:bg-gray-50">
             Annuler
           </button>
+        </div>
+      )}
+
+      {/* Export de la grille telle qu'elle est filtrée : une colonne par
+          échéance de l'année (ou du mois) affichée, une ligne par client
+          visible. Le CSV reproduit le tableau, pas la base entière. */}
+      {yearColumns.length > 0 && view === 'grid' && (
+        <div className="flex justify-end">
+          <ExportButton
+            fileName={`echeances-${year}`}
+            rows={visibleClients}
+            columns={[
+              { header: 'N°', value: (c: any) => c.customFields?.['Numéro'] ?? c.id },
+              { header: 'Client', value: (c: any) => c.name || '' },
+              ...yearColumns.map(col => ({
+                header: `${MONTH_NAMES[Number(col.month) - 1] ?? col.month} — ${col.label}`,
+                value: (c: any) => statusByCell.get(`${c.id}:${col.id}`) ?? '',
+              })),
+            ]}
+          />
         </div>
       )}
 

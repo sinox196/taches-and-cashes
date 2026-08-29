@@ -152,6 +152,10 @@ export const PlatformUsersModal: React.FC<PlatformUsersModalProps> = ({ companyI
                     </select>
                     <input
                       type="password"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore
+                    data-form-type="other"
                       value={formPassword}
                       onChange={e => setFormPassword(e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px]"

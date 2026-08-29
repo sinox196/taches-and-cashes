@@ -3,6 +3,8 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { AbsenceAuthorization } from '../../types';
 import { Plus, Check, X, Clock, AlertCircle } from 'lucide-react';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 
 export const AbsencesTab: React.FC = () => {
   const { token, hasPermission, user } = useAuth();
@@ -192,6 +194,16 @@ export const AbsencesTab: React.FC = () => {
     <div className="flex flex-col h-full">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Autorisations d'absence</h2>
+        <div className="flex items-center gap-2 self-start">
+            <ExportButton fileName="autorisations-absence" rows={auths} columns={[
+                { header: 'Employé', value: (r: any) => r.userName || '' },
+                { header: 'Responsable', value: (r: any) => r.approverName || '' },
+                { header: 'Date', value: (r: any) => r.date },
+                { header: 'De', value: (r: any) => r.startTime || '' },
+                { header: 'À', value: (r: any) => r.endTime || '' },
+                { header: 'Motif', value: (r: any) => r.reason || '' },
+                { header: 'Statut', value: (r: any) => r.status },
+            ]} />
         {hasPermission('CREATE_ABSENCE_AUTHORIZATION') && (
           <button
             onClick={() => setIsCreating(true)}
@@ -201,6 +213,7 @@ export const AbsencesTab: React.FC = () => {
             Nouvelle autorisation
           </button>
         )}
+        </div>
       </div>
 
       <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">

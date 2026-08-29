@@ -25,7 +25,7 @@ import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
 import { ResetPassword } from './pages/ResetPassword';
-import { Loader2, ClipboardCheck, CalendarClock } from 'lucide-react';
+import { Loader2, ClipboardCheck, CalendarClock, Pause, Square } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -594,14 +594,36 @@ export default function App() {
     showToast(`Tâche de ${entry.userName || 'collaborateur'} ${label}.`);
   };
 
+  /**
+   * Reprendre une tâche alors qu'une autre tourne demandait une décision qui
+   * n'était jamais posée : l'ancienne version *clôturait* la tâche en cours,
+   * sans rien demander. Mettre en pause et arrêter ne sont pas la même chose —
+   * une tâche arrêtée par erreur ne se reprend pas, il faut en recréer une.
+   * On demande donc, plutôt que de choisir à la place de l'utilisateur.
+   */
+  const [switchPrompt, setSwitchPrompt] = useState<{ from: TimeEntry; to: TimeEntry } | null>(null);
+
+  const startEntry = async (entry: TimeEntry) => {
+    await updateTimeEntryApi(entry.id, { statut: 'RUNNING' });
+    showToast(`Chronomètre basculé sur « ${entry.description || entry.taskType || entry.pole || entry.client} »`);
+  };
+
   const handleSelectAsActive = async (entry: TimeEntry) => {
     if (myRunningEntry && myRunningEntry.id !== entry.id) {
-      await updateTimeEntryApi(myRunningEntry.id, {
-        statut: myRunningEntry.statut === 'RUNNING' ? 'COMPLETED' : myRunningEntry.statut
-      });
+      setSwitchPrompt({ from: myRunningEntry, to: entry });
+      return;
     }
-    await updateTimeEntryApi(entry.id, { statut: 'RUNNING' });
-    showToast(`Chronomètre actif basculé sur "${entry.description}"`);
+    await startEntry(entry);
+  };
+
+  /** Choix fait dans la fenêtre : que devient la tâche en cours ? */
+  const resolveSwitch = async (action: 'PAUSED' | 'COMPLETED') => {
+    if (!switchPrompt) return;
+    const { from, to } = switchPrompt;
+    setSwitchPrompt(null);
+    if (action === 'PAUSED') setJustPausedId(from.id);
+    await updateTimeEntryApi(from.id, { statut: action });
+    await startEntry(to);
   };
 
   if (resetToken) {
@@ -816,6 +838,45 @@ export default function App() {
           onPlanned={() => showToast('Tâche planifiée.')}
         />
       )}
+
+      {switchPrompt && (() => {
+        const label = (e: TimeEntry) => e.description || e.taskType || e.pole || e.client;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <h3 className="text-[15px] font-bold text-gray-900 mb-1">Une tâche est déjà en cours</h3>
+              <p className="text-[13px] text-gray-600 mb-4">
+                Vous êtes sur <span className="font-semibold">{label(switchPrompt.from)}</span>
+                {switchPrompt.from.client ? <> ({switchPrompt.from.client})</> : null}.
+                Pour reprendre <span className="font-semibold">{label(switchPrompt.to)}</span>, que faut-il en faire ?
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => resolveSwitch('PAUSED')}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-navy text-white rounded-lg text-[13px] font-semibold hover:bg-navy-hover"
+                >
+                  <Pause className="w-4 h-4" /> Mettre en pause et basculer
+                </button>
+                <button
+                  onClick={() => resolveSwitch('COMPLETED')}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <Square className="w-4 h-4" /> Arrêter et basculer
+                </button>
+                <button
+                  onClick={() => setSwitchPrompt(null)}
+                  className="w-full px-4 py-2 text-[12.5px] font-medium text-gray-500 hover:text-gray-700"
+                >
+                  Annuler — rester sur la tâche en cours
+                </button>
+              </div>
+              <p className="text-[11.5px] text-gray-400 mt-3">
+                Une tâche mise en pause se reprend quand vous voulez ; une tâche arrêtée est clôturée.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {overtimeAlert && (() => {
         const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);

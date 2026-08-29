@@ -5,6 +5,8 @@ import { friendlyError } from '../../utils/errors';
 import { ClientSearchInput } from './ClientSearchInput';
 import { CategoryPicker, CashCategory } from './CategoryPicker';
 import { isCashMode } from '../../constants/paymentModes';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -301,6 +303,21 @@ export const CashJournal: React.FC = () => {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Description, client, objet…"
               className="pl-8 pr-3 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full sm:w-56" />
           </div>
+          {/* Exporte l'ensemble filtré, pas la page : le solde n'aurait
+              aucun sens tronqué à vingt lignes. */}
+          <ExportButton
+            fileName="brouillard-de-caisse"
+            rows={withSolde}
+            columns={[
+              { header: 'Date', value: (r: any) => frDate(r.row.date) },
+              { header: 'Objet', value: (r: any) => r.row.category || '' },
+              { header: 'Description', value: (r: any) => r.row.label || '' },
+              { header: 'Client', value: (r: any) => r.row.clientName || '' },
+              { header: 'Montant encaissé', value: (r: any) => csvNumber(r.row.entree || 0) },
+              { header: 'Montant décaissé', value: (r: any) => csvNumber(r.row.sortie || 0) },
+              { header: 'Solde', value: (r: any) => csvNumber(r.solde) },
+            ]}
+          />
           {canManage && !draft && (
             <button onClick={() => { setDraft(emptyDraft()); setPage(1); }}
               className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 shrink-0 whitespace-nowrap">

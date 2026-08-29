@@ -306,7 +306,7 @@ export const PlatformAdmin: React.FC = () => {
         <CompanyEditModal
           company={editCompany as any}
           startInDeleteMode={openDelete}
-          onClose={() => { setEditCompany(null); setOpenDelete(false); }}
+          onClose={() => { setEditCompany(null); setOpenDelete(false); load(); }}
           onSaved={() => { setEditCompany(null); setOpenDelete(false); load(); }}
           onDeleted={() => { setEditCompany(null); setOpenDelete(false); load(); }}
           onManageUsers={() => { setUsersCompany(editCompany); setEditCompany(null); setOpenDelete(false); }}

@@ -224,6 +224,10 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
                     <input
                       required
                       type="password"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore
+                      data-form-type="other"
                       minLength={6}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
@@ -239,6 +243,10 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
                     <input
                       required
                       type="password"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore
+                      data-form-type="other"
                       value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
                       className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"

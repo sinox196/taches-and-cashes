@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, X, Check, Wallet, CheckCircle2, Ban, Clock, AlertCircle } from 'lucide-react';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 
 interface Advance {
   id: number;
@@ -139,6 +141,14 @@ export const AdvancesTab: React.FC = () => {
     <div className="flex flex-col h-full">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Avances</h2>
+        <div className="flex items-center gap-2 self-start">
+            <ExportButton fileName="avances" rows={advances} columns={[
+                { header: 'Employé', value: (r: any) => r.userName || '' },
+                { header: 'Date', value: (r: any) => r.date || r.createdAt?.slice(0, 10) || '' },
+                { header: 'Montant', value: (r: any) => csvNumber(Number(r.amount) || 0) },
+                { header: 'Motif', value: (r: any) => r.reason || '' },
+                { header: 'Statut', value: (r: any) => r.status },
+            ]} />
         {hasPermission('CREATE_LOAN_REQUEST') && (
           <button
             onClick={() => setIsCreating(true)}
@@ -147,6 +157,7 @@ export const AdvancesTab: React.FC = () => {
             <Plus className="w-4 h-4" /> Demander une avance
           </button>
         )}
+        </div>
       </div>
 
       <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">

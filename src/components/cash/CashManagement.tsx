@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
@@ -7,6 +7,8 @@ import { CompanySettings } from './CompanySettings';
 import { CashJournal } from './CashJournal';
 import { ClientPayments } from './ClientPayments';
 import { friendlyError } from '../../utils/errors';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -109,6 +111,38 @@ export const CashManagement: React.FC = () => {
     return () => clearTimeout(h);
   }, [search, page]);
 
+  /**
+   * Émettre un brouillon : c'est le serveur qui lui attribue son numéro, à ce
+   * moment-là et pas avant. Un autre document doit fournir sa référence libre.
+   */
+  const issue = async (invoice: any) => {
+    let number: string | null = null;
+    if (invoice.documentKind !== 'FACTURE_LEGALE') {
+      number = window.prompt(`Numéro à donner à ce document en l'émettant :`, '');
+      if (number === null) return;
+    } else if (!confirm(
+      `Émettre ce brouillon en facture légale ?\n\nIl prendra le prochain numéro de la séquence et ne pourra plus revenir à l'état de brouillon.`
+    )) return;
+
+    const res = await fetch(`/api/invoices/${invoice.id}/issue`, {
+      method: 'POST', headers: authHeaders,
+      body: JSON.stringify(number === null ? {} : { number }),
+    });
+    if (res.ok) { setError(''); load(search.trim()); }
+    else setError((await res.json().catch(() => ({}))).error || "Émission impossible");
+  };
+
+  /** Transformer un autre document en facture légale : il prend le prochain
+   *  numéro de la séquence et se place donc en dernier. */
+  const convertToLegal = async (invoice: any) => {
+    if (!confirm(
+      `Transformer « ${invoice.number} » en facture légale ?\n\nIl prendra le prochain numéro de la séquence légale et devra en respecter l'ordre chronologique. Sa référence actuelle sera conservée pour mémoire.`
+    )) return;
+    const res = await fetch(`/api/invoices/${invoice.id}/convert-to-legal`, { method: 'POST', headers: authHeaders });
+    if (res.ok) { setError(''); load(search.trim()); }
+    else setError((await res.json().catch(() => ({}))).error || 'Conversion impossible');
+  };
+
   const remove = async (invoice: any) => {
     if (!confirm(`Supprimer le document ${invoice.number} — ${invoice.clientName} ?`)) return;
     const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE', headers: authHeaders });
@@ -164,6 +198,25 @@ export const CashManagement: React.FC = () => {
               <span className="hidden sm:inline">Informations de facturation</span>
             </button>
           )}
+          <ExportButton
+            fileName="factures"
+            rows={invoices}
+            columns={[
+              { header: 'Numéro', value: (i: any) => displayNumber(i) },
+              { header: 'Statut', value: (i: any) => (i.status === 'DRAFT' ? 'Brouillon' : 'Émis') },
+              { header: 'Type', value: (i: any) => KIND_LABEL[i.documentKind] ?? i.documentKind },
+              { header: 'Objet', value: (i: any) => i.title },
+              { header: 'Client', value: (i: any) => i.clientName },
+              { header: 'Matricule', value: (i: any) => i.clientTaxId || '' },
+              { header: 'Date', value: (i: any) => frDate(i.issueDate) },
+              { header: 'Échéance', value: (i: any) => frDate(i.dueDate) },
+              { header: 'Régime TVA', value: (i: any) => REGIME_LABEL[i.vatRegime] ?? i.vatRegime },
+              { header: 'Devise', value: (i: any) => i.currency || 'TND' },
+              { header: 'Total HT', value: (i: any) => csvNumber(i.totalHT) },
+              { header: 'Total TVA', value: (i: any) => csvNumber(i.totalVAT) },
+              { header: 'Montant de facture', value: (i: any) => csvNumber(i.totalNetToPay) },
+            ]}
+          />
           {canManage && (
             <button
               onClick={() => setEditor({ invoice: null })}
@@ -275,9 +328,35 @@ export const CashManagement: React.FC = () => {
                   <tr
                     key={inv.id}
                     onClick={() => setPreview(inv)}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors group"
+                    /* Un brouillon se distingue par un fond ambré et un bord
+                       gauche : il est dans la liste sans être un document émis,
+                       et ne compte dans aucun total. */
+                    className={`cursor-pointer transition-colors group ${
+                      inv.status === 'DRAFT'
+                        ? 'bg-run-bg/40 hover:bg-run-bg/70 border-l-2 border-l-run-fg'
+                        : 'hover:bg-gray-50'
+                    }`}
                   >
-                    <td className="px-4 py-3 font-mono font-bold text-gray-900">{displayNumber(inv)}</td>
+                    <td className="px-4 py-3 font-mono font-bold text-gray-900">
+                      {inv.status === 'DRAFT' ? (
+                        <span className="inline-flex items-center gap-1.5 text-run-fg">
+                          <FileClock className="w-3.5 h-3.5" />
+                          <span className="font-sans text-[10px] font-bold uppercase tracking-wide">Brouillon</span>
+                        </span>
+                      ) : (
+                        <>
+                          {displayNumber(inv)}
+                          {inv.convertedFromNumber && (
+                            <span
+                              title={`Anciennement « ${inv.convertedFromNumber} », converti en facture légale.`}
+                              className="ml-1.5 font-sans text-[9px] font-bold uppercase tracking-wide text-gray-400"
+                            >
+                              converti
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900">{inv.title}</div>
                       <div className="text-[11px] text-gray-400">{KIND_LABEL[inv.documentKind] ?? inv.documentKind}</div>
@@ -298,6 +377,24 @@ export const CashManagement: React.FC = () => {
                     <td className="px-4 py-3 text-center sticky right-0 z-10 bg-white group-hover:bg-gray-50 transition-colors shadow-[-1px_0_0_0_theme(colors.gray.200)]">
                       {canManage && (
                         <div className="flex items-center justify-center gap-1">
+                          {inv.status === 'DRAFT' && (
+                            <button
+                              onClick={e => { e.stopPropagation(); issue(inv); }}
+                              className="p-1.5 text-run-fg hover:bg-run-bg rounded"
+                              title="Émettre — lui attribue son numéro définitif"
+                            >
+                              <Send className="w-4 h-4" />
+                            </button>
+                          )}
+                          {inv.status !== 'DRAFT' && inv.documentKind !== 'FACTURE_LEGALE' && (
+                            <button
+                              onClick={e => { e.stopPropagation(); convertToLegal(inv); }}
+                              className="p-1.5 text-gray-400 hover:text-navy hover:bg-gray-100 rounded"
+                              title="Transformer en facture légale"
+                            >
+                              <ArrowRightLeft className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={e => { e.stopPropagation(); setEditor({ invoice: inv }); }}
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"

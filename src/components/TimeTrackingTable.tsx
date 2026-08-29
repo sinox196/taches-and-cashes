@@ -19,6 +19,8 @@ import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
 import { MultiSelectFilterDropdown } from './MultiSelectFilterDropdown';
 import { EntryDeviceBadge } from './EntryDeviceBadge';
+import { ExportButton } from './ExportButton';
+import { csvNumber } from '../utils/exportCsv';
 
 interface TimeTrackingTableProps {
   entries: TimeEntry[];
@@ -72,6 +74,11 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
 
     return matchesStatus && matchesClient && matchesPole && matchesCollab;
   });
+
+  /** Libellés de statut, partagés par l'affichage et l'export. */
+  const STATUT_LABEL: Record<string, string> = {
+    COMPLETED: 'Terminée', RUNNING: 'En cours', PAUSED: 'En pause',
+  };
 
   // Group by month
   const MONTHS = [
@@ -161,6 +168,30 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
             selected={poleFilter}
             onChange={setPoleFilter}
             widthClass="max-w-[130px]"
+          />
+
+          <ExportButton
+            fileName="pointage"
+            rows={filteredEntries}
+            columns={[
+              { header: 'Collaborateur', value: (e: TimeEntry) => e.userName || '' },
+              { header: 'Date', value: (e: TimeEntry) => e.date },
+              { header: 'Client', value: (e: TimeEntry) => e.client },
+              { header: 'Facturable', value: (e: TimeEntry) => (e.facturable === false ? 'Non' : 'Oui') },
+              { header: 'Description', value: (e: TimeEntry) => e.description },
+              { header: 'Mission', value: (e: TimeEntry) => e.pole },
+              { header: 'Type de tâche', value: (e: TimeEntry) => e.taskType || '' },
+              { header: 'Début', value: (e: TimeEntry) => e.heureDebut },
+              { header: 'Fin', value: (e: TimeEntry) => e.heureFin || '' },
+              { header: 'Durée (h)', value: (e: TimeEntry) => csvNumber((e.dureeSeconds || 0) / 3600, 2) },
+              { header: 'Statut', value: (e: TimeEntry) => STATUT_LABEL[e.statut] ?? e.statut },
+              // Le coût ne sort du fichier que s'il sort déjà de l'écran :
+              // le serveur ne l'envoie pas à un non-admin.
+              ...(isAdmin ? [{
+                header: 'Coût employeur (TND)',
+                value: (e: TimeEntry) => (e.hourlyRate == null ? '' : csvNumber(((e.dureeSeconds || 0) / 3600) * e.hourlyRate)),
+              }] : []),
+            ]}
           />
 
           {/* Status: a segmented control rather than a dropdown — four states,
@@ -272,9 +303,21 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     {row.date}
                   </td>
 
-                  {/* Client */}
+                  {/* Client — un client non facturable est signalé ici plutôt
+                      que dans la colonne Coût : le coût employeur reste réel,
+                      c'est la refacturation qui n'a pas lieu. */}
                   <td className="px-2 py-2.5 font-medium text-gray-900 truncate" title={row.client}>
-                    {row.client}
+                    <span className="inline-flex items-center gap-1.5 max-w-full">
+                      <span className="truncate">{row.client}</span>
+                      {row.facturable === false && (
+                        <span
+                          title="Client non facturable : ce temps ne sera couvert par aucun honoraire."
+                          className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-[9px] font-bold uppercase tracking-wide shrink-0"
+                        >
+                          non fact.
+                        </span>
+                      )}
+                    </span>
                   </td>
 
                   {/* Description */}

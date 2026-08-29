@@ -35,6 +35,12 @@ export interface TimeEntry {
    * not change where it was started.
    */
   createdVia?: 'MOBILE' | 'DESKTOP';
+  /**
+   * Le travail est-il refacturable au client ? Figé à la création depuis
+   * `client.nonFacturable`. Le coût employeur reste calculé — il est réel —
+   * mais il ne sera couvert par aucun honoraire.
+   */
+  facturable?: boolean;
   /** The device, person and time of the most recent change to this entry. */
   lastEditedVia?: 'MOBILE' | 'DESKTOP';
   lastEditedBy?: number;

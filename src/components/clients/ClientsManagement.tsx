@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
@@ -51,6 +53,11 @@ export interface Client {
   montantFacture?: number;
   /** Derived server-side: soldeAnterieur - sum(encaissements) + montantFacture. */
   resteAPayer?: number;
+  /**
+   * Le travail fait pour ce client n'est pas refacturé. Chaque tâche fige la
+   * valeur à sa création, donc cocher la case n'agit que sur la suite.
+   */
+  nonFacturable?: boolean;
 }
 
 // A client saved before this list existed has `encaissements` stored as a
@@ -95,7 +102,7 @@ export const ClientsManagement: React.FC = () => {
   const [formData, setFormData] = useState<Partial<Client>>({
     customFields: {},
     name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '',
-    soldeAnterieur: '' as any, encaissements: [],
+    soldeAnterieur: '' as any, encaissements: [], nonFacturable: false,
   });
   const [formError, setFormError] = useState('');
   const [newFieldName, setNewFieldName] = useState('');
@@ -319,7 +326,7 @@ export const ClientsManagement: React.FC = () => {
 
   const handleOpenCreate = () => {
     setEditingClient(null);
-    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {}, soldeAnterieur: '' as any, encaissements: [] });
+    setFormData({ name: '', type: 'Company', email: '', phone: '', address: '', city: '', country: '', taxId: '', status: 'Active', notes: '', customFields: {}, soldeAnterieur: '' as any, encaissements: [], nonFacturable: false });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -472,6 +479,33 @@ export const ClientsManagement: React.FC = () => {
           />
 
           <div className="flex gap-2 relative">
+            {/* Exporte la page affichée, filtres compris. Les colonnes du
+                ledger ne sortent que si l'utilisateur a le droit de les voir :
+                le serveur ne les lui envoie même pas. */}
+            <ExportButton
+              fileName="clients"
+              rows={filteredClients}
+              columns={[
+                { header: 'Client / Nom', value: (c: Client) => c.name },
+                { header: 'Type', value: (c: Client) => (c.type === 'Company' ? 'Entreprise' : 'Particulier') },
+                { header: 'Matricule / CIN', value: (c: Client) => c.taxId || '' },
+                { header: 'Email', value: (c: Client) => c.email || '' },
+                { header: 'Téléphone', value: (c: Client) => c.phone || '' },
+                { header: 'Adresse', value: (c: Client) => c.address || '' },
+                { header: 'Ville', value: (c: Client) => c.city || '' },
+                { header: 'Pays', value: (c: Client) => c.country || '' },
+                { header: 'Statut', value: (c: Client) => (c.status === 'Active' ? 'Actif' : 'Inactif') },
+                { header: 'Non facturable', value: (c: Client) => (c.nonFacturable ? 'Oui' : 'Non') },
+                ...(seesFinancials ? [
+                  { header: 'Solde antérieur', value: (c: Client) => csvNumber(Number(c.soldeAnterieur) || 0) },
+                  { header: 'Montant de facture', value: (c: Client) => csvNumber(c.montantFacture ?? 0) },
+                  { header: 'Encaissements', value: (c: Client) => csvNumber(sumEncaissements(c.encaissements) + sumEncaissements(c.journalEncaissements)) },
+                  { header: 'Reste à payer', value: (c: Client) => csvNumber(c.resteAPayer ?? 0) },
+                ] : []),
+                // Les colonnes libres du cabinet suivent, dans l'ordre du tableau.
+                ...availableFields.map(f => ({ header: f, value: (c: Client) => c.customFields?.[f] ?? '' })),
+              ]}
+            />
             <div className="relative">
               <button
                 onClick={() => {
@@ -998,6 +1032,31 @@ export const ClientsManagement: React.FC = () => {
                     </p>
                   </div>
                 )}
+
+                {/* Non facturable — décidé au niveau du client parce que c'est
+                    la relation qui est gratuite, pas telle ou telle tâche.
+                    Chaque tâche fige la valeur à sa création : cocher la case
+                    plus tard ne requalifie pas le travail déjà pointé. */}
+                <div className="md:col-span-2">
+                  <label className="flex items-start gap-2.5 p-3 rounded-lg border border-gray-200 bg-gray-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!formData.nonFacturable}
+                      onChange={e => handleFormChange('nonFacturable', e.target.checked)}
+                      className="mt-0.5 rounded border-gray-300"
+                    />
+                    <span>
+                      <span className="block text-[12.5px] font-semibold text-gray-800">
+                        Les tâches de ce client ne sont pas facturées
+                      </span>
+                      <span className="block text-[11px] text-gray-500 mt-0.5">
+                        Le temps pointé reste chiffré à son coût employeur — il est bien réel — mais il est
+                        signalé comme non facturable dans le pointage et compté à part du temps facturable.
+                        Ne s'applique qu'aux tâches créées après.
+                      </span>
+                    </span>
+                  </label>
+                </div>
 
                 <div>
                   <label className="block text-[12px] font-semibold text-gray-700 mb-1">Type de client</label>

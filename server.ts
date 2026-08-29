@@ -110,6 +110,19 @@ const filterKpiEntries = (entries: any[], body: any) => {
   });
 };
 
+/**
+ * Un document compte-t-il dans le chiffre d'affaires du client ?
+ *
+ * Non pour un brouillon — il n'est pas émis, et le compter gonflerait les
+ * honoraires de documents qui n'existent pas encore. Non pour un « autre
+ * document (non facturable) », qui existe dans Cash mais n'est pas de la
+ * facturation. Une seule définition, parce qu'elle sert au grand-livre client,
+ * au tableau de bord et aux totaux de Cash : trois écrans qui prétendent
+ * montrer le même chiffre.
+ */
+const countsAsBilled = (inv: any) =>
+  inv.documentKind !== 'AUTRE_NON_FACTURABLE' && inv.status !== 'DRAFT';
+
 /** Bucket key used to group entries by client (falls back to the stored name). */
 const clientBucketKey = (t: any) =>
   t.clientId != null ? String(t.clientId) : `name:${t.client || 'Sans client'}`;
@@ -360,7 +373,14 @@ async function startServer() {
 
       const companyId = user.companyId || LEGACY_COMPANY_ID;
       const company = await expireTrialIfDue(await db.getCompanyById(companyId));
-      if (company && (company.status === 'EXPIRED' || company.status === 'SUSPENDED')) {
+      // Suspendu et essai terminé bloquent tous les deux la connexion, mais ne
+      // veulent pas dire la même chose : dans les deux cas les données restent
+      // intactes, seul l'accès est fermé.
+      if (company && company.status === 'SUSPENDED') {
+        res.status(403).json({ error: "Votre accès a été suspendu. Contactez-nous pour le rétablir." });
+        return;
+      }
+      if (company && company.status === 'EXPIRED') {
         res.status(403).json({ error: "Votre période d'essai est terminée. Contactez-nous pour activer un abonnement." });
         return;
       }
@@ -909,9 +929,7 @@ async function startServer() {
     const invoices = await db.getAllInvoices(companyId);
     let montantFacture = 0;
     for (const inv of invoices) {
-      // "Autre document (non facturable)" is explicitly excluded from the
-      // client's running balance — it exists in Cash but isn't billing.
-      if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
+      if (!countsAsBilled(inv)) continue;
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       if (key === String(client.id) || key === `name:${client.name}`) {
         montantFacture += num(Number(inv.totalNetToPay), 0);
@@ -1042,9 +1060,7 @@ async function startServer() {
       const allInvoices = await db.getAllInvoices(req.user.companyId);
       const montantFactureByClient = new Map<string, number>();
       for (const inv of allInvoices) {
-        // "Autre document (non facturable)" is explicitly excluded from the
-        // client's running balance — it exists in Cash but isn't billing.
-        if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
+        if (!countsAsBilled(inv)) continue;
         const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
         montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
       }
@@ -1580,7 +1596,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       // "Autre document (non facturable)" is explicitly excluded from the
       // client's running balance and from the billing activity below — it
       // exists in Cash but isn't billing.
-      if (inv.documentKind === 'AUTRE_NON_FACTURABLE') continue;
+      if (!countsAsBilled(inv)) continue;
       const k = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       montantFactureByClient.set(k, round3((montantFactureByClient.get(k) || 0) + num(Number(inv.totalNetToPay), 0)));
       const ts = parseIsoDate(inv.issueDate);
@@ -1779,6 +1795,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
     const heures = hoursOf(entries);
     const heuresPrev = hoursOf(prevEntries);
+    /**
+     * Facturable / non facturable, lu sur le champ figé de chaque tâche. Une
+     * tâche antérieure à ce champ n'a pas de valeur : elle est comptée
+     * facturable, ce qui était l'hypothèse implicite jusqu'ici.
+     */
+    const heuresNonFacturables = hoursOf(entries.filter((t: any) => t.facturable === false));
+    const heuresFacturables = round3(heures - heuresNonFacturables);
+    const coutNonFacturable = costOf(entries.filter((t: any) => t.facturable === false));
     const coutTemps = costOf(entries);
     const coutTempsPrev = costOf(prevEntries);
     const unpriced = entries.filter((t: any) => taskCost(t) === null);
@@ -1789,7 +1813,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     // Une devise saisie librement ne s'additionne pas à la TND : on n'agrège
     // que la TND et on compte ce qui a été écarté, plutôt que de convertir à
     // un taux qu'on ne stocke pas (Q-07).
-    const isBillable = (inv: any) => inv.documentKind !== 'AUTRE_NON_FACTURABLE';
+    const isBillable = countsAsBilled;
     const isTnd = (inv: any) => String(inv.currency || 'TND').toUpperCase() === 'TND';
     const invoiceTs = (inv: any) => (inv.issueDate ? new Date(inv.issueDate).getTime() : 0);
 
@@ -2117,7 +2141,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       financialsFiltered,
       executive: {
         heures, heuresPrev,
+        heuresFacturables, heuresNonFacturables,
         capaciteNette, capaciteNettePrev,
+        // Le taux d'utilisation au sens des cabinets : le temps refacturable
+        // rapporté à la capacité. Distinct du taux d'occupation — on peut être
+        // occupé à 95 % et facturable à 40 %.
+        utilisation: capaciteNette > 0 ? round3(heuresFacturables / capaciteNette) : null,
         occupation: ratio(heures, capaciteNette),
         occupationPrev: ratio(heuresPrev, capaciteNettePrev),
         tachesSansTaux, collabsSansTaux,
@@ -2135,6 +2164,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
           honorairesParHeure: ratio(honoraires, heures),
           coutParHeure: ratio(coutTemps, heures),
           resteAEncaisser, creancesEchues, devisesExclues,
+          coutNonFacturable,
         } : {}),
       },
       alerts: alerts.slice(0, 10),
@@ -2159,7 +2189,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
   app.post('/api/clients', authenticate, requirePermission('CREATE_CLIENTS'), async (req: any, res: any) => {
     try {
-      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements } = req.body;
+      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements, nonFacturable } = req.body;
 
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Client name is required' });
@@ -2178,6 +2208,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         status: status || 'Active',
         notes: notes || '',
         customFields: customFields || {},
+        // Le travail fait pour ce client n'est pas refacturé. Chaque tâche en
+        // hérite à sa création, et le fige : changer d'avis plus tard ne
+        // réécrit pas l'historique.
+        nonFacturable: !!nonFacturable,
         soldeAnterieur: num(Number(soldeAnterieur), 0),
         encaissements: normalizeEncaissements(encaissements),
         createdAt: new Date().toISOString(),
@@ -2196,7 +2230,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   app.put('/api/clients/:id', authenticate, requirePermission('EDIT_CLIENTS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements } = req.body;
+      const { name, type, email, phone, address, city, country, taxId, status, notes, customFields, soldeAnterieur, encaissements, nonFacturable } = req.body;
 
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Client name is required' });
@@ -2221,6 +2255,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         status: status || 'Active',
         notes: notes || '',
         customFields: customFields || {},
+        nonFacturable: !!nonFacturable,
         soldeAnterieur: seesLedger ? num(Number(soldeAnterieur), 0) : num(Number(current?.soldeAnterieur), 0),
         encaissements: seesLedger ? normalizeEncaissements(encaissements) : normalizeEncaissements(current?.encaissements),
         updatedAt: new Date().toISOString()
@@ -2953,7 +2988,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // currency because a document can be issued in USD/EUR: adding those to
       // dinars would produce a number that means nothing.
       const totalsByCurrency: Record<string, { totalHT: number; totalNetToPay: number; count: number }> = {};
+      let draftCount = 0;
       for (const inv of filtered) {
+        // Un brouillon figure dans la liste mais pas dans le total : il n'est
+        // pas émis. Il est compté à part pour que le décompte de la ligne de
+        // total ne semble pas se tromper.
+        if (inv.status === 'DRAFT') { draftCount += 1; continue; }
         const currency = String(inv.currency || 'TND');
         const acc = totalsByCurrency[currency] || { totalHT: 0, totalNetToPay: 0, count: 0 };
         acc.totalHT = round3(acc.totalHT + num(Number(inv.totalHT), 0));
@@ -2962,7 +3002,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         totalsByCurrency[currency] = acc;
       }
 
-      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset, totalsByCurrency });
+      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset, totalsByCurrency, draftCount });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -3020,12 +3060,26 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         : 'FACTURE_LEGALE';
       const all = await db.getAllInvoices(req.user.companyId);
 
+      /**
+       * Un brouillon n'est pas un document émis : il ne prend aucun numéro de
+       * la séquence légale, n'est soumis à aucune règle de chronologie, et ne
+       * compte nulle part comme honoraires. Il prendra son numéro à
+       * l'émission, à sa place dans l'ordre — c'est tout l'intérêt : préparer
+       * une facture sans percer un trou dans la numérotation ni gonfler le
+       * chiffre d'affaires de documents qui n'existent pas encore.
+       */
+      const isDraft = body.status === 'DRAFT';
+
       // Only a legal invoice is bound to the sequence. Both "autre" kinds
       // carry a free reference (bon de livraison, reçu, note interne…), so
       // neither follows the sequence nor consumes a number from it — doing so
       // would punch gaps in the legal numbering.
       let number: string;
-      if (kind !== 'FACTURE_LEGALE') {
+      if (isDraft) {
+        // Numéro provisoire, jamais celui de la séquence — et unique, pour
+        // que deux brouillons ne se marchent pas dessus.
+        number = `BR-${Date.now()}`;
+      } else if (kind !== 'FACTURE_LEGALE') {
         number = String(body.number ?? '').trim();
         if (!number) {
           return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
@@ -3041,11 +3095,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       }
 
       const totals = computeInvoiceTotals(body);
-      if (kind === 'FACTURE_LEGALE') number = await db.nextInvoiceNumber(req.user.companyId);
+      if (kind === 'FACTURE_LEGALE' && !isDraft) number = await db.nextInvoiceNumber(req.user.companyId);
 
       const invoice = await db.createInvoice(req.user.companyId, {
         id: `inv-${Date.now()}`,
         number,
+        status: isDraft ? 'DRAFT' : 'ISSUED',
         documentKind: kind,
         title: String(body.title || 'Facture').trim(),
         billingMode: body.billingMode === 'DETAILLEE' ? 'DETAILLEE' : 'FORFAIT',
@@ -3068,6 +3123,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         attestationNumber: String(body.attestationNumber || '').trim(),
         attestationDate: body.attestationDate ? String(body.attestationDate).slice(0, 10) : '',
         bonCommandeNumber: String(body.bonCommandeNumber || '').trim(),
+        // Indication libre en face du remboursement de débours (« frais de
+        // greffe », « timbres »…). Facultative : le montant suffit, la
+        // précision est pour le client qui lit la facture.
+        disbursementsLabel: String(body.disbursementsLabel || '').trim().slice(0, 120),
         // Masks the Retenue à la source / Timbre fiscal lines on the printed
         // document — and, unlike showDueDate, also drops them from the actual
         // net-to-pay math (see computeInvoiceTotals).
@@ -3100,9 +3159,16 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
       const merged = { ...existing, ...req.body };
 
+      // Le statut ne se change pas par une simple modification : on émet un
+      // brouillon par /issue, qui seul sait attribuer un numéro.
+      merged.status = existing.status || 'ISSUED';
+      const editingDraft = merged.status === 'DRAFT';
+
       // A legal invoice's number belongs to the sequence and is never
       // reassigned; a free document's may be corrected.
-      if (merged.documentKind !== 'FACTURE_LEGALE') {
+      if (editingDraft) {
+        merged.number = existing.number;
+      } else if (merged.documentKind !== 'FACTURE_LEGALE') {
         const wanted = String(req.body?.number ?? existing.number ?? '').trim();
         if (!wanted) {
           return res.status(400).json({ error: 'Le numéro du document est obligatoire' });
@@ -3130,7 +3196,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       }
       // Editing bypassed the ordering rule entirely, so a legal invoice created
       // in order could be moved to any date afterwards.
-      if (merged.documentKind === 'FACTURE_LEGALE') {
+      if (merged.documentKind === 'FACTURE_LEGALE' && !editingDraft) {
         const dateError = legalSequenceDateError(
           await db.getAllInvoices(req.user.companyId), existing.id, Number(merged.number), merged.issueDate,
         );
@@ -3146,6 +3212,104 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       res.json(updated);
     } catch (error) {
       console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Émettre un brouillon : c'est ici, et seulement ici, qu'il prend son numéro.
+   *
+   * Le numéro est attribué au moment de l'émission, donc à sa vraie place dans
+   * la séquence — un brouillon préparé lundi et émis vendredi ne réserve pas
+   * un numéro toute la semaine, et ne laisse pas de trou s'il est abandonné.
+   */
+  app.post('/api/invoices/:id/issue', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+      if (existing.status !== 'DRAFT') {
+        return res.status(409).json({ error: 'Ce document est déjà émis.' });
+      }
+
+      const all = await db.getAllInvoices(req.user.companyId);
+      let number = existing.number;
+
+      if (existing.documentKind === 'FACTURE_LEGALE') {
+        // Même règle qu'à la création : une facture émise maintenant est la
+        // dernière de la séquence, donc Infinity.
+        const dateError = legalSequenceDateError(all, existing.id, Infinity, existing.issueDate);
+        if (dateError) return res.status(400).json({ error: dateError });
+        number = await db.nextInvoiceNumber(req.user.companyId);
+      } else {
+        // Un autre document porte une référence libre : elle est demandée à
+        // l'émission si le brouillon n'en portait pas encore de vraie.
+        const wanted = String(req.body?.number ?? '').trim();
+        if (!wanted) {
+          return res.status(400).json({ error: 'Le numéro du document est obligatoire pour l\'émettre.' });
+        }
+        if (all.some((i: any) => i.id !== existing.id && i.number === wanted)) {
+          return res.status(400).json({ error: `Le numéro « ${wanted} » est déjà utilisé.` });
+        }
+        number = wanted;
+      }
+
+      res.json(await db.updateInvoice(req.user.companyId, existing.id, {
+        status: 'ISSUED',
+        number,
+        issuedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      console.error('Issue invoice error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Transformer un autre document en facture légale.
+   *
+   * Le document prend le prochain numéro de la séquence légale — il ne garde
+   * pas sa référence libre, qui n'appartient pas à la séquence — et se place
+   * donc en dernier. La règle de chronologie s'applique dès cet instant : une
+   * facture légale ne peut pas porter une date antérieure à celle qui la
+   * précède, quelle que soit la façon dont elle est née.
+   */
+  app.post('/api/invoices/:id/convert-to-legal', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+      if (existing.documentKind === 'FACTURE_LEGALE') {
+        return res.status(409).json({ error: 'Ce document est déjà une facture légale.' });
+      }
+      if (existing.status === 'DRAFT') {
+        return res.status(409).json({ error: 'Émettez le brouillon en facture légale plutôt que de le convertir.' });
+      }
+
+      const all = await db.getAllInvoices(req.user.companyId);
+      const dateError = legalSequenceDateError(all, existing.id, Infinity, existing.issueDate);
+      if (dateError) {
+        return res.status(400).json({
+          error: `${dateError} Corrigez la date du document avant de le convertir.`,
+        });
+      }
+
+      const number = await db.nextInvoiceNumber(req.user.companyId);
+      // La cascade est recalculée : passer en facture légale peut changer la
+      // retenue et le timbre, donc le net à payer.
+      const totals = computeInvoiceTotals({ ...existing, documentKind: 'FACTURE_LEGALE' });
+      const updated = await db.updateInvoice(req.user.companyId, existing.id, {
+        documentKind: 'FACTURE_LEGALE',
+        number,
+        // Garde la trace de ce qu'il était : la référence libre d'origine
+        // reste retrouvable, sans quoi le document devient introuvable pour
+        // qui le connaissait sous son ancien numéro.
+        convertedFromNumber: existing.number,
+        convertedAt: new Date().toISOString(),
+        ...totals,
+      });
+      console.warn(`[cash] document ${existing.number} converti en facture légale n° ${number}, par ${req.user.username}`);
+      res.json(updated);
+    } catch (error) {
+      console.error('Convert invoice error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -4233,6 +4397,17 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
   const createRunningEntryForUser = async (companyId: string, userId: number, fields: any, via?: 'MOBILE' | 'DESKTOP') => {
     const userFull = await db.getUserById(companyId, userId);
+    /**
+     * Facturable ou non — figé ici, à la création, comme `pole` et
+     * `hourlyRate` le sont déjà. Cocher « non facturable » sur un client plus
+     * tard ne doit pas requalifier rétroactivement le travail déjà pointé, ni
+     * le décocher rendre facturable ce qui ne l'était pas.
+     */
+    let facturable = true;
+    if (fields.clientId != null) {
+      const client = await db.getClientById(companyId, Number(fields.clientId));
+      if (client?.nonFacturable) facturable = false;
+    }
     const settings = await db.getSettings(companyId) || {};
     // Snapshot the author's employer cost. Reads resolve it live as well, so
     // this is only a record of the rate in force when the task was created.
@@ -4257,6 +4432,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       userId,
       hourlyRate,
       lastStartedAt: Date.now(),
+      facturable,
       // The device the task was started from. Never rewritten afterwards —
       // editing a task from a laptop doesn't change where it was started.
       ...(via ? { createdVia: via } : {}),
@@ -5499,6 +5675,45 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       res.json(await db.updateCompany(id, updates));
     } catch (error) {
       console.error('Platform update company error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Ouvrir ou fermer l'accès d'une entreprise.
+   *
+   * Route à part, et pas un champ de plus dans le PUT : suspendre est une
+   * décision d'exploitation, réactiver ne doit jamais pouvoir *créer* un
+   * abonnement payé. On suspend en mémorisant le statut d'avant, et on le
+   * restaure tel quel — un essai suspendu redevient un essai, pas un compte
+   * actif.
+   *
+   * Aucune donnée n'est touchée : seule la connexion est refusée.
+   */
+  app.put('/api/platform/companies/:id/access', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      const id = String(req.params.id);
+      if (id === LEGACY_COMPANY_ID) {
+        return res.status(403).json({ error: "L'entreprise historique ne peut pas être suspendue." });
+      }
+      const company = await db.getCompanyById(id);
+      if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      const active = req.body?.active !== false;
+      if (active) {
+        if (company.status !== 'SUSPENDED') return res.json(company);
+        // Restaure ce qu'il y avait avant la suspension. À défaut (compte
+        // suspendu avant que ce champ n'existe), on retombe sur EXPIRED :
+        // c'est le statut qui ne donne aucun droit non payé, donc le seul
+        // repli honnête.
+        const restored = company.statusBeforeSuspension || 'EXPIRED';
+        return res.json(await db.updateCompany(id, { status: restored, statusBeforeSuspension: null }));
+      }
+      if (company.status === 'SUSPENDED') return res.json(company);
+      console.warn(`[platform] accès suspendu : ${company.name} (${id}), par ${req.user.username}`);
+      res.json(await db.updateCompany(id, { status: 'SUSPENDED', statusBeforeSuspension: company.status }));
+    } catch (error) {
+      console.error('Platform access toggle error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

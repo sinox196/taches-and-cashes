@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
 import { ClientSearchInput } from './ClientSearchInput';
 import { PAYMENT_MODES, isCashMode, paymentModeLabel, type PaymentMode } from '../../constants/paymentModes';
+import { ExportButton } from '../ExportButton';
+import { csvNumber } from '../../utils/exportCsv';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -305,6 +307,19 @@ export const ClientPayments: React.FC = () => {
             <option value={0}>Tous les mois</option>
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
           </select>
+          <ExportButton
+            fileName="reglements-clients"
+            rows={filtered}
+            columns={[
+              { header: 'Date', value: (r: any) => frDate(r.date) },
+              { header: 'Client', value: (r: any) => r.clientName || '' },
+              { header: 'Objet du règlement', value: (r: any) => r.label || '' },
+              { header: 'Mode de règlement', value: (r: any) => paymentModeLabel(r.paymentMethod) },
+              { header: 'Compte bancaire', value: (r: any) => r.bankAccount || '' },
+              { header: 'Référence', value: (r: any) => r.reference || '' },
+              { header: 'Montant', value: (r: any) => csvNumber(r.entree || 0) },
+            ]}
+          />
           {canManage && (
             <button
               onClick={() => { setEditingId(null); setEditDraft(null); setDraft(emptyDraft()); }}

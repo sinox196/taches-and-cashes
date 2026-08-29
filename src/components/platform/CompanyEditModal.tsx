@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, X, Users, Trash2, AlertTriangle } from 'lucide-react';
+import { Loader2, X, Users, Trash2, AlertTriangle, Power } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { friendlyError } from '../../utils/errors';
 
@@ -53,6 +53,33 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
   const [confirmingDelete, setConfirmingDelete] = useState(startInDeleteMode);
   const [confirmName, setConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  /**
+   * L'accès se pilote par une route à part, pas par le formulaire : suspendre
+   * est une décision d'exploitation, et réactiver ne doit jamais pouvoir créer
+   * un abonnement payé. Le serveur restaure le statut d'avant la suspension.
+   */
+  const [status, setStatus] = useState(company.status);
+  const [togglingAccess, setTogglingAccess] = useState(false);
+  const suspended = status === 'SUSPENDED';
+
+  const toggleAccess = async () => {
+    setError('');
+    setTogglingAccess(true);
+    try {
+      const res = await fetch(`/api/platform/companies/${company.id}/access`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ active: suspended }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+      setStatus((await res.json()).status);
+    } catch (err: any) {
+      setError(friendlyError(err));
+    } finally {
+      setTogglingAccess(false);
+    }
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,6 +195,39 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
               />
               <p className="text-[10.5px] text-gray-400 mt-1">Vide = pas de date de fin.</p>
             </div>
+          </div>
+
+          {/* Accès au compte. Séparé du reste du formulaire : il ne s'enregistre
+              pas avec « Enregistrer », il prend effet au clic. */}
+          <div className={`flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border ${
+            suspended ? 'border-late-bg bg-late-bg/40' : 'border-gray-200 bg-gray-50'
+          }`}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${suspended ? 'bg-late-fg' : 'bg-done-fg'}`} />
+                <span className="text-[12.5px] font-semibold text-gray-900">
+                  {suspended ? 'Accès suspendu' : 'Compte actif'}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                {suspended
+                  ? "Personne ne peut se connecter. Les données sont conservées intactes."
+                  : "Suspendre ferme la connexion pour tous ses utilisateurs, sans rien supprimer."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={toggleAccess}
+              disabled={togglingAccess}
+              className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 shrink-0 disabled:opacity-50 ${
+                suspended
+                  ? 'bg-navy text-white hover:bg-navy-hover'
+                  : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {togglingAccess ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
+              {suspended ? 'Réactiver' : 'Suspendre'}
+            </button>
           </div>
 
           {/* La gestion des utilisateurs vit ici depuis que la ligne du tableau

@@ -7,6 +7,7 @@ import { ROLES, roleMeta, type Role } from '../constants/roles';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
 import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import { ExportButton } from './ExportButton';
 
 const PERMISSIONS_GROUPED = [
   {
@@ -292,13 +293,25 @@ export const UsersManagement: React.FC = () => {
             {t('users.subtitle')}
           </p>
         </div>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <ExportButton
+          fileName="utilisateurs"
+          rows={users}
+          columns={[
+            { header: 'Utilisateur', value: (u: any) => u.username },
+            { header: 'Rôle', value: (u: any) => roleMeta(u.role).label },
+            { header: 'Permissions', value: (u: any) => (u.role === 'ADMIN' ? 'Accès complet' : (u.permissions || []).join(' | ')) },
+            { header: 'Solde congés (jours)', value: (u: any) => u.soldeConge ?? '' },
+          ]}
+        />
         <button
           onClick={handleOpenCreate}
-          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors shrink-0 whitespace-nowrap self-start sm:self-auto"
+          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors shrink-0 whitespace-nowrap"
         >
           <Plus className="w-4 h-4" />
           <span>{t('users.add')}</span>
         </button>
+        </div>
       </div>
 
       <PresenceSettingsCard />
@@ -435,6 +448,10 @@ export const UsersManagement: React.FC = () => {
                   </label>
                   <input
                     type="password"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore
+                    data-form-type="other"
                     required={!editingUserId}
                     value={formPassword}
                     onChange={e => setFormPassword(e.target.value)}
