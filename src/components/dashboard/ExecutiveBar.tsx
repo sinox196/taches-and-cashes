@@ -135,11 +135,26 @@ export const ExecutiveBar: React.FC<ExecutiveBarProps> = ({ data, financialsFilt
           </>
         )}
 
+        {/* Le non facturable vit dans le pied de « Heures produites » plutôt
+            que dans une huitième carte : c'est un sous-ensemble de ces heures,
+            pas une mesure de plus, et la barre tient à sept cartes pour rester
+            lisible d'un coup d'œil. */}
         <Card
           label="Heures produites"
           value={hours(e.heures)}
-          foot={<Trend value={delta(e.heures, e.heuresPrev)} />}
-          title="Temps pointé sur la période, tous statuts confondus."
+          foot={<>
+            <Trend value={delta(e.heures, e.heuresPrev)} />
+            {e.heuresNonFacturables > 0 && (
+              <span className="text-gray-500">
+                dont {hours(e.heuresNonFacturables)} non fact.
+              </span>
+            )}
+          </>}
+          title={`Temps pointé sur la période, tous statuts confondus.${
+            e.heuresNonFacturables > 0
+              ? ` Dont ${e.tachesNonFacturables} tâche${e.tachesNonFacturables > 1 ? 's' : ''} chez ${e.clientsNonFacturables} client${e.clientsNonFacturables > 1 ? 's' : ''} marqué${e.clientsNonFacturables > 1 ? 's' : ''} non facturable${e.clientsNonFacturables > 1 ? 's' : ''} : ce travail coûte au cabinet sans être facturé.`
+              : ''
+          }`}
         />
 
         <Card
@@ -187,6 +202,21 @@ export const ExecutiveBar: React.FC<ExecutiveBarProps> = ({ data, financialsFilt
             Ce temps est exclu du coût, donc <strong>toutes les marges affichées sont surévaluées</strong>.
           </span>
         </button>
+      )}
+
+      {/* Ce que le non facturable coûte réellement. Le montant n'apparaît que
+          pour un ADMIN, comme tout coût employeur ailleurs ; les heures, elles,
+          restent lisibles par un SUPERVISEUR dans le pied de carte ci-dessus. */}
+      {money && e.coutNonFacturable > 0 && (
+        <div className="mt-2 flex items-start gap-2 p-3 rounded-lg bg-gray-50 border border-gray-200 text-[12px] text-gray-700">
+          <Info className="w-4 h-4 shrink-0 mt-px" />
+          <span>
+            <strong>{e.tachesNonFacturables} tâche{e.tachesNonFacturables > 1 ? 's' : ''} non facturable{e.tachesNonFacturables > 1 ? 's' : ''}</strong>
+            {' '}({hours(e.heuresNonFacturables)}) chez {e.clientsNonFacturables} client{e.clientsNonFacturables > 1 ? 's' : ''} —
+            {' '}<strong>{tnd(e.coutNonFacturable)} TND</strong> de coût employeur qui ne sera jamais facturé.
+            Ce temps est bien compté dans la marge : il en est la charge sans en être le produit.
+          </span>
+        </div>
       )}
 
       {money && e.devisesExclues > 0 && (

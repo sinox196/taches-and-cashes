@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Plus, X, Check, Wallet, CheckCircle2, Ban, Clock, AlertCircle } from 'lucide-react';
 import { ExportButton } from '../ExportButton';
 import { csvNumber } from '../../utils/exportCsv';
+import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
 
 interface Loan {
   id: number;
@@ -35,6 +36,11 @@ export const LoansTab: React.FC = () => {
   const canManage = hasPermission('MANAGE_LOANS_ADVANCES');
   const [loans, setLoans] = useState<Loan[]>([]);
   const [approvers, setApprovers] = useState<{ id: number; name: string; role: string }[]>([]);
+
+  // Filtre année/mois + pagination, partagés par les quatre onglets RH.
+  // La date qui situe la ligne est celle de l'octroi.
+  const rowDate = React.useCallback((r: Loan) => r.dateGranted, []);
+  const pager = usePeriodPage<Loan>(loans, rowDate);
   const [isCreating, setIsCreating] = useState(false);
   const [repayModalId, setRepayModalId] = useState<number | null>(null);
   const [repayAmount, setRepayAmount] = useState<number | ''>('');
@@ -151,11 +157,12 @@ export const LoansTab: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Prêts</h2>
-        <div className="flex items-center gap-2 self-start">
-            <ExportButton fileName="prets" rows={loans} columns={[
+        <div className="flex flex-wrap items-center gap-2 self-start">
+            <PeriodFilter page={pager} />
+            <ExportButton fileName="prets" rows={pager.filtered} columns={[
                 { header: 'Employé', value: (r: any) => r.userName || '' },
                 { header: 'Date', value: (r: any) => r.date || r.createdAt?.slice(0, 10) || '' },
                 { header: 'Montant', value: (r: any) => csvNumber(Number(r.amount) || 0) },
@@ -173,7 +180,7 @@ export const LoansTab: React.FC = () => {
         </div>
       </div>
 
-      <div className="overflow-x-auto flex-1 border border-gray-200 rounded-lg">
+      <div className="overflow-auto flex-1 min-h-0 border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0">
             <tr>
@@ -189,12 +196,12 @@ export const LoansTab: React.FC = () => {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {loans.length === 0 ? (
+            {pager.pageRows.length === 0 ? (
               <tr>
                 <td colSpan={canManage ? 9 : 8} className="px-6 py-8 text-center text-sm text-gray-500">Aucun prêt trouvé.</td>
               </tr>
             ) : (
-              loans.map(loan => (
+              pager.pageRows.map(loan => (
                 <tr key={loan.id} className="hover:bg-gray-50">
                   {canManage && <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{loan.userName}</td>}
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{loan.approverName}</td>
@@ -256,6 +263,8 @@ export const LoansTab: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      <PaginationBar page={pager} unit="prêts" />
 
       {/* Approval modal */}
       {approvalModalId && (

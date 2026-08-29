@@ -13,6 +13,9 @@ import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/co
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
 import { toPaymentMode, isCashMode } from './src/constants/paymentModes.js';
 import {
+  normalizeDisbursementLines, sumDisbursements, DISBURSEMENT_LINES_MAX,
+} from './src/constants/disbursements.js';
+import {
   DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
 } from './src/constants/presence.js';
 import bcrypt from 'bcryptjs';
@@ -1191,7 +1194,12 @@ app.get('/api/kpi/users/search', authenticate, async (req: any, res: any) => {
   }
   const q = (req.query.q || '').toLowerCase();
   let users = await db.getAllUsers(req.user.companyId);
-  users = users.filter((u: any) => u.role !== 'ADMIN');
+  // Un administrateur pointe du temps et a désormais sa ligne dans le tableau
+  // de performance : il doit pouvoir filtrer dessus. Les autres lecteurs du
+  // tableau de bord ne le voient toujours pas — même règle que Pointage.
+  if (req.user.role !== 'ADMIN') {
+    users = users.filter((u: any) => u.role !== 'ADMIN');
+  }
   if (q) {
     users = users.filter((u: any) => 
       u.username.toLowerCase().includes(q) || 
@@ -1281,6 +1289,19 @@ app.post('/api/kpi/employee-tasks', authenticate, async (req: any, res: any) => 
     if (!Number.isFinite(userId)) return res.status(400).json({ error: 'A userId is required' });
 
     const isAdminViewer = req.user.role === 'ADMIN';
+
+    // Les tâches d'un administrateur ne sont pas montrées aux autres — même
+    // règle que `visibleEntriesFor()` dans Pointage. Le tableau de performance
+    // n'offre la ligne qu'à un ADMIN, mais cette route s'appelle avec un
+    // userId quelconque : le refus appartient au serveur, pas à l'absence de
+    // bouton.
+    if (!isAdminViewer) {
+      const target = await db.getUserById(req.user.companyId, userId);
+      if (target?.role === 'ADMIN' && userId !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
     const clients = await db.getAllClients(req.user.companyId) || [];
     const clientsById = new Map<number, any>(clients.map((c: any) => [c.id, c]));
 
@@ -1384,6 +1405,24 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     const kpiSettings = await db.getSettings(req.user.companyId);
     const isAdminViewer = req.user.role === 'ADMIN';
 
+    /**
+     * Qui apparaît dans le tableau de performance.
+     *
+     * L'effectif (`employees`) reste ce qu'il était : un administrateur est un
+     * compte, pas une tête à compter, et le rentrer dans « Effectif »
+     * changerait un chiffre déjà en place. Mais un administrateur pointe du
+     * temps comme les autres, et ce temps entrait dans les totaux globaux sans
+     * qu'aucune ligne ne dise qui l'avait fait.
+     *
+     * Visible du seul ADMIN : « les tâches d'un administrateur ne sont pas
+     * montrées aux autres » vaut ici comme dans Pointage, sans quoi un
+     * SUPERVISEUR lirait dans ce tableau ce que `visibleEntriesFor()` lui
+     * refuse à l'écran d'à côté.
+     */
+    const performanceUsers = isAdminViewer
+      ? allUsers.filter((u: any) => STAFF_ROLES.includes(u.role) || u.role === 'ADMIN')
+      : employees;
+
     // Index once instead of scanning allUsers/clients per task. With thousands
     // of entries the repeated .find() calls were the dominant cost here.
     const usersById = new Map<number, any>(allUsers.map((u: any) => [u.id, u]));
@@ -1441,7 +1480,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     };
 
     // Calculate per employee stats
-    const employeeStats = employees.map((emp: any) => {
+    const employeeStats = performanceUsers.map((emp: any) => {
       if (filterUserIds && filterUserIds.length > 0 && !filterUserIds.includes(emp.id)) return null;
 
       const empTasks = timeEntries.filter((t: any) => t.userId === emp.id);
@@ -1800,9 +1839,18 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
      * tâche antérieure à ce champ n'a pas de valeur : elle est comptée
      * facturable, ce qui était l'hypothèse implicite jusqu'ici.
      */
-    const heuresNonFacturables = hoursOf(entries.filter((t: any) => t.facturable === false));
+    const nonFacturables = entries.filter((t: any) => t.facturable === false);
+    const heuresNonFacturables = hoursOf(nonFacturables);
     const heuresFacturables = round3(heures - heuresNonFacturables);
-    const coutNonFacturable = costOf(entries.filter((t: any) => t.facturable === false));
+    const coutNonFacturable = costOf(nonFacturables);
+    // Le nombre de tâches, à côté des heures : « 12 tâches » se relie à ce que
+    // Pointage montre, là où « 30 h » ne se retrouve pas dans une liste.
+    const tachesNonFacturables = nonFacturables.length;
+    // Combien de clients sont à l'origine de ce temps — un seul client pro
+    // bono et douze clients mal paramétrés ne se corrigent pas pareil.
+    const clientsNonFacturables = new Set(
+      nonFacturables.map((t: any) => clientBucketKey(t)),
+    ).size;
     const coutTemps = costOf(entries);
     const coutTempsPrev = costOf(prevEntries);
     const unpriced = entries.filter((t: any) => taskCost(t) === null);
@@ -2142,6 +2190,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       executive: {
         heures, heuresPrev,
         heuresFacturables, heuresNonFacturables,
+        tachesNonFacturables, clientsNonFacturables,
         capaciteNette, capaciteNettePrev,
         // Le taux d'utilisation au sens des cabinets : le temps refacturable
         // rapporté à la capacité. Distinct du taux d'occupation — on peut être
@@ -2730,7 +2779,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     // net-to-pay math — same rule as the retenue à la source above.
     const stampDuty = invoice.showStampDuty === false ? 0 : num(Number(invoice.stampDuty), 0); // (6)
     const netToPay = round3(totalTTC - withholdingAmount + stampDuty);              // (7)
-    const disbursements = num(Number(invoice.disbursements), 0);                    // (8)
+    // (8) — plusieurs lignes possibles ; le montant qui entre dans la cascade
+    // est leur somme, jamais un champ saisi à part qui pourrait la contredire.
+    // Un document d'avant cette version est relu comme une ligne unique.
+    const disbursementsLines = normalizeDisbursementLines(invoice);
+    const disbursements = sumDisbursements(disbursementsLines);                     // (8)
     const advances = num(Number(invoice.advances), 0);                              // (9)
     const totalNetToPay = round3(netToPay + disbursements - advances);              // (10)
 
@@ -2745,10 +2798,34 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       withholdingAmount,
       stampDuty,
       netToPay,
+      disbursementsLines,
       disbursements,
       advances,
       totalNetToPay,
     };
+  };
+
+  /**
+   * Refuse un lot de lignes de débours qui ne tient pas dans la cascade.
+   *
+   * Le normalisateur tronque au-delà de la limite ; le faire en silence
+   * ferait disparaître un montant que l'utilisateur a bien saisi, et la
+   * facture partirait pour moins que ce qui est dû. Mieux vaut refuser.
+   */
+  const disbursementsError = (body: any): string | null => {
+    const raw = body?.disbursementsLines;
+    if (raw === undefined || raw === null) return null;
+    if (!Array.isArray(raw)) return 'Les débours doivent être une liste de lignes.';
+    if (raw.length > DISBURSEMENT_LINES_MAX) {
+      return `Pas plus de ${DISBURSEMENT_LINES_MAX} lignes de débours par document.`;
+    }
+    if (raw.some((l: any) => !Number.isFinite(Number(l?.amount)))) {
+      return 'Chaque ligne de débours doit porter un montant.';
+    }
+    if (raw.some((l: any) => Number(l?.amount) < 0)) {
+      return 'Un débours ne peut pas être négatif — utilisez « Moins avances perçues ».';
+    }
+    return null;
   };
 
   /**
@@ -3094,6 +3171,9 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         if (dateError) return res.status(400).json({ error: dateError });
       }
 
+      const debError = disbursementsError(body);
+      if (debError) return res.status(400).json({ error: debError });
+
       const totals = computeInvoiceTotals(body);
       if (kind === 'FACTURE_LEGALE' && !isDraft) number = await db.nextInvoiceNumber(req.user.companyId);
 
@@ -3123,10 +3203,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         attestationNumber: String(body.attestationNumber || '').trim(),
         attestationDate: body.attestationDate ? String(body.attestationDate).slice(0, 10) : '',
         bonCommandeNumber: String(body.bonCommandeNumber || '').trim(),
-        // Indication libre en face du remboursement de débours (« frais de
-        // greffe », « timbres »…). Facultative : le montant suffit, la
-        // précision est pour le client qui lit la facture.
-        disbursementsLabel: String(body.disbursementsLabel || '').trim().slice(0, 120),
+        // Le libellé unique d'avant les lignes multiples. Vidé sur tout
+        // document écrit par cette version : `disbursementsLines` est le seul
+        // porteur désormais, et laisser les deux garnis ferait deux copies de
+        // la même information à tenir d'accord.
+        disbursementsLabel: '',
         // Masks the Retenue à la source / Timbre fiscal lines on the printed
         // document — and, unlike showDueDate, also drops them from the actual
         // net-to-pay math (see computeInvoiceTotals).
@@ -3202,11 +3283,20 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         );
         if (dateError) return res.status(400).json({ error: dateError });
       }
+      const debError = disbursementsError(req.body);
+      if (debError) return res.status(400).json({ error: debError });
       const totals = computeInvoiceTotals(merged);
 
       const updated = await db.updateInvoice(req.user.companyId, req.params.id, {
         ...merged,
         ...totals,
+        // Le libellé unique d'avant les lignes multiples, vidé dès qu'un
+        // document passe par cette version pour qu'il ne reste qu'un porteur.
+        // Après computeInvoiceTotals, jamais avant : c'est lui qui relit ce
+        // libellé pour en faire la ligne unique d'un document hérité, et le
+        // vider d'abord effacerait l'indication en modifiant une vieille
+        // facture à laquelle on ne touchait pas les débours.
+        disbursementsLabel: '',
         updatedAt: new Date().toISOString(),
       });
       res.json(updated);

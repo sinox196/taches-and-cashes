@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { amountToFrenchWords } from '../../utils/amountToWords';
+import { normalizeDisbursementLines } from '../../constants/disbursements';
 
 /**
  * Builds the document as a real PDF.
@@ -310,9 +311,20 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     row('Timbre fiscal', money(invoice.stampDuty));
   }
   row('Net à payer', money(invoice.netToPay), true);
-  if (invoice.disbursements > 0) {
-    const label = String(invoice.disbursementsLabel || '').trim();
-    row(label ? `Remboursement de débours — ${label}` : 'Remboursement de débours', `+ ${money(invoice.disbursements)}`);
+  // Une ligne par débours : le client doit pouvoir lire ce qui a été avancé
+  // pour son compte, poste par poste. Le normalisateur relit un document
+  // d'avant les lignes multiples comme une ligne unique, donc ce même code
+  // dessine les anciens documents à l'identique.
+  const debLines = normalizeDisbursementLines(invoice);
+  if (debLines.length === 1) {
+    const only = debLines[0].label;
+    row(only ? `Remboursement de débours — ${only}` : 'Remboursement de débours',
+      `+ ${money(debLines[0].amount)}`);
+  } else if (debLines.length > 1) {
+    row('Remboursement de débours', `+ ${money(invoice.disbursements)}`);
+    for (const l of debLines) {
+      row(l.label ? `    ${l.label}` : '    Débours', money(l.amount));
+    }
   }
   if (invoice.advances > 0) row('Moins avances perçues', `- ${money(invoice.advances)}`);
 

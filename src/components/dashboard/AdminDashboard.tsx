@@ -76,6 +76,33 @@ export const AdminDashboard: React.FC = () => {
     const end = last > today ? today : last;
     setStartDate(toLocalDateString(first));
     setEndDate(toLocalDateString(end));
+    setYearFilter('');
+  };
+
+  // Même raccourci, d'un cran au-dessus : une année entière en un clic. Il
+  // écrit dans les mêmes startDate/endDate que le reste, donc choisir un mois
+  // ou toucher une date le désélectionne — il ne cherche pas à refléter une
+  // plage quelconque, pas plus que le filtre par mois.
+  const [yearFilter, setYearFilter] = useState('');
+  const yearOptions = React.useMemo(() => {
+    const current = new Date().getFullYear();
+    // Cinq ans en arrière : au-delà, la plage libre Du/Au reste là pour aller
+    // chercher un exercice ancien sans allonger la liste pour tout le monde.
+    return Array.from({ length: 6 }, (_, i) => current - i);
+  }, []);
+  const applyYearFilter = (value: string) => {
+    setYearFilter(value);
+    if (!value) return;
+    const year = Number(value);
+    const first = new Date(year, 0, 1);
+    // Plafonné à aujourd'hui, comme le filtre par mois : une fin d'année à
+    // venir n'est qu'une plage vide.
+    const last = new Date(year, 11, 31);
+    const today = new Date();
+    const end = last > today ? today : last;
+    setMonthFilter('');
+    setStartDate(toLocalDateString(first));
+    setEndDate(toLocalDateString(end));
   };
 
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
@@ -159,7 +186,7 @@ export const AdminDashboard: React.FC = () => {
                 <input
                   type="date"
                   value={startDate}
-                  onChange={e => { setStartDate(e.target.value); setMonthFilter(''); }}
+                  onChange={e => { setStartDate(e.target.value); setMonthFilter(''); setYearFilter(''); }}
                   className="text-[13px] outline-none text-gray-700 bg-transparent min-w-0"
                 />
               </div>
@@ -169,7 +196,7 @@ export const AdminDashboard: React.FC = () => {
                 <input
                   type="date"
                   value={endDate}
-                  onChange={e => { setEndDate(e.target.value); setMonthFilter(''); }}
+                  onChange={e => { setEndDate(e.target.value); setMonthFilter(''); setYearFilter(''); }}
                   className="text-[13px] outline-none text-gray-700 bg-transparent min-w-0"
                 />
               </div>
@@ -183,6 +210,16 @@ export const AdminDashboard: React.FC = () => {
             >
               <option value="">Filtrer par mois…</option>
               {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+
+            <select
+              value={yearFilter}
+              onChange={e => applyYearFilter(e.target.value)}
+              title="Filtrer par année"
+              className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-[13px] text-gray-700 focus:outline-none cursor-pointer w-full sm:w-auto"
+            >
+              <option value="">Filtrer par année…</option>
+              {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
 
             <MultiSelectAutocomplete 

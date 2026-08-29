@@ -6,6 +6,9 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { amountToFrenchWords } from '../../utils/amountToWords';
 import { friendlyError } from '../../utils/errors';
+import {
+  normalizeDisbursementLines, DISBURSEMENT_LABEL_MAX, DISBURSEMENT_LINES_MAX,
+} from '../../constants/disbursements';
 
 /** Choices from the cahier des charges. */
 const DOCUMENT_KINDS = [
@@ -141,9 +144,25 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   const [showWithholding, setShowWithholding] = useState(invoice ? invoice.showWithholding !== false : true);
   const [stampDuty, setStampDuty] = useState<number | ''>(invoice?.stampDuty ?? 1);
   const [showStampDuty, setShowStampDuty] = useState(invoice ? invoice.showStampDuty !== false : true);
-  const [showDisbursements, setShowDisbursements] = useState(!!invoice?.disbursements);
-  const [disbursements, setDisbursements] = useState<number | ''>(invoice?.disbursements || '');
-  const [disbursementsLabel, setDisbursementsLabel] = useState<string>(invoice?.disbursementsLabel || '');
+  // Plusieurs débours possibles sur un même document. Un document d'avant
+  // cette version arrive avec un montant et un libellé uniques : le
+  // normalisateur partagé le relit comme une ligne, il n'y a rien à migrer.
+  const initialDeb = normalizeDisbursementLines(invoice).map(l => ({
+    label: l.label, amount: l.amount as number | '',
+  }));
+  const [showDisbursements, setShowDisbursements] = useState(initialDeb.length > 0);
+  const [debLines, setDebLines] = useState<{ label: string; amount: number | '' }[]>(
+    initialDeb.length > 0 ? initialDeb : [{ label: '', amount: '' }],
+  );
+
+  const setDebLine = (i: number, patch: Partial<{ label: string; amount: number | '' }>) =>
+    setDebLines(prev => prev.map((l, k) => (k === i ? { ...l, ...patch } : l)));
+  const addDebLine = () =>
+    setDebLines(prev => (prev.length >= DISBURSEMENT_LINES_MAX ? prev : [...prev, { label: '', amount: '' }]));
+  // La dernière ligne ne se supprime pas : décocher « Remboursement de
+  // débours » est ce qui retire le bloc entier.
+  const removeDebLine = (i: number) =>
+    setDebLines(prev => (prev.length <= 1 ? prev : prev.filter((_, k) => k !== i)));
   const [showAdvances, setShowAdvances] = useState(!!invoice?.advances);
   const [advances, setAdvances] = useState<number | ''>(invoice?.advances || '');
 
@@ -247,11 +266,11 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
     const rsAmount = showWithholding ? round3(ttc * withholdingRate) : 0;
     const stamp = showStampDuty ? n(Number(stampDuty)) : 0;
     const net = round3(ttc - rsAmount + stamp);
-    const deb = showDisbursements ? n(Number(disbursements)) : 0;
+    const deb = showDisbursements ? round3(debLines.reduce((t, l) => t + n(Number(l.amount)), 0)) : 0;
     const adv = showAdvances ? n(Number(advances)) : 0;
     const totalNet = round3(net + deb - adv);
     return { breakdown, indicativeBreakdown, indicativeTotal, ht, tva, ttc, rsAmount, stamp, net, deb, adv, totalNet };
-  }, [lines, suspended, zeroVat, detailed, withholdingRate, showWithholding, stampDuty, showStampDuty, showDisbursements, disbursements, showAdvances, advances]);
+  }, [lines, suspended, zeroVat, detailed, withholdingRate, showWithholding, stampDuty, showStampDuty, showDisbursements, debLines, showAdvances, advances]);
 
   const dateWarning = !isEdit && !freeNumber && lastIssueDate && issueDate < lastIssueDate
     ? `La date doit être postérieure ou égale à celle de la dernière facture légale (${lastIssueDate}).`
@@ -304,8 +323,14 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           showWithholding,
           stampDuty: n(Number(stampDuty)),
           showStampDuty,
-          disbursements: totals.deb,
-          disbursementsLabel: showDisbursements ? disbursementsLabel.trim() : '',
+          // Le serveur refait la somme depuis ces lignes : `disbursements`
+          // n'est jamais envoyé, pour qu'un total ne puisse pas contredire
+          // son propre détail.
+          disbursementsLines: showDisbursements
+            ? debLines
+                .map(l => ({ label: l.label.trim().slice(0, DISBURSEMENT_LABEL_MAX), amount: n(Number(l.amount)) }))
+                .filter(l => l.amount !== 0 || l.label !== '')
+            : [],
           advances: totals.adv,
           attestationNumber: attestationNumber.trim(),
           attestationDate,
@@ -878,26 +903,52 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                       <input type="checkbox" checked={showDisbursements} onChange={e => setShowDisbursements(e.target.checked)} className="rounded border-gray-300" />
                       Remboursement de débours
                     </label>
-                    {showDisbursements && (
-                      <input
-                        type="number" min="0" step="0.001"
-                        value={disbursements}
-                        onChange={e => setDisbursements(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                        className="w-24 px-2 py-1 border border-gray-300 rounded text-[12px] text-right"
-                      />
+                    {showDisbursements && debLines.length > 1 && (
+                      <span className="font-mono text-[12px] text-gray-700">{money(totals.deb)}</span>
                     )}
                   </div>
-                  {/* Indication facultative : le montant seul suffit à la
-                      cascade, la précision est pour le client qui lit. */}
                   {showDisbursements && (
-                    <input
-                      type="text"
-                      value={disbursementsLabel}
-                      onChange={e => setDisbursementsLabel(e.target.value)}
-                      maxLength={120}
-                      placeholder="Indication (facultatif) — ex : frais de greffe"
-                      className="mt-1.5 w-full px-2 py-1 border border-gray-200 rounded text-[11.5px]"
-                    />
+                    <div className="mt-1.5 space-y-1.5">
+                      {debLines.map((l, i) => (
+                        <div key={i} className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={l.label}
+                            onChange={e => setDebLine(i, { label: e.target.value })}
+                            maxLength={DISBURSEMENT_LABEL_MAX}
+                            placeholder="Indication (facultatif) — ex : frais de greffe"
+                            className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded text-[11.5px]"
+                          />
+                          <input
+                            type="number" min="0" step="0.001"
+                            value={l.amount}
+                            onChange={e => setDebLine(i, { amount: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                            className="w-24 shrink-0 px-2 py-1 border border-gray-300 rounded text-[12px] text-right"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeDebLine(i)}
+                            disabled={debLines.length <= 1}
+                            title={debLines.length <= 1
+                              ? 'Décochez « Remboursement de débours » pour retirer le bloc'
+                              : 'Retirer cette ligne'}
+                            className="shrink-0 p-1 text-gray-400 hover:text-late-fg disabled:opacity-30 disabled:hover:text-gray-400"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      {debLines.length < DISBURSEMENT_LINES_MAX && (
+                        <button
+                          type="button"
+                          onClick={addDebLine}
+                          className="flex items-center gap-1 text-[11px] text-navy hover:underline"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Ajouter une ligne de débours
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="flex items-center justify-between">
