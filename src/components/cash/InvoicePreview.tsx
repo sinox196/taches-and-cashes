@@ -293,9 +293,14 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                 <div className="text-gray-700 leading-relaxed">
                   <div className="font-semibold text-gray-900">{block.company.name}</div>
                   {block.company.address && <div>{block.company.address}</div>}
-                  {block.company.taxId && <div>MF: {block.company.taxId}</div>}
-                  {block.company.email && <div>{block.company.email}</div>}
-                  {block.company.phone && <div>{block.company.phone}</div>}
+                  {/* Chaque ligne porte son libellé. Sans lui, un e-mail et un
+                      numéro nus sous l'adresse se lisent comme la suite de
+                      l'adresse ; l'espace avant les deux-points est la
+                      typographie française, celle qu'utilise déjà le bloc
+                      bancaire juste à côté. */}
+                  {block.company.taxId && <div>MF : {block.company.taxId}</div>}
+                  {block.company.email && <div>E-mail : {block.company.email}</div>}
+                  {block.company.phone && <div>Tél : {block.company.phone}</div>}
                 </div>
               ) : (
                 <div className="text-gray-300 italic">Non renseignées</div>

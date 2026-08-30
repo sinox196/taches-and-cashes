@@ -372,9 +372,12 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     const companyLines = [
       block?.company?.name,
       block?.company?.address,
-      block?.company?.taxId ? `MF: ${block.company.taxId}` : '',
-      block?.company?.email,
-      block?.company?.phone,
+      // Chaque coordonnée porte son libellé : un e-mail et un numéro nus
+      // empilés sous l'adresse se lisent comme la suite de celle-ci. Espace
+      // avant les deux-points, comme le bloc bancaire de droite.
+      block?.company?.taxId ? `MF : ${block.company.taxId}` : '',
+      block?.company?.email ? `E-mail : ${block.company.email}` : '',
+      block?.company?.phone ? `Tél : ${block.company.phone}` : '',
     ].filter(Boolean);
     let cy = fy;
     for (const line of (companyLines.length ? companyLines : ['—'])) {
