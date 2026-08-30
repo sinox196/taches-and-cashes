@@ -258,6 +258,43 @@ Column management (add/edit/remove a colonne, cascading its cells on delete) and
 
 Deliberately deferred to V2/V3 per the spec's own phasing table (do not build without an explicit request): automatic task generation from an échéance into time entries, attachments on document items, automatic email/notification reminders, average document-receipt-delay statistics, and any cross-cabinet template sharing.
 
+### Parrainage
+
+Une entreprise partage un lien (`/?ref=CODE`) ; si l'invité crée un compte, le
+parrain gagne un mois gratuit. Page [ReferralPage.tsx](src/components/ReferralPage.tsx),
+entrée de nav « Parrainage » derrière `MANAGE_USERS` — c'est l'abonnement de
+l'entreprise qui est en jeu.
+
+**Ce que « un mois gratuit » veut dire dépend de l'état du parrain, et c'est le
+modèle de données qui l'impose.** Une entreprise en essai a un `trialEndsAt` :
+on le repousse de 30 jours, tout de suite, depuis la fin d'essai en cours (et
+non depuis aujourd'hui, sinon un parrainage en début d'essai ajouterait moins
+d'un mois). Une entreprise déjà active a `trialEndsAt: null` — la confirmation
+de paiement l'efface — et sa facturation vit hors de l'app : la récompense
+devient un avoir, `referralCreditMonths`, **affiché dans la console plateforme**
+pour que l'admin l'applique à la prochaine échéance. Sans cet affichage le mois
+promis n'existerait jamais. Les deux branches s'excluent et chaque parrainage
+écrit une ligne dans `referrals` (`rewardKind`), donc pas de double comptage.
+
+Le `referralCode` est créé **à la première consultation** de la page, pas à
+l'inscription : les entreprises déjà en base n'en ont pas, et une migration
+pour un champ que personne n'a regardé serait du travail pour rien. Alphabet
+sans I, O, 0 ni 1 — le code se dicte au téléphone.
+
+Le lien est construit côté serveur depuis l'origine réellement appelée : codé
+en dur il serait faux en local comme sur un domaine personnalisé.
+
+Un code inconnu **n'échoue pas** l'inscription (un lien tronqué en route ne doit
+pas coûter un client) et la récompense est accordée *après* la création de
+l'entreprise, dans un `try/catch` : un parrainage perdu ne fait jamais échouer
+une inscription déjà aboutie.
+
+**Ce qui n'est délibérément pas construit** : la récompense tombe à la création
+du compte, comme demandé, et non à la conversion du filleul en payant. C'est
+donc abusable par de fausses inscriptions — l'unicité de l'email freine le cas
+trivial, rien de plus. Conditionner la récompense au passage en `ACTIVE` est un
+changement d'une ligne dans `grantReferralReward`, à faire si l'abus apparaît.
+
 ### Portail client
 
 Un client du cabinet peut avoir son propre accès. Il se connecte par le **même

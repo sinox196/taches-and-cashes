@@ -5947,6 +5947,123 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * the account out on its own — no cron job, the same lazy-expiry idiom the
    * rest of this codebase already uses for presence and leave balances.
    */
+  // ---- Parrainage --------------------------------------------------------
+  //
+  // Une entreprise partage un lien ; si l'invité crée un compte, le parrain
+  // gagne un mois gratuit.
+  //
+  // **Ce que « un mois gratuit » veut dire dépend de l'état du parrain**, et
+  // c'est le modèle de données qui l'impose, pas un choix de confort :
+  //  - une entreprise en essai a un `trialEndsAt` — on le repousse de 30 jours,
+  //    tout de suite. Pour un essai il n'y a rien à facturer plus tard : la
+  //    récompense doit atterrir maintenant ou elle n'atterrira jamais.
+  //  - une entreprise déjà active a `trialEndsAt: null` (la confirmation de
+  //    paiement l'efface) et sa facturation vit hors de l'app. La récompense
+  //    devient donc un **avoir**, `referralCreditMonths`, que la console
+  //    plateforme affiche pour que l'admin l'applique à la prochaine échéance.
+  //
+  // Les deux branches s'excluent, et chaque parrainage écrit une ligne dans
+  // `referrals` : jamais de double comptage, et une trace de ce qui a été
+  // accordé et sous quelle forme.
+
+  const REFERRAL_REWARD_DAYS = 30;
+
+  /** Sans I, O, 0 ni 1 : le code se lit à voix haute et se recopie à la main. */
+  const REFERRAL_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  const newReferralCode = () =>
+    Array.from({ length: 8 }, () => REFERRAL_ALPHABET[Math.floor(Math.random() * REFERRAL_ALPHABET.length)]).join('');
+
+  /**
+   * Le code de parrainage de l'entreprise, créé à la première consultation
+   * plutôt qu'à l'inscription : les entreprises déjà en base n'en ont pas, et
+   * une migration pour un champ que personne n'a encore regardé serait du
+   * travail pour rien. Unicité vérifiée contre les codes existants.
+   */
+  const referralCodeFor = async (company: any): Promise<string> => {
+    if (company.referralCode) return company.referralCode;
+    const companies = await db.getAllCompanies();
+    const taken = new Set(companies.map((c: any) => c.referralCode).filter(Boolean));
+    let code = newReferralCode();
+    for (let i = 0; i < 20 && taken.has(code); i++) code = newReferralCode();
+    await db.updateCompany(company.id, { referralCode: code });
+    return code;
+  };
+
+  /**
+   * Accorde le mois gagné et journalise le parrainage. Retourne la forme prise
+   * par la récompense, pour que l'appelant puisse le dire au parrain.
+   */
+  const grantReferralReward = async (referrer: any, invitee: any) => {
+    const onTrial = referrer.status === 'TRIAL' && referrer.trialEndsAt;
+    let rewardKind: 'TRIAL_EXTENDED' | 'CREDIT';
+
+    if (onTrial) {
+      // Depuis la fin d'essai en cours, pas depuis aujourd'hui : un parrainage
+      // en début d'essai ajouterait sinon moins d'un mois.
+      const base = new Date(referrer.trialEndsAt).getTime();
+      const from = Number.isFinite(base) ? base : Date.now();
+      await db.updateCompany(referrer.id, {
+        trialEndsAt: new Date(from + REFERRAL_REWARD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      rewardKind = 'TRIAL_EXTENDED';
+    } else {
+      await db.updateCompany(referrer.id, {
+        referralCreditMonths: num(Number(referrer.referralCreditMonths), 0) + 1,
+      });
+      rewardKind = 'CREDIT';
+    }
+
+    await db.createReferral(referrer.id, {
+      id: genId('ref'),
+      referredCompanyId: invitee.id,
+      referredCompanyName: invitee.name,
+      referredContactEmail: invitee.contactEmail || '',
+      rewardKind,
+      rewardMonths: 1,
+      createdAt: new Date().toISOString(),
+    });
+
+    return rewardKind;
+  };
+
+  /**
+   * Le tableau de bord parrainage de l'entreprise connectée : son lien, ce
+   * qu'elle a gagné, et qui s'est inscrit grâce à elle. Réservé à qui gère
+   * l'entreprise — c'est son abonnement qui est en jeu.
+   */
+  app.get('/api/referral', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.user.companyId);
+      if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
+
+      const code = await referralCodeFor(company);
+      const referrals = (await db.getAllReferrals(company.id))
+        .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+
+      res.json({
+        code,
+        // Construit côté serveur à partir de l'origine réellement appelée :
+        // codée en dur, l'URL serait fausse en local comme sur un domaine
+        // personnalisé, et le lien partagé ne mènerait nulle part.
+        link: `${req.protocol}://${req.get('host')}/?ref=${code}`,
+        rewardDays: REFERRAL_REWARD_DAYS,
+        creditMonths: num(Number(company.referralCreditMonths), 0),
+        status: company.status,
+        trialEndsAt: company.trialEndsAt || null,
+        referrals: referrals.map((r: any) => ({
+          id: r.id,
+          companyName: r.referredCompanyName,
+          rewardKind: r.rewardKind,
+          rewardMonths: r.rewardMonths,
+          createdAt: r.createdAt,
+        })),
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.post('/api/signup', async (req: any, res: any) => {
     try {
       const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
@@ -5984,6 +6101,21 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         return res.status(400).json({ error: 'Cette adresse email est déjà utilisée' });
       }
 
+      // Parrainage : le code arrive du lien (`/?ref=CODE`) que le parrain a
+      // partagé. Un code inconnu n'est pas une erreur — l'inscription doit
+      // aboutir même si le lien a été tronqué en route ; elle se fait
+      // simplement sans parrain.
+      const referralCode = text(req.body?.referralCode, 16).toUpperCase();
+      const allCompanies = referralCode ? await db.getAllCompanies() : [];
+      const referrer = referralCode
+        ? allCompanies.find((c: any) => (c.referralCode || '').toUpperCase() === referralCode) || null
+        : null;
+      // On ne se parraine pas soi-même : même adresse de contact, c'est le
+      // même monde. Le garde-fou minimal, pas une politique anti-fraude.
+      const selfReferral = !!referrer
+        && String(referrer.contactEmail || '').toLowerCase() === contactEmail.toLowerCase();
+      const validReferrer = referrer && !selfReferral ? referrer : null;
+
       const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
       const company = await db.createCompany({
         id: genId('company'),
@@ -5995,7 +6127,21 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         createdAt: new Date().toISOString(),
         trialEndsAt,
         contactName, contactEmail, phone,
+        referredByCompanyId: validReferrer ? validReferrer.id : null,
       });
+
+      // La récompense est accordée une fois l'entreprise réellement créée :
+      // créditer avant laisserait un mois offert pour une inscription qui
+      // échoue plus loin.
+      if (validReferrer) {
+        try {
+          await grantReferralReward(validReferrer, company);
+        } catch (e) {
+          // Un parrainage perdu ne doit jamais faire échouer une inscription
+          // déjà aboutie — l'entreprise et son compte existent à ce stade.
+          console.error('referral reward failed', e);
+        }
+      }
 
       const hashed = await bcrypt.hash(password, 10);
       const user = await db.createUser(company.id, {

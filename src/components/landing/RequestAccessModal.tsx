@@ -67,6 +67,11 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
           body: JSON.stringify({
             companyName, contactName, contactEmail, phone, password, confirmPassword,
             plan: PLAN_CODES[plan], website, secteur,
+            // Code de parrainage porté par l'URL d'arrivée (`/?ref=CODE`).
+            // Lu au moment de l'envoi plutôt que mémorisé au montage : le
+            // visiteur peut ouvrir la page, réfléchir, puis s'inscrire — la
+            // recherche est toujours dans la barre d'adresse.
+            referralCode: new URLSearchParams(window.location.search).get('ref') || '',
           }),
         });
         const data = await res.json().catch(() => ({}));

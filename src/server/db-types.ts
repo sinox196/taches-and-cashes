@@ -83,6 +83,10 @@ export interface Database {
   createAdvance(companyId: string, advance: any): Promise<any>;
   updateAdvance(companyId: string, id: number, updates: any): Promise<any | null>;
 
+  /** Parrainage — une ligne par filleul inscrit via le lien d'une entreprise. */
+  getAllReferrals(companyId: string): Promise<any[]>;
+  createReferral(companyId: string, referral: any): Promise<any>;
+
   /** Daily check-in/check-out (pointage), one row per (user, date). */
   getAllAttendanceRecords(companyId: string): Promise<any[]>;
   getAttendanceRecordById(companyId: string, id: number): Promise<any | undefined>;
@@ -264,6 +268,8 @@ export const emptyDb = () => ({
   advances: [],
   // Daily check-in/check-out (pointage), one row per (user, date).
   attendanceRecords: [],
+  // Parrainage : une ligne par filleul inscrit, portée par le parrain.
+  referrals: [],
   leaveBalances: [],
   timeEntries: [],
   // Direct messages between two users (chat).

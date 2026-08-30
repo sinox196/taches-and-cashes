@@ -64,6 +64,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   loans: { desc: false },
   advances: { desc: false },
   attendance_records: { desc: false },
+  referrals: { desc: true },
   time_entries: { desc: true },
   messages: { desc: false },
   task_assignments: { desc: true },
@@ -98,6 +99,7 @@ const TABLE_FOR: Record<string, string> = {
   loans: 'loans',
   advances: 'advances',
   attendanceRecords: 'attendance_records',
+  referrals: 'referrals',
   timeEntries: 'time_entries',
   messages: 'messages',
   taskAssignments: 'task_assignments',
@@ -341,6 +343,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const loans = tenantCollection('loans');
   const advances = tenantCollection('advances');
   const attendance = tenantCollection('attendance_records');
+  const referrals = tenantCollection('referrals');
   const timeEntries = tenantCollection('time_entries');
   const messages = tenantCollection('messages');
   const taskAssignments = tenantCollection('task_assignments');
@@ -484,6 +487,9 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAdvanceById: advances.byId,
     createAdvance: advances.create,
     updateAdvance: advances.update,
+
+    getAllReferrals: referrals.all,
+    createReferral: referrals.create,
 
     getAllAttendanceRecords: attendance.all,
     getAttendanceRecordById: attendance.byId,

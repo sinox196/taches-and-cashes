@@ -59,7 +59,7 @@ export async function initDb(): Promise<Database> {
  */
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
-  'absenceAuthorizations', 'loans', 'advances', 'attendanceRecords', 'leaveBalances', 'timeEntries', 'messages',
+  'absenceAuthorizations', 'loans', 'advances', 'attendanceRecords', 'referrals', 'leaveBalances', 'timeEntries', 'messages',
   'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories',
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
@@ -80,6 +80,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.loans) db.loans = [];
     if (!db.advances) db.advances = [];
     if (!db.attendanceRecords) db.attendanceRecords = [];
+    if (!db.referrals) db.referrals = [];
     if (!db.leaveBalances) db.leaveBalances = [];
     if (!db.timeEntries) db.timeEntries = [];
     if (!db.messages) db.messages = [];
@@ -419,6 +420,14 @@ async function initJsonDb(): Promise<Database> {
       db.advances[index] = { ...db.advances[index], ...updates };
       await saveDb();
       return db.advances[index];
+    },
+
+    getAllReferrals: async (companyId: string) => scoped(db.referrals, companyId),
+    createReferral: async (companyId: string, referral: any) => {
+      const row = { ...referral, companyId };
+      db.referrals.push(row);
+      await saveDb();
+      return row;
     },
 
     getAllAttendanceRecords: async (companyId: string) => scoped(db.attendanceRecords, companyId),

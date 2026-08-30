@@ -14,6 +14,8 @@ interface Company {
   seatLimit: number;
   createdAt: string;
   trialEndsAt: string | null;
+  /** Mois offerts gagnés par parrainage et pas encore appliqués à une échéance. */
+  referralCreditMonths?: number;
   contactName?: string;
   contactEmail?: string;
   phone?: string;
@@ -223,6 +225,15 @@ export const PlatformAdmin: React.FC = () => {
                       {c.status === 'TRIAL' && remaining !== null && (
                         <div className="text-[11px] text-gray-400 mt-0.5">
                           {remaining >= 0 ? `${remaining} j restant(s)` : 'Essai terminé'}
+                        </div>
+                      )}
+                      {/* Parrainage : pour une entreprise déjà active il n'y a
+                          pas de date d'essai à repousser, la récompense est un
+                          avoir. Il doit se voir ici, sinon personne ne
+                          l'applique et le mois promis n'existe jamais. */}
+                      {!!c.referralCreditMonths && (
+                        <div className="text-[11px] text-emerald-700 font-medium mt-0.5">
+                          {c.referralCreditMonths} mois offert(s) à déduire
                         </div>
                       )}
                     </td>

@@ -13,6 +13,7 @@ import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { MyDashboard } from './components/dashboard/MyDashboard';
 import { ChatPage } from './components/chat/ChatPage';
 import { UsersManagement } from './components/UsersManagement';
+import { ReferralPage } from './components/ReferralPage';
 import { ClientsManagement } from './components/clients/ClientsManagement';
 import { HRManagement } from './components/hr/HRManagement';
 import { MissionsManagement } from './components/missions/MissionsManagement';
@@ -58,7 +59,7 @@ export default function App() {
 
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Plateforme'];
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Parrainage', 'Plateforme'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     // Clicking a pushed notification with no tab open makes the service
     // worker open the app at `/?nav=<section>` — there's no router to read a
@@ -763,6 +764,8 @@ export default function App() {
           (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? <AdminDashboard /> : <MyDashboard />
         ) : activeSidebarItem === 'Messages' ? (
           <ChatPage onUnreadChange={setUnreadMessages} />
+        ) : activeSidebarItem === 'Parrainage' && hasPermission('MANAGE_USERS') ? (
+          <ReferralPage />
         ) : activeSidebarItem === 'Users' && hasPermission('MANAGE_USERS') ? (
 
           <UsersManagement />
