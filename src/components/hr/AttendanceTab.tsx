@@ -152,7 +152,11 @@ export const AttendanceTab: React.FC = () => {
   );
 
   const recordDate = React.useCallback((r: AttendanceRecord) => r.date, []);
-  const pager = usePeriodPage<AttendanceRecord>(scopedRecords, recordDate);
+  // 15 lignes par page ici plutôt que les 10 des autres onglets RH : une
+  // ligne de pointage est courte (deux heures et deux durées) et la page se
+  // lit d'un coup, là où une demande de congé porte des motifs et des
+  // commentaires qui la font respirer.
+  const pager = usePeriodPage<AttendanceRecord>(scopedRecords, recordDate, 15);
 
   const handleCheckin = async () => {
     setActionError('');

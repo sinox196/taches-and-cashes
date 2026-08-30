@@ -38,6 +38,8 @@ export interface PeriodPage<T> {
   totalPages: number;
   /** La page affichée. */
   pageRows: T[];
+  /** Lignes par page réellement appliquées — pas forcément HR_PAGE_SIZE. */
+  pageSize: number;
 }
 
 /**
@@ -88,7 +90,7 @@ export function usePeriodPage<T>(
 
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  return { year, setYear, month, setMonth, yearOptions, filtered, page, setPage, totalPages, pageRows };
+  return { year, setYear, month, setMonth, yearOptions, filtered, page, setPage, totalPages, pageRows, pageSize };
 }
 
 const SELECT =
@@ -137,9 +139,13 @@ export function PeriodFilter<T>({ page }: { page: PeriodPage<T> }) {
  * barre qui apparaît et disparaît fait sauter le tableau.
  */
 export function PaginationBar<T>({ page, unit = 'lignes' }: { page: PeriodPage<T>; unit?: string }) {
-  const { filtered, page: current, setPage, totalPages } = page;
-  const from = filtered.length === 0 ? 0 : (current - 1) * HR_PAGE_SIZE + 1;
-  const to = Math.min(current * HR_PAGE_SIZE, filtered.length);
+  // `pageSize` vient de la page, pas de HR_PAGE_SIZE : le hook accepte une
+  // taille personnalisée depuis toujours, mais ce décompte gardait la
+  // constante. Un onglet paginant par 15 aurait affiché « 1 à 10 sur 47 » —
+  // le tableau et son pied de page se seraient contredits.
+  const { filtered, page: current, setPage, totalPages, pageSize } = page;
+  const from = filtered.length === 0 ? 0 : (current - 1) * pageSize + 1;
+  const to = Math.min(current * pageSize, filtered.length);
   return (
     // `flex-wrap` + `gap-2` : à 375 px le décompte et les boutons se
     // chevauchaient — le texte passait à la ligne sous « Précédent »/« Suivant »
