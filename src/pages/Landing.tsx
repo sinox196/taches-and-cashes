@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Mail } from 'lucide-react';
+import { Mail, Gift, Link2, UserPlus, CalendarPlus } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
 
@@ -149,6 +149,12 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     }
   }, [view, pendingAnchor]);
 
+  // Le code de parrainage porté par l'URL d'arrivée (`/?ref=CODE`). Lu une
+  // fois au montage, seulement pour *afficher* que la visite vient d'une
+  // invitation : c'est le formulaire d'inscription qui le renvoie au serveur,
+  // et le serveur seul qui décide s'il est valide.
+  const [invitedBy] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
+
   const goToAnchor = (id: string) => {
     if (view !== 'home') {
       setPendingAnchor(id);
@@ -186,6 +192,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <button onClick={() => goToAnchor('fonctionnalites')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Fonctionnalités</button>
             <button onClick={() => goToAnchor('dashboard')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Facturation</button>
             <button onClick={goToTarifs} className={`text-[14px] whitespace-nowrap ${view === 'tarifs' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Tarifs</button>
+            <button onClick={() => goToAnchor('parrainage')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Parrainage</button>
             <a href={`mailto:${CONTACT_EMAIL}`} className="text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
           </nav>
 
@@ -216,6 +223,24 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           </div>
         </div>
       </header>
+
+      {/* Arrivée par un lien de parrainage : le dire, sinon le lien partagé se
+          comporte exactement comme une URL ordinaire et l'invitation ne se voit
+          nulle part. Le code n'est pas validé ici — c'est le serveur qui
+          tranche à l'inscription ; ce bandeau ne fait qu'accuser réception.
+          Affiché sur les deux vues (accueil et tarifs) : l'invité peut très
+          bien aller voir les tarifs avant de créer son compte. */}
+      {invitedBy && (
+        <div className="bg-turquoise/10 border-b border-turquoise/20 px-6 sm:px-10 py-3">
+          <div className="max-w-[1280px] mx-auto flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center">
+            <Gift className="w-4 h-4 text-turquoise shrink-0" />
+            <span className="text-[13.5px] font-semibold text-navy">Vous avez été invité par un confrère.</span>
+            <span className="text-[13.5px] text-[#3D4655]">
+              Créez votre compte : votre essai démarre, et il gagne un mois gratuit.
+            </span>
+          </div>
+        </div>
+      )}
 
       {view === 'home' ? (
         <>
@@ -642,6 +667,53 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
         </>
       )}
 
+      {/* Parrainage — sur la page d'accueil uniquement : c'est une offre pour
+          les visiteurs et les clients, pas une rubrique de la grille tarifaire. */}
+      {view === 'home' && (
+        <section id="parrainage" className="py-24 px-6 sm:px-10 bg-[#F2F4F7]">
+          <div className="max-w-[920px] mx-auto text-center">
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-turquoise/10 text-turquoise text-[13px] font-bold">
+              <Gift className="w-4 h-4" /> Programme de parrainage
+            </span>
+            <h2 className="mt-5 text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em] leading-[1.2]">
+              Parrainez un confrère, gagnez un mois gratuit
+            </h2>
+            <p className="mt-4 text-[15.5px] text-[#3D4655] max-w-[560px] mx-auto">
+              Chaque cabinet qui crée son compte avec votre lien vous offre un mois d'abonnement.
+              Sans limite de filleuls.
+            </p>
+
+            <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-6 text-left">
+              <Step
+                icon={Link2}
+                step="1"
+                title="Récupérez votre lien"
+                text="Depuis votre espace, rubrique Parrainage. Un lien unique, prêt à partager."
+              />
+              <Step
+                icon={UserPlus}
+                step="2"
+                title="Votre confrère s'inscrit"
+                text="Il crée son compte depuis votre lien et démarre son essai gratuit."
+              />
+              <Step
+                icon={CalendarPlus}
+                step="3"
+                title="Vous gagnez un mois"
+                text="Votre essai est prolongé de 30 jours, ou le mois est déduit de votre prochaine échéance."
+              />
+            </div>
+
+            <button
+              onClick={() => setModalPlan('Freelance')}
+              className="mt-12 inline-block px-[30px] py-4 rounded-xl text-[15px] font-bold text-white bg-navy hover:bg-navy-hover transition-colors"
+            >
+              Créer mon compte et parrainer
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* CTA banner */}
       <section className="py-24 px-6 sm:px-10 bg-white">
         <div className="max-w-[920px] mx-auto bg-navy rounded-[28px] px-8 sm:px-12 py-16 text-center relative overflow-hidden">
@@ -706,3 +778,17 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     </div>
   );
 };
+
+/** Une étape du programme de parrainage. Trois blocs identiques : un composant, pas trois copies. */
+const Step: React.FC<{ icon: React.ElementType; step: string; title: string; text: string }> = ({ icon: Icon, step, title, text }) => (
+  <div className="bg-white rounded-2xl p-6 border border-[#E6E9EE]">
+    <div className="flex items-center gap-3 mb-3">
+      <div className="w-10 h-10 rounded-xl bg-turquoise/10 flex items-center justify-center shrink-0">
+        <Icon className="w-5 h-5 text-turquoise" />
+      </div>
+      <span className="text-[13px] font-bold text-[#98A2B3]">Étape {step}</span>
+    </div>
+    <p className="text-[15px] font-bold text-navy mb-1.5">{title}</p>
+    <p className="text-[13.5px] text-[#3D4655] leading-relaxed">{text}</p>
+  </div>
+);
