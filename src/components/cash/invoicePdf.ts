@@ -75,7 +75,11 @@ export const documentName = (invoice: any) =>
 const INK: [number, number, number] = [13, 27, 42]; // #0D1B2A — Bleu Profond
 const MUTED: [number, number, number] = [102, 112, 133];
 const LINE: [number, number, number] = [228, 231, 236];
-const HEAD: [number, number, number] = [249, 250, 251];
+// Les en-têtes de tableau (Désignation / TVA / Montant, et le détail des
+// taux de TVA) sont tirés en Bleu Profond plein, comme le bandeau « Montant
+// de facture » : le texte y passe donc en blanc, d'où HEAD_TEXT.
+const HEAD: [number, number, number] = INK;
+const HEAD_TEXT: [number, number, number] = [255, 255, 255];
 
 const M = 14;           // page margin, mm
 const W = 210;          // A4 width, mm
@@ -186,7 +190,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   const drawHeader = () => {
     doc.setFillColor(HEAD[0], HEAD[1], HEAD[2]);
     doc.rect(M, y, RIGHT - M, 7, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setInk(MUTED);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setInk(HEAD_TEXT);
     let x = M + 2;
     for (const c of cols) {
       text(label[c.k].toUpperCase(), c.a === 'right' ? x + c.w - 4 : x, y + 4.7,
@@ -247,7 +251,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     let by = totalsTop;
     doc.setFillColor(HEAD[0], HEAD[1], HEAD[2]);
     doc.rect(bx, by, bw, 6, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setInk(MUTED);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setInk(HEAD_TEXT);
     text('TVA', bx + 2, by + 4.2);
     text('BASE', c1, by + 4.2, { align: 'right' });
     text('MONTANT', c2 - 2, by + 4.2, { align: 'right' });
@@ -273,7 +277,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     if (indicative.length > 0) {
       doc.setFillColor(HEAD[0], HEAD[1], HEAD[2]);
       doc.rect(bx, by, bw, 6, 'F');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setInk(MUTED);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setInk(HEAD_TEXT);
       text('TVA', bx + 2, by + 4.2);
       text('BASE', c1, by + 4.2, { align: 'right' });
       text('MONTANT', c2 - 2, by + 4.2, { align: 'right' });

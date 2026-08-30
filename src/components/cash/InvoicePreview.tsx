@@ -164,7 +164,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             <table className="w-full text-left text-[12.5px]">
               <thead>
-                <tr className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
+                <tr className="bg-navy text-[10px] uppercase tracking-wider text-white">
                   <th className="px-3 py-2 font-semibold">Désignation</th>
                   {detailed && <th className="px-3 py-2 font-semibold text-right">Qté</th>}
                   {detailed && <th className="px-3 py-2 font-semibold text-right">P.U.</th>}
@@ -192,7 +192,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
                   <table className="w-full text-left text-[12px]">
                     <thead>
-                      <tr className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
+                      <tr className="bg-navy text-[10px] uppercase tracking-wider text-white">
                         <th className="px-3 py-2 font-semibold">TVA</th>
                         <th className="px-3 py-2 font-semibold text-right">Base</th>
                         <th className="px-3 py-2 font-semibold text-right">Montant</th>
@@ -215,7 +215,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                   {(invoice.indicativeVatBreakdown || []).length > 0 && (
                     <table className="w-full text-left text-[12px]">
                       <thead>
-                        <tr className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200">
+                        <tr className="bg-navy text-[10px] uppercase tracking-wider text-white">
                           <th className="px-3 py-2 font-semibold">TVA</th>
                           <th className="px-3 py-2 font-semibold text-right">Base</th>
                           <th className="px-3 py-2 font-semibold text-right">Montant</th>

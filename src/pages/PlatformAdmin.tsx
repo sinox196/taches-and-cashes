@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Pencil, Trash2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Pencil, Trash2, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 import { PlatformUsersModal } from '../components/platform/PlatformUsersModal';
 import { CompanyEditModal } from '../components/platform/CompanyEditModal';
+import { usePeriodPage, PeriodFilter, PaginationBar } from '../components/PeriodPager';
 
 interface Company {
   id: string;
@@ -32,6 +33,13 @@ const STATUS_STYLE: Record<string, string> = {
 };
 const STATUS_LABELS: Record<string, string> = { TRIAL: 'Essai', ACTIVE: 'Actif', EXPIRED: 'Expiré', SUSPENDED: 'Suspendu' };
 
+/**
+ * Dix lignes par page, comme les onglets RH et le Brouillard de caisse : la
+ * console plateforme n'a aucune raison de compter autrement que le reste de
+ * l'app.
+ */
+const PLATFORM_PAGE_SIZE = 10;
+
 const daysLeft = (iso: string | null) => {
   if (!iso) return null;
   const ms = new Date(iso).getTime() - Date.now();
@@ -47,6 +55,10 @@ export const PlatformAdmin: React.FC = () => {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [planPick, setPlanPick] = useState<Record<string, string>>({});
+
+  /** Recherche libre (nom, contact, e-mail, téléphone, secteur) et statut. */
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
   const [usersCompany, setUsersCompany] = useState<Company | null>(null);
   const [editCompany, setEditCompany] = useState<Company | null>(null);
@@ -74,6 +86,33 @@ export const PlatformAdmin: React.FC = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Recherche et statut d'abord, période ensuite : c'est le pager qui découpe
+  // en pages, donc il doit recevoir des lignes déjà filtrées — sinon son
+  // décompte « X à Y sur Z » compterait des entreprises que le tableau ne
+  // montre pas.
+  const matching = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return companies.filter(c => {
+      if (statusFilter && c.status !== statusFilter) return false;
+      if (!q) return true;
+      return [c.name, c.contactName, c.contactEmail, c.phone, c.secteur]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+  }, [companies, search, statusFilter]);
+
+  // `createdAt` est la seule date que porte une entreprise : le filtre année
+  // puis mois — le même geste que partout ailleurs — porte donc sur son
+  // inscription, ce que dit le libellé à côté des deux listes.
+  const companyDate = useCallback((c: Company) => c.createdAt, []);
+  const pager = usePeriodPage<Company>(matching, companyDate, PLATFORM_PAGE_SIZE);
+
+  // Le pager ne revient de lui-même en page 1 que si la page courante dépasse
+  // le nouveau total. Restreindre par recherche ou par statut peut laisser
+  // assez de pages pour que la page 3 existe encore tout en n'étant plus celle
+  // qu'on regardait : on repart du début, comme le font les listes déroulantes
+  // de période.
+  useEffect(() => { pager.setPage(1); }, [search, statusFilter]);
 
   const planFor = (c: Company) => planPick[c.id] || c.pendingPlan || c.plan || 'FREELANCE';
 
@@ -205,6 +244,33 @@ export const PlatformAdmin: React.FC = () => {
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Rechercher : entreprise, contact, e-mail, téléphone…"
+                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              title="Filtrer par statut"
+              className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+            >
+              <option value="">Tous les statuts</option>
+              {Object.entries(STATUS_LABELS).map(([value, labelText]) => (
+                <option key={value} value={value}>{labelText}</option>
+              ))}
+            </select>
+            {/* Les deux listes de période portent sur la date d'inscription —
+                le libellé le dit, « Toutes les années » seul ne dirait pas de
+                quelle date il parle. */}
+            <span className="text-[11.5px] text-gray-400 shrink-0">Inscrite&nbsp;:</span>
+            <PeriodFilter page={pager} />
+          </div>
           <table className="w-full text-[12.5px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -216,7 +282,7 @@ export const PlatformAdmin: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {companies.map(c => {
+              {pager.pageRows.map(c => {
                 const remaining = daysLeft(c.trialEndsAt);
                 return (
                   <tr key={c.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
@@ -308,8 +374,18 @@ export const PlatformAdmin: React.FC = () => {
                   </tr>
                 );
               })}
+              {pager.pageRows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-[13px] text-gray-500">
+                    Aucune entreprise ne correspond à ces filtres.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
+          <div className="px-4 pb-4">
+            <PaginationBar page={pager} unit="entreprises" />
+          </div>
         </div>
       )}
 
