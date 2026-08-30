@@ -15,6 +15,8 @@ export interface User {
   shiftEnd?: string | null;
   /** Meal-break ("pause ftour") allowance in minutes, deducted from the shift's paid hours. */
   breakMinutes?: number | null;
+  /** Dossier client rattaché — renseigné uniquement pour un compte de rôle CLIENT. */
+  clientId?: number | null;
   cnss?: number;
   tfp?: number;
   foprolos?: number;

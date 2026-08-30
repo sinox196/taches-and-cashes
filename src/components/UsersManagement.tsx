@@ -3,11 +3,12 @@ import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { PresenceSettingsCard } from './PresenceSettingsCard';
 import { useAuth, User } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { ROLES, roleMeta, type Role } from '../constants/roles';
+import { ROLES, roleMeta, CLIENT_ROLE, type Role } from '../constants/roles';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
 import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import { ExportButton } from './ExportButton';
+import { ClientSearchInput } from './cash/ClientSearchInput';
 
 const PERMISSIONS_GROUPED = [
   {
@@ -100,6 +101,9 @@ export const UsersManagement: React.FC = () => {
   const [formShiftEnd, setFormShiftEnd] = useState('');
   /** Pause ftour, en minutes — déduite des heures du shift. */
   const [formBreakMinutes, setFormBreakMinutes] = useState<number | ''>('');
+  /** Dossier rattaché, pour un compte de rôle CLIENT uniquement. */
+  const [formClientId, setFormClientId] = useState<number | null>(null);
+  const [formClientName, setFormClientName] = useState('');
   /** Days already consumed — read-only context so the admin sets the allowance knowingly. */
   const [formCongesUtilises, setFormCongesUtilises] = useState<number>(0);
   const [globalSettings, setGlobalSettings] = useState<any>(null);
@@ -159,6 +163,8 @@ export const UsersManagement: React.FC = () => {
     setFormShiftStart('');
     setFormShiftEnd('');
     setFormBreakMinutes('');
+    setFormClientId(null);
+    setFormClientName('');
     setFormError('');
     setIsModalOpen(true);
   };
@@ -181,6 +187,8 @@ export const UsersManagement: React.FC = () => {
     setFormShiftStart(user.shiftStart || '');
     setFormShiftEnd(user.shiftEnd || '');
     setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
+    setFormClientId(user.clientId ?? null);
+    setFormClientName('');
     setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
     setFormError('');
     setIsModalOpen(true);
@@ -235,6 +243,7 @@ export const UsersManagement: React.FC = () => {
         shiftStart: formShiftStart || null,
         shiftEnd: formShiftEnd || null,
         breakMinutes: formBreakMinutes === '' ? null : Number(formBreakMinutes),
+        clientId: formRole === CLIENT_ROLE ? formClientId : null,
       };
       if (formPassword) payload.password = formPassword;
       if (!editingUserId) payload.username = formUsername;
@@ -496,6 +505,10 @@ export const UsersManagement: React.FC = () => {
                   />
                 </div>
 
+                {/* Salaire, shift et congés n'ont aucun sens pour un client :
+                    il n'est pas employé du cabinet. */}
+                {formRole !== CLIENT_ROLE && (
+                <>
                 <div className="pt-4 border-t border-gray-200 mt-4">
                   <h3 className="text-[13px] font-bold text-gray-800 mb-4">Coût employeur</h3>
                   
@@ -716,6 +729,8 @@ export const UsersManagement: React.FC = () => {
                     Modifier le solde annuel n'affecte pas les congés déjà pris.
                   </p>
                 </div>
+                </>
+                )}
 
                 <div className="pt-4 border-t border-gray-200 mt-4">
                   <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
@@ -728,9 +743,40 @@ export const UsersManagement: React.FC = () => {
                       <option key={r.id} value={r.id}>{r.label}</option>
                     ))}
                   </select>
+
+                  {/* Un compte client n'a de sens que rattaché à un dossier :
+                      sans lui le portail n'a rien à montrer et le dit. Le
+                      choix passe par la recherche serveur, jamais par une
+                      liste complète — il y a des centaines de clients. */}
+                  {formRole === CLIENT_ROLE && (
+                    <div className="mt-3">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Dossier client rattaché</label>
+                      {formClientId && !formClientName ? (
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-gray-50">
+                          <span className="text-gray-700">Dossier n° {formClientId}</span>
+                          <button
+                            type="button"
+                            onClick={() => { setFormClientId(null); setFormClientName(''); }}
+                            className="text-[12px] text-blue-600 hover:underline shrink-0"
+                          >
+                            Changer
+                          </button>
+                        </div>
+                      ) : (
+                        <ClientSearchInput
+                          value={formClientName}
+                          onChange={(name, id) => { setFormClientName(name); setFormClientId(id ?? null); }}
+                          placeholder="Rechercher un client…"
+                        />
+                      )}
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Ce compte ne verra que ce dossier. Plusieurs comptes peuvent viser le même client (gérant, comptable…).
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                {formRole !== 'ADMIN' && (
+                {formRole !== 'ADMIN' && formRole !== CLIENT_ROLE && (
                   <div>
                     <label className="block text-[12px] font-semibold text-gray-700 mb-2 mt-2">Permissions</label>
                     <div className="space-y-4 border border-gray-200 rounded-lg p-3 bg-gray-50 max-h-[300px] overflow-y-auto">

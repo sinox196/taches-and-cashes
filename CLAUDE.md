@@ -258,6 +258,74 @@ Column management (add/edit/remove a colonne, cascading its cells on delete) and
 
 Deliberately deferred to V2/V3 per the spec's own phasing table (do not build without an explicit request): automatic task generation from an échéance into time entries, attachments on document items, automatic email/notification reminders, average document-receipt-delay statistics, and any cross-cabinet template sharing.
 
+### Portail client
+
+Un client du cabinet peut avoir son propre accès. Il se connecte par le **même
+écran** que les collaborateurs — c'est son rôle qui l'amène sur le portail
+([ClientPortal.tsx](src/pages/ClientPortal.tsx)) au lieu du back-office, via un
+branchement placé dans [App.tsx](src/App.tsx) *avant* toute la coquille interne.
+
+**Le rattachement porte sur l'utilisateur, pas sur le client.** `user.clientId`
+plutôt que `clients.userId` : plusieurs comptes peuvent viser le même dossier —
+le gérant et son comptable — sans table pivot, et un compte ne peut par
+construction en viser qu'un seul. `CLIENT_ROLE` vit dans
+[roles.ts](src/constants/roles.ts) et sert des deux côtés.
+
+**La sécurité est un périmètre global, pas un filtre par route.** Un compte
+`CLIENT` n'a aucune permission, donc `requirePermission` le refuse déjà partout
+où il est posé — mais beaucoup de routes ne portent que `authenticate` et lui
+seraient ouvertes. `authenticate` refuse donc **par défaut** tout chemin absent
+de `CLIENT_ALLOWED_EXACT` / `CLIENT_ALLOWED_PREFIXES` (`/api/portal/*`, plus
+`/api/me`, `/api/logout`, `/api/notifications*`, `/api/messages*`). Une liste
+blanche, jamais noire : **une route ajoutée demain naît fermée au portail**.
+Chaque exception ouverte hors `/api/portal` porte son propre filtrage par
+utilisateur.
+
+Les routes du portail prennent le dossier **dans le jeton**, jamais dans un
+paramètre : il n'y a aucun `?clientId=` à falsifier.
+
+- `/api/portal/summary` — identité du dossier et situation financière.
+- `/api/portal/statement` — le relevé de compte : une ligne par facture ou
+  règlement, dans l'ordre chronologique, avec le solde qui court. Le solde
+  antérieur ouvre le relevé comme une ligne à part entière. Une facture et son
+  règlement le même jour se lisent facture d'abord, sinon le solde plonge puis
+  remonte et se lit comme un trop-perçu qui n'a jamais existé. Les chiffres
+  sortent des mêmes helpers que la page Clients (`countsAsBilled`,
+  `journalEncaissementsByClient`, `sumEncaissements`) : le solde annoncé au
+  client et celui du back-office ne peuvent pas diverger.
+- `/api/portal/tasks` — l'avancement **sans temps ni coût**. Le filtrage est
+  dans la réponse, pas dans l'interface : masquer une colonne côté navigateur
+  laisserait `dureeSeconds`/`hourlyRate`/`cost` partir dans le JSON. Les champs
+  sont listés un par un — liste blanche, pour qu'un champ sensible ajouté
+  demain à l'entrée ne se retrouve pas ici par défaut. Seules les tâches
+  `COMPLETED` sont servies.
+- `/api/portal/deliverables` — les modèles affectés au dossier, leur
+  avancement et leurs items, jamais qui y a passé du temps.
+
+**Messagerie : le module existant, pas un second.** Le fil est déjà filtré par
+participant. Deux ajouts : la liste de contacts d'un client est réduite aux
+comptes du cabinet — sans quoi elle lui rendait **tous** les utilisateurs, les
+autres clients compris — et les messages portent `isInternal`, filtré côté
+serveur pour un client. Dans le modèle actuel (messages directs à deux) un
+échange entre collaborateurs est déjà hors de portée ; le drapeau est là pour
+que la règle tienne le jour où un fil accueillera plusieurs personnes.
+
+**Les effets du back-office doivent être éteints à la source.** Un `return`
+anticipé dans le rendu n'empêche pas les `useEffect` de tourner — les hooks
+s'exécutent avant lui, quelle que soit la branche rendue. Le sondage des
+services, le flux SSE du pointage et le battement de présence partaient donc
+pour un compte client et se faisaient refuser en 403 en boucle. Ils sont gardés
+par `isClientUser` dans App.tsx et par un jeton neutralisé dans
+[PresenceContext](src/context/PresenceContext.tsx) — la présence est un outil
+interne, un client n'y a pas sa place.
+
+**Pas encore construit**, faute de donnée ou de mécanisme dans l'app : les
+rappels d'échéance de paiement à J-7/J-1 (il n'existe aucun balayage
+périodique), les notifications par e-mail et leurs préférences par utilisateur
+(les notifications in-app existantes s'affichent déjà dans la cloche), et le
+téléchargement de documents livrés avec historique de versions — le modèle de
+ressource métier ne porte ni fichier ni version.
+
 ### Export CSV
 
 Every table screen carries an **Exporter** button: Clients, Pointage, the four HR tabs, Cash (facturation, règlements, brouillard) and the Échéances grid. One implementation for all of them — [exportCsv.ts](src/utils/exportCsv.ts) builds the file, [ExportButton.tsx](src/components/ExportButton.tsx) is the button — because three variants would eventually produce three files that do not open the same way.

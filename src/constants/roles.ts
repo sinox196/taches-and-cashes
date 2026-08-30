@@ -57,9 +57,36 @@ export const ROLES: RoleDefinition[] = [
     badgeClass: 'bg-teal-100 text-teal-700',
     hasShield: false,
   },
+  {
+    // Le client du cabinet, pas un membre du cabinet. Il se connecte par le
+    // même écran que les collaborateurs — c'est le rôle qui l'envoie sur le
+    // portail au lieu du back-office — et ne voit que son propre dossier.
+    // `isStaff: false` le tient hors de l'effectif et de la paie ; il n'a
+    // aucune permission back-office et le garde-fou de `authenticate` lui
+    // refuse toute route hors `/api/portal`.
+    id: 'CLIENT',
+    label: 'Client',
+    isStaff: false,
+    canViewDashboard: false,
+    canApproveHR: false,
+    badgeClass: 'bg-slate-100 text-slate-700',
+    hasShield: false,
+  },
 ];
 
 export type Role = string;
+
+/**
+ * Le rôle qui bascule sur le portail client.
+ *
+ * Une constante plutôt qu'un littéral `'CLIENT'` recopié : elle sert des deux
+ côtés (redirection de l'interface, périmètre du serveur) et un des deux
+ * seulement corrigé serait exactement le trou que le portail ne doit pas avoir.
+ */
+export const CLIENT_ROLE = 'CLIENT';
+
+/** Rôles internes au cabinet — tout sauf le client. */
+export const STAFF_SIDE_ROLES: string[] = ROLES.filter((r) => r.id !== CLIENT_ROLE).map((r) => r.id);
 
 const FALLBACK: RoleDefinition = {
   id: 'UNKNOWN',

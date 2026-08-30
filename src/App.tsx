@@ -21,10 +21,11 @@ import { ResourcesManagement } from './components/resources/ResourcesManagement'
 import { useEscapeToClose } from './hooks/useEscapeToClose';
 import { closeLingeringTimerNotification } from './utils/osNotifications';
 import { useAuth } from './context/AuthContext';
-import { DASHBOARD_ROLES } from './constants/roles';
+import { DASHBOARD_ROLES, CLIENT_ROLE } from './constants/roles';
 import { Login } from './pages/Login';
 import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
+import { ClientPortal } from './pages/ClientPortal';
 import { ResetPassword } from './pages/ResetPassword';
 import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X } from 'lucide-react';
 
@@ -154,8 +155,15 @@ export default function App() {
 
   useEscapeToClose(() => setAttendanceGateDismissed(true), !!attendanceGate && !attendanceGateDismissed);
 
+  // Les effets ci-dessous appartiennent au back-office. Un `return` anticipé
+  // dans le rendu ne les empêche PAS de tourner — les hooks s'exécutent avant
+  // lui, quelle que soit la branche rendue — et ils partaient donc pour un
+  // compte client, qui se voyait refuser chacun en 403. Ils sont donc gardés
+  // ici, à la source.
+  const isClientUser = user?.role === CLIENT_ROLE;
+
   useEffect(() => {
-    if (token) {
+    if (token && !isClientUser) {
       // Clients are NOT preloaded: with hundreds of them this fetch ran on
       // every navigation just to feed one autocomplete. NewTaskCard queries
       // /api/clients?q= as you type instead.
@@ -171,7 +179,7 @@ export default function App() {
           if (Array.isArray(data)) setTaskTypesList(data);
         }).catch(console.error);
     }
-  }, [token, activeSidebarItem]);
+  }, [token, activeSidebarItem, isClientUser]);
 
   // Cost comes from the collaborator's employer hourly cost. When they have
   // none configured we show a dash rather than pricing the work at a guess.
@@ -200,7 +208,7 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || activeSidebarItem !== 'Time Tracking') return;
+    if (!token || isClientUser || activeSidebarItem !== 'Time Tracking') return;
 
     let closed = false;
     let source: EventSource | null = null;
@@ -265,7 +273,7 @@ export default function App() {
       if (retryTimer) clearTimeout(retryTimer);
       source?.close();
     };
-  }, [token, activeSidebarItem, fetchTimeEntries]);
+  }, [token, isClientUser, activeSidebarItem, fetchTimeEntries]);
 
   /**
    * Off Pointage there is no SSE stream (it pushes a whole page of every
@@ -707,6 +715,16 @@ export default function App() {
     return publicScreen === 'login'
       ? <Login onBack={() => setPublicScreen('landing')} />
       : <Landing onLogin={() => setPublicScreen('login')} />;
+  }
+
+  // Un client passe par le même écran de connexion que les collaborateurs :
+  // c'est ici, sur son rôle, qu'il bascule sur le portail au lieu du
+  // back-office. Le branchement est **avant** toute la coquille interne — pas
+  // une branche de plus dans la chaîne de `activeSidebarItem` — pour qu'aucun
+  // effet ni aucun fetch du back-office (SSE du pointage, KPI, liste des
+  // services…) ne parte pour un compte qui n'a le droit d'en lire aucun.
+  if (user.role === CLIENT_ROLE) {
+    return <ClientPortal />;
   }
 
   return (

@@ -9,7 +9,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
 import { LEGACY_COMPANY_ID, TRIAL_DAYS, PLAN_SEAT_LIMITS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
-import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES } from './src/constants/roles.js';
+import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
 import { toPaymentMode, isCashMode } from './src/constants/paymentModes.js';
 import {
@@ -125,6 +125,23 @@ const filterKpiEntries = (entries: any[], body: any) => {
  */
 const countsAsBilled = (inv: any) =>
   inv.documentKind !== 'AUTRE_NON_FACTURABLE' && inv.status !== 'DRAFT';
+
+/**
+ * Les seuls chemins qu'un compte `CLIENT` peut atteindre.
+ *
+ * Liste blanche, jamais liste noire : ce qui n'y figure pas est refusé, donc
+ * une route ajoutée plus tard naît fermée au portail. Chaque entrée ouverte
+ * hors `/api/portal` porte son propre filtrage par utilisateur :
+ *  - `/api/me`, `/api/logout` ne renvoient que le compte connecté ;
+ *  - `/api/notifications*` est déjà indexé par `userId` ;
+ *  - `/api/messages*` est filtré par participant, et sa liste de contacts est
+ *    réduite aux collaborateurs du cabinet (voir la route) — sans quoi un
+ *    client verrait tous les autres clients.
+ */
+const CLIENT_ALLOWED_EXACT = new Set(['/api/me', '/api/logout']);
+const CLIENT_ALLOWED_PREFIXES = ['/api/portal/', '/api/notifications', '/api/messages'];
+const clientPathAllowed = (path: string) =>
+  CLIENT_ALLOWED_EXACT.has(path) || CLIENT_ALLOWED_PREFIXES.some((p) => path === p || path.startsWith(p));
 
 /** Bucket key used to group entries by client (falls back to the stored name). */
 const clientBucketKey = (t: any) =>
@@ -389,7 +406,11 @@ async function startServer() {
       }
 
       const token = jwt.sign(
-        { id: user.id, role: user.role, companyId, isPlatformAdmin: !!user.isPlatformAdmin },
+        // `clientId` voyage dans le jeton : le garde-fou de `authenticate` et
+        // les routes du portail s'en servent à chaque requête, et le relire en
+        // base à chaque appel n'apporterait rien — il ne change pas dans la
+        // vie d'un compte (le rattachement se fait à la création).
+        { id: user.id, role: user.role, companyId, clientId: user.clientId ?? null, isPlatformAdmin: !!user.isPlatformAdmin },
         JWT_SECRET, { expiresIn: '1d' },
       );
 
@@ -402,6 +423,7 @@ async function startServer() {
           permissions: JSON.parse(user.permissions),
           salaireBrut: user.salaireBrut,
           regimeHoraire: user.regimeHoraire,
+          clientId: user.clientId ?? null,
           isPlatformAdmin: !!user.isPlatformAdmin,
         }
       });
@@ -428,6 +450,24 @@ async function startServer() {
       // legacy cabinet's data with zero forced re-login.
       payload.companyId = payload.companyId || LEGACY_COMPANY_ID;
       req.user = payload;
+
+      // ---- Portail client : périmètre global, pas route par route --------
+      //
+      // Un compte `CLIENT` n'a aucune permission back-office, donc
+      // `requirePermission` le refuse déjà partout où il est posé. Mais une
+      // bonne partie des routes ne portent que `authenticate` (notifications,
+      // messagerie, présence, RH « annuler ma demande »…) : elles lui
+      // seraient ouvertes. Plutôt que d'ajouter un filtre à chacune — et
+      // d'en oublier une le jour où on en ajoute une nouvelle, ce qui
+      // exposerait les données d'un autre client — le périmètre est refusé
+      // par défaut ici, en un seul endroit, et seul le préfixe `/api/portal`
+      // (plus le strict nécessaire pour se connaître et discuter) est ouvert.
+      // Une route ajoutée demain est donc fermée au client tant que
+      // quelqu'un ne l'ouvre pas explicitement.
+      if (payload.role === CLIENT_ROLE && !clientPathAllowed(req.path)) {
+        res.status(403).json({ error: 'Accès réservé au portail client.' });
+        return;
+      }
 
       const company = await expireTrialIfDue(await db.getCompanyById(req.user.companyId));
       if (company && (company.status === 'EXPIRED' || company.status === 'SUSPENDED')) {
@@ -459,6 +499,7 @@ async function startServer() {
         shiftStart: user.shiftStart || null,
         shiftEnd: user.shiftEnd || null,
         breakMinutes: user.breakMinutes ?? null,
+        clientId: user.clientId ?? null,
         isPlatformAdmin: !!user.isPlatformAdmin,
         company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null } : null,
       });
@@ -719,7 +760,7 @@ async function startServer() {
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes } = req.body;
+      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId } = req.body;
 
       const existing = await db.getUserByUsername(username);
       if (existing) {
@@ -766,6 +807,11 @@ async function startServer() {
         shiftStart: shiftStart || null,
         shiftEnd: shiftEnd || null,
         breakMinutes: typeof breakMinutes === 'number' && Number.isFinite(breakMinutes) ? breakMinutes : null,
+        // Rattachement au dossier client. Porté par l'utilisateur et non
+        // l'inverse (`clients.userId`) : plusieurs comptes peuvent viser le
+        // même client — le gérant et son comptable — sans table pivot, et un
+        // compte ne peut par construction en viser qu'un seul.
+        clientId: role === CLIENT_ROLE && clientId != null ? Number(clientId) : null,
       });
 
       // The admin sets the annual leave allowance from this same form.
@@ -784,7 +830,7 @@ async function startServer() {
   app.put('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes } = req.body;
+      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId } = req.body;
       
       const simSalaire = typeof salaireBrut === 'number' ? salaireBrut : 0;
       const simRegime = typeof regimeHoraire === 'number' ? regimeHoraire : 0;
@@ -813,6 +859,11 @@ async function startServer() {
         shiftStart: shiftStart || null,
         shiftEnd: shiftEnd || null,
         breakMinutes: typeof breakMinutes === 'number' && Number.isFinite(breakMinutes) ? breakMinutes : null,
+        // Rattachement au dossier client. Porté par l'utilisateur et non
+        // l'inverse (`clients.userId`) : plusieurs comptes peuvent viser le
+        // même client — le gérant et son comptable — sans table pivot, et un
+        // compte ne peut par construction en viser qu'un seul.
+        clientId: role === CLIENT_ROLE && clientId != null ? Number(clientId) : null,
       };
 
       if (password) {
@@ -4212,6 +4263,215 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  // ---- Portail client -----------------------------------------------------
+  //
+  // La seule surface qu'un compte `CLIENT` peut atteindre (voir la liste
+  // blanche de `authenticate`). Chaque route part de `portalClient(req)` :
+  // le dossier est repris du jeton, jamais d'un paramètre de requête, donc
+  // aucune de ces routes ne peut être détournée vers le dossier d'un autre
+  // client en changeant une URL.
+
+  /** Le dossier du client connecté, ou `null` si le compte n'est rattaché à rien. */
+  const portalClient = async (req: any) => {
+    if (req.user.role !== CLIENT_ROLE) return null;
+    const id = req.user.clientId;
+    if (id == null) return null;
+    return (await db.getClientById(req.user.companyId, Number(id))) || null;
+  };
+
+  /** 403 explicite plutôt qu'un 500 : un compte client non rattaché est une erreur d'administration, pas une panne. */
+  const requirePortalClient = async (req: any, res: any) => {
+    const client = await portalClient(req);
+    if (!client) {
+      res.status(403).json({ error: "Votre compte n'est rattaché à aucun dossier client. Contactez le cabinet." });
+      return null;
+    }
+    return client;
+  };
+
+  /** Les factures du dossier qui comptent comme des honoraires, triées par date. */
+  const portalInvoicesFor = async (companyId: string, client: any) =>
+    (await db.getAllInvoices(companyId))
+      .filter((inv: any) => {
+        if (!countsAsBilled(inv)) return false;
+        const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
+        return key === String(client.id) || key === `name:${client.name}`;
+      })
+      .sort((a: any, b: any) => String(a.issueDate || '').localeCompare(String(b.issueDate || '')));
+
+  /** Tous les encaissements du dossier : ceux saisis sur la fiche et ceux venus du brouillard. */
+  const portalEncaissementsFor = async (companyId: string, client: any) => {
+    const manual = normalizeEncaissements(client.encaissements).map((e: any) => ({ ...e, source: 'MANUEL' }));
+    const fromJournal = journalFor(
+      journalEncaissementsByClient(await db.getAllCashJournalEntries(companyId)),
+      client,
+    );
+    return [...manual, ...fromJournal].sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)));
+  };
+
+  app.get('/api/portal/summary', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+
+      const invoices = await portalInvoicesFor(req.user.companyId, client);
+      const encaissements = await portalEncaissementsFor(req.user.companyId, client);
+      const montantFacture = round3(invoices.reduce((s: number, i: any) => s + num(Number(i.totalNetToPay), 0), 0));
+      const totalEncaisse = round3(encaissements.reduce((s: number, e: any) => s + num(Number(e.amount), 0), 0));
+      const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
+
+      res.json({
+        client: { id: client.id, name: client.name, taxId: client.taxId || '', email: client.email || '' },
+        soldeAnterieur,
+        montantFacture,
+        totalEncaisse,
+        // Le même calcul que la page Clients du back-office, à la virgule près :
+        // deux écrans qui annoncent un solde différent au client et au cabinet
+        // seraient pires que pas de portail du tout.
+        soldeGlobal: round3(soldeAnterieur - totalEncaisse + montantFacture),
+        invoiceCount: invoices.length,
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Relevé de compte : une ligne par facture ou par encaissement, dans l'ordre
+   * chronologique, avec le solde qui court. Le solde antérieur ouvre le relevé
+   * comme une ligne à part entière — sans elle le premier solde afficherait un
+   * report sorti de nulle part.
+   */
+  app.get('/api/portal/statement', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+
+      const invoices = await portalInvoicesFor(req.user.companyId, client);
+      const encaissements = await portalEncaissementsFor(req.user.companyId, client);
+
+      type StatementLine = {
+        kind: 'FACTURE' | 'ENCAISSEMENT';
+        date: string; label: string; reference: string;
+        dueDate?: string | null; paymentMethod?: string;
+        debit: number; credit: number; currency: string;
+      };
+      const lines: StatementLine[] = invoices.map((inv: any): StatementLine => ({
+        kind: 'FACTURE',
+        date: String(inv.issueDate || '').slice(0, 10),
+        label: `Facture n° ${inv.number || inv.reference || '—'}`,
+        reference: inv.number || inv.reference || '',
+        dueDate: inv.dueDate || null,
+        debit: round3(num(Number(inv.totalNetToPay), 0)),
+        credit: 0,
+        currency: inv.currency || 'TND',
+      })).concat(encaissements.map((e: any): StatementLine => ({
+        kind: 'ENCAISSEMENT',
+        date: String(e.date || '').slice(0, 10),
+        label: e.note || 'Règlement reçu',
+        reference: e.reference || '',
+        paymentMethod: e.paymentMethod || '',
+        debit: 0,
+        credit: round3(num(Number(e.amount), 0)),
+        currency: 'TND',
+      })));
+
+      lines.sort((a, b) => String(a.date).localeCompare(String(b.date))
+        // Une facture et son règlement le même jour se lisent facture d'abord :
+        // l'inverse ferait passer le solde en négatif puis revenir, ce qui se
+        // lit comme un trop-perçu qui n'a jamais existé.
+        || (a.kind === b.kind ? 0 : a.kind === 'FACTURE' ? -1 : 1));
+
+      const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
+      let running = soldeAnterieur;
+      const withBalance = lines.map((l) => {
+        running = round3(running + l.debit - l.credit);
+        return { ...l, solde: running };
+      });
+
+      res.json({
+        soldeAnterieur,
+        lines: withBalance,
+        soldeGlobal: running,
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * L'avancement des travaux, **sans temps ni coût**.
+   *
+   * Le filtrage est ici, dans la réponse, et pas dans l'interface : masquer une
+   * colonne côté navigateur laisserait `dureeSeconds`, `hourlyRate` et `cost`
+   * partir dans le JSON, lisibles par quiconque ouvre l'onglet réseau. Les
+   * champs sont donc listés un par un — une liste blanche, pour qu'un champ
+   * sensible ajouté demain à l'entrée ne se retrouve pas ici par défaut.
+   */
+  app.get('/api/portal/tasks', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+
+      const users = await db.getAllUsers(req.user.companyId);
+      const entries = (await db.getAllTimeEntries(req.user.companyId))
+        .filter((t: any) => {
+          const key = clientBucketKey(t);
+          return key === String(client.id) || key === `name:${client.name}`;
+        })
+        // Une tâche en cours n'est pas une information que le client doit lire
+        // en direct : elle apparaît une fois close, comme un travail livré.
+        .filter((t: any) => t.statut === 'COMPLETED');
+
+      res.json(entries.map((t: any) => ({
+        id: t.id,
+        date: t.date || '',
+        libelle: t.description || t.taskType || t.pole || 'Travail',
+        mission: t.pole || '',
+        typeTache: t.taskType || '',
+        statut: t.statut,
+        responsable: users.find((u: any) => u.id === t.userId)?.fullName
+          || users.find((u: any) => u.id === t.userId)?.username || '',
+      })));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Les livrables métier du dossier : où en est chaque modèle affecté au
+   * client. On renvoie l'avancement (items résolus sur total) et le détail des
+   * libellés, jamais qui a travaillé dessus ni combien de temps.
+   */
+  app.get('/api/portal/deliverables', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+
+      const instances = (await db.getAllClientResourceInstances(req.user.companyId))
+        .filter((i: any) => i.clientId === client.id);
+      const allStatuses = await db.getAllClientResourceItemStatuses(req.user.companyId);
+
+      res.json(instances.map((instance: any) => {
+        const items = allStatuses
+          .filter((s: any) => s.instanceId === instance.id)
+          .sort((a: any, b: any) => a.sortOrder - b.sortOrder);
+        const done = items.filter((i: any) => i.done).length;
+        return {
+          id: instance.id,
+          name: instance.name,
+          type: instance.type,
+          status: instance.status,
+          createdAt: instance.createdAt,
+          progress: { done, total: items.length },
+          items: items.map((i: any) => ({ id: i.id, label: i.label, done: !!i.done })),
+        };
+      }));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET Leave Balance
   app.get('/api/hr/balance', authenticate, async (req: any, res: any) => {
     try {
@@ -4249,8 +4509,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     try {
       const allUsers = await db.getAllUsers(req.user.companyId);
       const messages = await db.getAllMessages(req.user.companyId);
+      // Un client n'a pas d'annuaire : il ne peut écrire qu'au cabinet. Sans
+      // ce filtre la liste de contacts lui rendait *tous* les utilisateurs de
+      // l'entreprise, y compris les autres clients — nom et rôle compris.
+      const isClientViewer = req.user.role === CLIENT_ROLE;
       const contacts = allUsers
         .filter((u: any) => u.id !== req.user.id)
+        .filter((u: any) => !isClientViewer || u.role !== CLIENT_ROLE)
         .map((u: any) => {
           const thread = messages.filter((m: any) =>
             (m.fromUserId === req.user.id && m.toUserId === u.id) ||
@@ -4305,6 +4570,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
           (m.fromUserId === req.user.id && m.toUserId === otherId) ||
           (m.fromUserId === otherId && m.toUserId === req.user.id)
         )
+        // L'appartenance au fil suffit aujourd'hui à tenir les notes internes
+        // hors de portée d'un client ; ce second filtre est la ceinture qui
+        // survivra à un fil à plusieurs participants.
+        .filter((m: any) => req.user.role !== CLIENT_ROLE || !m.isInternal)
         .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
       const changed = await db.markMessagesRead(req.user.companyId, req.user.id, otherId);
@@ -4336,6 +4605,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         fromUserId: req.user.id,
         toUserId,
         body,
+        // Note interne au cabinet : jamais servie à un compte client (voir le
+        // filtre du fil). Dans le modèle actuel — des messages directs à deux
+        // — un échange entre collaborateurs est déjà hors de portée d'un
+        // client, qui n'en est pas participant ; le drapeau est là pour que la
+        // règle tienne encore le jour où un fil accueillera plusieurs
+        // personnes, cas où l'appartenance au fil ne suffirait plus.
+        isInternal: req.user.role !== CLIENT_ROLE && recipient.role !== CLIENT_ROLE ? true : false,
         createdAt: new Date().toISOString(),
         readAt: null,
       });

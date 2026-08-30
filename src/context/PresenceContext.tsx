@@ -3,6 +3,7 @@ import { useAuth } from './AuthContext';
 import {
   DEFAULT_AWAY_AFTER_MS, HEARTBEAT_MS, clampAwayMinutes, type PresenceState,
 } from '../constants/presence';
+import { CLIENT_ROLE } from '../constants/roles';
 
 interface PresenceEntry {
   state: PresenceState;
@@ -29,7 +30,13 @@ const PresenceContext = createContext<PresenceContextType | undefined>(undefined
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'] as const;
 
 export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { token, user } = useAuth();
+  const { token: authToken, user } = useAuth();
+  // La présence est un outil interne au cabinet : « qui est à son poste ».
+  // Un client n'y a pas sa place, et le portail n'a aucun écran qui la lise.
+  // Neutraliser le jeton ici éteint d'un coup le battement, le sondage et la
+  // balise de départ — tous déjà gardés par `if (!token) return` — au lieu de
+  // laisser partir des requêtes que le serveur refuse en 403.
+  const token = authToken && user?.role !== CLIENT_ROLE ? authToken : null;
 
   const lastActivityRef = useRef<number>(Date.now());
   const [own, setOwn] = useState<PresenceState>('ACTIVE');
