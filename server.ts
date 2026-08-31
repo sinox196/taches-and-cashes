@@ -485,6 +485,12 @@ async function startServer() {
         res.status(403).json({ error: "Votre période d'essai est terminée. Contactez-nous pour activer un abonnement." });
         return;
       }
+      // Le catalogue de missions du secteur, ici et pas seulement à la
+      // connexion : un jeton vit 24 h, donc quelqu'un déjà connecté ne
+      // repasse pas par /api/login et ne verrait jamais arriver le catalogue.
+      // La fiche entreprise est déjà en main, et le drapeau court-circuite en
+      // une comparaison dès la deuxième fois.
+      await seedSectorMissions(company);
       next();
     } catch (e) {
       res.status(401).json({ error: 'Invalid token' });
@@ -2826,17 +2832,37 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * Ne lève jamais : un catalogue par défaut manquant ne doit pas empêcher
    * quelqu'un de se connecter.
    */
-  async function seedSectorMissions(company: any) {
-    try {
-      if (!company?.id || company.sectorMissionsSeededAt) return;
-      const catalogue = SECTOR_MISSIONS[company.secteur || 'CABINET'] || [];
-      if (catalogue.length === 0) return;
+  const sectorSeedInFlight = new Map<string, Promise<void>>();
 
-      await applyMissionCatalogue(company.id, normalizeMissionCatalogue(catalogue));
-      await db.updateCompany(company.id, { sectorMissionsSeededAt: new Date().toISOString() });
-    } catch (e) {
-      console.error('sector missions seeding failed', e);
-    }
+  async function seedSectorMissions(company: any): Promise<void> {
+    if (!company?.id || company.sectorMissionsSeededAt) return;
+
+    // Une seule pose en vol par entreprise. `authenticate` s'exécute sur
+    // *chaque* requête, et l'application en tire plusieurs de front au
+    // chargement d'une page : sans ça, toutes verraient le drapeau encore
+    // absent, liraient un catalogue vide et créeraient chacune les 8 missions.
+    // Le drapeau seul ne suffit pas — il n'est posé qu'à la fin.
+    const inFlight = sectorSeedInFlight.get(company.id);
+    if (inFlight) return inFlight;
+
+    const run = (async () => {
+      try {
+        const catalogue = SECTOR_MISSIONS[company.secteur || 'CABINET'] || [];
+        if (catalogue.length === 0) return;
+        await applyMissionCatalogue(company.id, normalizeMissionCatalogue(catalogue));
+        // Posé **après** coup : une pose interrompue doit pouvoir se rejouer à
+        // la requête suivante, et `applyMissionCatalogue` étant additif, la
+        // rejouer ne duplique rien.
+        await db.updateCompany(company.id, { sectorMissionsSeededAt: new Date().toISOString() });
+      } catch (e) {
+        console.error('sector missions seeding failed', e);
+      } finally {
+        sectorSeedInFlight.delete(company.id);
+      }
+    })();
+
+    sectorSeedInFlight.set(company.id, run);
+    return run;
   }
 
   // ---------------------------------------------------------
