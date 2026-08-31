@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { X, ChevronDown, Search, Loader, CalendarClock } from 'lucide-react';
+import { SearchableSelect } from './SearchableSelect';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 
@@ -208,19 +209,14 @@ export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskType
 
             <div>
               <label className="text-[11px] font-semibold text-gray-400 block mb-1">Mission</label>
-              <div className="relative">
-                <select
-                  value={selectedServiceId}
-                  onChange={(e) => { setSelectedServiceId(e.target.value); setSelectedTaskTypeId(''); }}
-                  className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-2 pr-8 text-[13px] font-medium text-gray-800 focus:outline-none focus:border-gray-400"
-                >
-                  <option value="" disabled>Sélectionner une mission</option>
-                  {availableServices.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
+              <SearchableSelect
+                value={selectedServiceId}
+                onChange={(id) => { setSelectedServiceId(id); setSelectedTaskTypeId(''); }}
+                options={availableServices.map((s) => ({ id: s.id, label: s.name }))}
+                placeholder="Sélectionner une mission"
+                searchPlaceholder="Rechercher une mission…"
+                emptyLabel="Aucune mission ne correspond."
+              />
             </div>
 
             <div>
@@ -236,19 +232,14 @@ export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskType
                   Aucun type défini pour cette mission
                 </div>
               ) : (
-                <div className="relative">
-                  <select
-                    value={selectedTaskTypeId}
-                    onChange={(e) => setSelectedTaskTypeId(e.target.value)}
-                    className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-2 pr-8 text-[13px] font-medium text-gray-800 focus:outline-none focus:border-gray-400"
-                  >
-                    <option value="">Aucun</option>
-                    {availableTaskTypes.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <SearchableSelect
+                  value={selectedTaskTypeId}
+                  onChange={setSelectedTaskTypeId}
+                  options={availableTaskTypes.map((t) => ({ id: t.id, label: t.name }))}
+                  placeholder="Aucun"
+                  searchPlaceholder="Rechercher un type…"
+                  emptyLabel="Aucun type ne correspond."
+                />
               )}
             </div>
 

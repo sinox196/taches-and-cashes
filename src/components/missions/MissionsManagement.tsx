@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Pencil, Trash2, Loader2, Layers, ListChecks, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Layers, ListChecks } from 'lucide-react';
 import { MissionEditorModal, type Mission, type TaskType } from './MissionEditorModal';
-import { ImportMissionsModal } from './ImportMissionsModal';
 
 /**
  * Admin screen for the mission → types de tâches catalogue that drives the
@@ -21,7 +20,6 @@ export const MissionsManagement: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [editor, setEditor] = useState<false | { mission: Mission | null }>(false);
-  const [importing, setImporting] = useState(false);
 
   const canManage = hasPermission('MANAGE_SERVICES');
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
@@ -80,23 +78,13 @@ export const MissionsManagement: React.FC = () => {
             Ces missions et leurs types de tâches alimentent le formulaire de pointage.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => setImporting(true)}
-            title="Créer plusieurs missions et leurs types de tâches depuis un tableur"
-            className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            Importer
-          </button>
-          <button
-            onClick={() => setEditor({ mission: null })}
-            className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Nouvelle mission
-          </button>
-        </div>
+        <button
+          onClick={() => setEditor({ mission: null })}
+          className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          Nouvelle mission
+        </button>
       </div>
 
       {error && (
@@ -111,20 +99,12 @@ export const MissionsManagement: React.FC = () => {
         <div className="bg-white border border-gray-200 rounded-xl p-10 text-center shadow-sm">
           <Layers className="w-8 h-8 text-gray-300 mx-auto mb-3" />
           <p className="text-[13px] text-gray-500">Aucune mission pour le moment.</p>
-          <div className="mt-3 flex items-center justify-center gap-4">
-            <button
-              onClick={() => setEditor({ mission: null })}
-              className="text-[13px] font-medium text-blue-600 hover:text-blue-800"
-            >
-              Créer la première mission
-            </button>
-            <button
-              onClick={() => setImporting(true)}
-              className="text-[13px] font-medium text-blue-600 hover:text-blue-800"
-            >
-              Importer depuis un tableur
-            </button>
-          </div>
+          <button
+            onClick={() => setEditor({ mission: null })}
+            className="mt-3 text-[13px] font-medium text-blue-600 hover:text-blue-800"
+          >
+            Créer la première mission
+          </button>
         </div>
       ) : (
         <div className="space-y-3">
@@ -182,13 +162,6 @@ export const MissionsManagement: React.FC = () => {
             );
           })}
         </div>
-      )}
-
-      {importing && (
-        <ImportMissionsModal
-          onClose={() => setImporting(false)}
-          onImported={() => { load(); }}
-        />
       )}
 
       {editor && (

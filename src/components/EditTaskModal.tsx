@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check } from 'lucide-react';
+import { SearchableSelect } from './SearchableSelect';
 import { TimeEntry } from '../types';
 import { useEscapeToClose } from '../hooks/useEscapeToClose';
 
@@ -127,19 +128,16 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
               <label className="block text-xs font-semibold text-slate-600 mb-1">
                 Type de tâche
               </label>
-              <select
+              <SearchableSelect
+                size="sm"
                 value={taskTypeId}
-                onChange={(e) => setTaskTypeId(e.target.value)}
+                onChange={setTaskTypeId}
+                options={availableTaskTypes.map(t => ({ id: t.id, label: t.name }))}
                 disabled={availableTaskTypes.length === 0}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:text-slate-400 disabled:cursor-not-allowed"
-              >
-                <option value="">
-                  {availableTaskTypes.length === 0 ? 'Aucun type pour cette mission' : 'Aucun'}
-                </option>
-                {availableTaskTypes.map(t => (
-                  <option key={t.id} value={String(t.id)}>{t.name}</option>
-                ))}
-              </select>
+                placeholder={availableTaskTypes.length === 0 ? 'Aucun type pour cette mission' : 'Aucun'}
+                searchPlaceholder="Rechercher un type…"
+                emptyLabel="Aucun type ne correspond."
+              />
             </div>
 
             <div>

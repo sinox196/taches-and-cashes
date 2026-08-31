@@ -15,6 +15,7 @@ import {
 } from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
+import { SECTOR_MISSIONS } from './src/constants/sectorMissions.js';
 import { toPaymentMode, isCashMode } from './src/constants/paymentModes.js';
 import {
   normalizeDisbursementLines, sumDisbursements, DISBURSEMENT_LINES_MAX,
@@ -2620,18 +2621,15 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * catalogue de secteur l'utilisent toutes, sans quoi l'un accepterait ce
    * qu'un autre refuse.
    */
-  const MAX_MISSION_IMPORT_ROWS = 500;
-  /** Un intitulé de mission ou de type ne dépasse pas ça — un tableur mal lu peut envoyer une page entière dans une cellule. */
+  /** Garde-fou d'intitulé, appliqué au catalogue livré comme à toute liste reçue. */
   const MAX_MISSION_NAME = 160;
   const MAX_TYPES_PER_MISSION = 100;
 
   /**
-   * Met un catalogue reçu (import, ou lignes du modèle de secteur) sous sa
-   * forme canonique : intitulés coupés, vides écartés, **et les doublons
-   * fusionnés plutôt que dupliqués** — deux lignes « Comptabilité » dans le
-   * même fichier sont une seule mission portant l'union de leurs types, pas
-   * deux missions homonymes. C'est la règle demandée, appliquée avant que
-   * quoi que ce soit ne touche la base.
+   * Met un catalogue sous sa forme canonique avant qu'il ne touche la base :
+   * intitulés coupés, vides écartés, **et les doublons fusionnés plutôt que
+   * dupliqués** — deux entrées « Comptabilité » sont une seule mission portant
+   * l'union de leurs types, pas deux missions homonymes.
    */
   const normalizeMissionCatalogue = (rows: any[]): { name: string; taskTypes: string[] }[] => {
     const out: { name: string; taskTypes: string[] }[] = [];
@@ -2748,10 +2746,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
   /**
    * Applique un catalogue de missions à une entreprise, sans jamais créer de
-   * doublon. Un seul point d'entrée pour les deux chemins qui en ont besoin —
-   * l'import d'un tableur et la copie du catalogue de secteur dans une
-   * nouvelle entreprise — donc « ce fichier a-t-il déjà été importé » et
-   * « cette entreprise a-t-elle déjà ce modèle » se répondent de la même façon.
+   * doublon.
    *
    * Une mission déjà présente n'est **pas** recréée ; ses types de tâches
    * manquants lui sont en revanche ajoutés. C'est strictement additif : rien
@@ -2834,9 +2829,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   async function seedSectorMissions(company: any) {
     try {
       if (!company?.id || company.sectorMissionsSeededAt) return;
-      const catalogue = (await db.getAllSectorMissions())
-        .filter((m: any) => m.secteur === (company.secteur || 'CABINET'))
-        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+      const catalogue = SECTOR_MISSIONS[company.secteur || 'CABINET'] || [];
       if (catalogue.length === 0) return;
 
       await applyMissionCatalogue(company.id, normalizeMissionCatalogue(catalogue));
@@ -2845,80 +2838,6 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       console.error('sector missions seeding failed', e);
     }
   }
-
-  /**
-   * POST /api/services/import — création en masse depuis un tableur.
-   *
-   * Le fichier est lu **dans le navigateur** (SheetJS), comme pour l'import
-   * des clients : le serveur ne reçoit qu'un tableau déjà mis en forme, ce qui
-   * lui évite un middleware d'upload et garantit que la correspondance
-   * confirmée à l'écran n'est pas réinterprétée ici.
-   *
-   * Gardé par MANAGE_SERVICES, la même permission qu'une création unitaire :
-   * importer reste créer, pas une capacité distincte.
-   */
-  app.post('/api/services/import', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
-    try {
-      const rows = Array.isArray(req.body?.missions) ? req.body.missions : null;
-      if (!rows) return res.status(400).json({ error: 'missions doit être un tableau.' });
-      if (rows.length === 0) return res.status(400).json({ error: 'Aucune mission à importer.' });
-      if (rows.length > MAX_MISSION_IMPORT_ROWS) {
-        return res.status(400).json({ error: `Trop de missions (${rows.length}). Maximum ${MAX_MISSION_IMPORT_ROWS} par import.` });
-      }
-
-      const catalogue = normalizeMissionCatalogue(rows);
-      if (catalogue.length === 0) return res.status(400).json({ error: 'Aucune mission valide dans ce fichier.' });
-
-      const result = await applyMissionCatalogue(req.user.companyId, catalogue);
-
-      // Poser le catalogue en modèle du secteur est une décision qui engage
-      // **toutes** les entreprises de ce secteur, pas seulement celle qui
-      // importe : réservé à l'exploitant de la plateforme, comme tout ce qui
-      // traverse les tenants.
-      let sectorSaved = false;
-      if (req.body?.setAsSectorDefault && req.user.isPlatformAdmin) {
-        const secteur = SECTEURS.some(x => x.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
-        for (const row of await db.getAllSectorMissions()) {
-          if (row.secteur === secteur) await db.deleteSectorMission(row.id);
-        }
-        let i = 0;
-        for (const entry of catalogue) {
-          await db.createSectorMission({
-            id: genId('secmis'),
-            secteur,
-            name: entry.name,
-            taskTypes: entry.taskTypes,
-            sortOrder: i++,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        sectorSaved = true;
-      }
-
-      res.status(201).json({ ...result, sectorSaved });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
-
-  /**
-   * Le catalogue de missions par défaut d'un secteur, tel qu'il est stocké.
-   * Lisible par qui gère les missions — c'est ce que son entreprise a reçu, ou
-   * recevra — et écrit uniquement par l'import ci-dessus.
-   */
-  app.get('/api/sector-missions', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
-    try {
-      const company = await db.getCompanyById(req.user.companyId);
-      const secteur = String(req.query.secteur || company?.secteur || 'CABINET');
-      const rows = (await db.getAllSectorMissions())
-        .filter((m: any) => m.secteur === secteur)
-        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-      res.json({ secteur, missions: rows.map((m: any) => ({ name: m.name, taskTypes: m.taskTypes || [] })) });
-    } catch (error) {
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
 
   // ---------------------------------------------------------
   // Types de tâches — each belongs to a mission (service)

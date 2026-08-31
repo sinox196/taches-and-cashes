@@ -81,12 +81,10 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   echeance_statuses: { desc: false },
   echeance_status_options: { desc: false },
   orders: { desc: true },
-  sector_missions: { desc: false },
 };
 
-/** Tables scoped by companyId — everything except the genuinely global ones. */
-const GLOBAL_TABLES = new Set(['companies', 'orders', 'sector_missions']);
-const TENANT_TABLES = new Set(Object.keys(COLLECTIONS).filter(t => !GLOBAL_TABLES.has(t)));
+/** Tables scoped by companyId (everything except `companies` and `orders`). */
+const TENANT_TABLES = new Set(Object.keys(COLLECTIONS).filter(t => t !== 'companies' && t !== 'orders'));
 
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
 const TABLE_FOR: Record<string, string> = {
@@ -118,7 +116,6 @@ const TABLE_FOR: Record<string, string> = {
   echeanceStatuses: 'echeance_statuses',
   echeanceStatusOptions: 'echeance_status_options',
   orders: 'orders',
-  sectorMissions: 'sector_missions',
 };
 
 function makePool(connectionString: string) {
@@ -335,7 +332,6 @@ export async function initPostgres(connectionString: string): Promise<Database> 
 
   const companies = collection('companies');
   const orders = collection('orders');
-  const sectorMissions = collection('sector_missions');
 
   const users = tenantCollection('users');
   const clients = tenantCollection('clients');
@@ -683,10 +679,6 @@ export async function initPostgres(connectionString: string): Promise<Database> 
 
     getAllOrders: orders.all,
     createOrder: orders.create,
-
-    getAllSectorMissions: sectorMissions.all,
-    createSectorMission: sectorMissions.create,
-    deleteSectorMission: sectorMissions.remove,
 
     getSettings: async (companyId: string) => {
       const rows = await q(

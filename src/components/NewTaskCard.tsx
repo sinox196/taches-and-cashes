@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Plus, Settings2, ChevronDown, Search } from 'lucide-react';
+import { Play, Plus, Settings2, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { MissionEditorModal } from './missions/MissionEditorModal';
+import { SearchableSelect } from './SearchableSelect';
 
 interface NewTaskCardProps {
   services: any[];
@@ -233,21 +234,15 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                 )}
               </div>
               
-              <div className="relative">
-                <select
-                  value={selectedServiceId}
-                  onChange={(e) => handleServiceSelect(e.target.value)}
-                  className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-1.5 pr-8 text-[12px] font-medium text-gray-800 focus:outline-none focus:border-gray-400 transition-colors"
-                >
-                  <option value="" disabled hidden>Sélectionner une mission</option>
-                  {availableServices.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
+              <SearchableSelect
+                size="sm"
+                value={selectedServiceId}
+                onChange={handleServiceSelect}
+                options={availableServices.map((s) => ({ id: s.id, label: s.name }))}
+                placeholder="Sélectionner une mission"
+                searchPlaceholder="Rechercher une mission…"
+                emptyLabel="Aucune mission ne correspond."
+              />
             </div>
 
             {/* Field: Type de tâche — options come from the selected mission */}
@@ -264,21 +259,15 @@ export const NewTaskCard: React.FC<NewTaskCardProps> = ({
                   Aucun type défini pour cette mission
                 </div>
               ) : (
-                <div className="relative">
-                  <select
-                    value={selectedTaskTypeId}
-                    onChange={(e) => setSelectedTaskTypeId(e.target.value)}
-                    className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-1.5 pr-8 text-[12px] font-medium text-gray-800 focus:outline-none focus:border-gray-400 transition-colors"
-                  >
-                    <option value="" disabled hidden>Sélectionner un type de tâche</option>
-                    {availableTaskTypes.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <SearchableSelect
+                  size="sm"
+                  value={selectedTaskTypeId}
+                  onChange={setSelectedTaskTypeId}
+                  options={availableTaskTypes.map((t) => ({ id: t.id, label: t.name }))}
+                  placeholder="Sélectionner un type de tâche"
+                  searchPlaceholder="Rechercher un type…"
+                  emptyLabel="Aucun type ne correspond."
+                />
               )}
             </div>
 
