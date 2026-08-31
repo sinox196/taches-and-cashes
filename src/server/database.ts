@@ -429,6 +429,13 @@ async function initJsonDb(): Promise<Database> {
       await saveDb();
       return row;
     },
+    updateReferral: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.referrals, companyId, id);
+      if (index === -1) return null;
+      db.referrals[index] = { ...db.referrals[index], ...updates };
+      await saveDb();
+      return db.referrals[index];
+    },
 
     getAllAttendanceRecords: async (companyId: string) => scoped(db.attendanceRecords, companyId),
     getAttendanceRecordById: async (companyId: string, id: number) => findScoped(db.attendanceRecords, companyId, id),

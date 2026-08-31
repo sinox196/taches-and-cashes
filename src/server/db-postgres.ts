@@ -490,6 +490,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
 
     getAllReferrals: referrals.all,
     createReferral: referrals.create,
+    updateReferral: referrals.update,
 
     getAllAttendanceRecords: attendance.all,
     getAttendanceRecordById: attendance.byId,

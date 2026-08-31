@@ -5,18 +5,28 @@ import { friendlyError } from '../utils/errors';
 import { PlatformUsersModal } from '../components/platform/PlatformUsersModal';
 import { CompanyEditModal } from '../components/platform/CompanyEditModal';
 import { usePeriodPage, PeriodFilter, PaginationBar } from '../components/PeriodPager';
+import { SELLABLE_PLANS, planMeta, planLabel, formatDT, discountedPriceDT } from '../constants/plans';
 
 interface Company {
   id: string;
   secteur?: string;
   name: string;
   status: 'TRIAL' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED';
-  plan: 'FREELANCE' | 'EQUIPE' | 'CROISSANCE';
+  /** Un identifiant d'offre de [plans.ts](../constants/plans.ts) — offres retirées comprises. */
+  plan: string;
   seatLimit: number;
+  portalSeatLimit?: number;
   createdAt: string;
   trialEndsAt: string | null;
   /** Mois offerts gagnés par parrainage et pas encore appliqués à une échéance. */
   referralCreditMonths?: number;
+  /** Remise de bienvenue obtenue par un lien de parrainage… */
+  referralDiscountPercent?: number;
+  /** …consommée à la première confirmation de paiement, jamais deux fois. */
+  referralDiscountUsedAt?: string | null;
+  referredByCompanyId?: string | null;
+  /** Prix retenu à la confirmation, remise déduite — figé pour ne pas bouger avec le catalogue. */
+  subscriptionPriceDT?: number;
   contactName?: string;
   contactEmail?: string;
   phone?: string;
@@ -24,7 +34,9 @@ interface Company {
   pendingPlan?: string;
 }
 
-const PLAN_LABELS: Record<string, string> = { FREELANCE: 'Freelance', EQUIPE: 'Équipe', CROISSANCE: 'Croissance' };
+/** La remise encore due à une entreprise : 10 % de parrainage, tant qu'elle n'a pas souscrit. */
+const pendingDiscount = (c: Company): number =>
+  c.referredByCompanyId && !c.referralDiscountUsedAt ? Number(c.referralDiscountPercent) || 0 : 0;
 const STATUS_STYLE: Record<string, string> = {
   TRIAL: 'bg-run-bg text-run-fg',
   ACTIVE: 'bg-done-bg text-done-fg',
@@ -136,7 +148,7 @@ export const PlatformAdmin: React.FC = () => {
   };
 
   const confirmPayment = async (c: Company) => {
-    if (!confirm(`Confirmer le paiement de "${c.name}" pour l'offre ${PLAN_LABELS[planFor(c)]} ?`)) return;
+    if (!confirm(`Confirmer le paiement de "${c.name}" pour l'offre ${planLabel(planFor(c))} ?`)) return;
     setBusyId(c.id);
     setError('');
     try {
@@ -322,10 +334,41 @@ export const PlatformAdmin: React.FC = () => {
                         className="px-2 py-1.5 border border-gray-300 rounded-lg text-[12px] bg-white"
                         disabled={c.status === 'ACTIVE'}
                       >
-                        <option value="FREELANCE">Freelance</option>
-                        <option value="EQUIPE">Équipe</option>
-                        <option value="CROISSANCE">Croissance</option>
+                        {/* Une entreprise encore sur une offre retirée garde
+                            son option, sinon le <select> afficherait la
+                            première offre du catalogue comme si c'était la
+                            sienne. Elle ne peut pas y revenir une fois
+                            changée : elle n'est pas dans la liste vendue. */}
+                        {!planMeta(planFor(c))?.legacy ? null : (
+                          <option value={planFor(c)}>{planLabel(planFor(c))}</option>
+                        )}
+                        {SELLABLE_PLANS.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.label} — {formatDT(p.priceDT)}/mois
+                          </option>
+                        ))}
                       </select>
+                      {(() => {
+                        const meta = planMeta(planFor(c));
+                        if (!meta) return null;
+                        const discount = pendingDiscount(c);
+                        return (
+                          <div className="text-[11px] text-gray-400 mt-1">
+                            {meta.seatLimit} util. + {meta.portalSeatLimit} portail
+                            {/* Le prix à encaisser, remise de parrainage
+                                déduite : c'est ce chiffre-là qu'il faut
+                                facturer, pas celui du catalogue. */}
+                            {discount > 0 && (
+                              <div className="text-emerald-700 font-medium">
+                                {formatDT(discountedPriceDT(meta.priceDT, discount))}/mois — remise parrainage −{discount} %
+                              </div>
+                            )}
+                            {c.status === 'ACTIVE' && c.subscriptionPriceDT !== undefined && (
+                              <div className="text-gray-500">Facturé {formatDT(c.subscriptionPriceDT)}/mois</div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">

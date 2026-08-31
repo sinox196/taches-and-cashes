@@ -86,6 +86,8 @@ export interface Database {
   /** Parrainage — une ligne par filleul inscrit via le lien d'une entreprise. */
   getAllReferrals(companyId: string): Promise<any[]>;
   createReferral(companyId: string, referral: any): Promise<any>;
+  /** La ligne passe de PENDING à CONFIRMED quand le filleul paie son abonnement. */
+  updateReferral(companyId: string, id: string, updates: any): Promise<any | null>;
 
   /** Daily check-in/check-out (pointage), one row per (user, date). */
   getAllAttendanceRecords(companyId: string): Promise<any[]>;
@@ -245,11 +247,13 @@ export const LEGACY_COMPANY_ID = 'company-1';
 /** Free-trial length for a newly signed-up company, per the sales-call-then-convert flow. */
 export const TRIAL_DAYS = 30;
 
-export const PLAN_SEAT_LIMITS: Record<string, number> = {
-  FREELANCE: 1,
-  EQUIPE: 5,
-  CROISSANCE: 10,
-};
+/**
+ * Les offres, leurs prix et leurs limites de sièges vivent dans
+ * [src/constants/plans.ts](../constants/plans.ts) — une seule liste, lue par
+ * la page publique, la console plateforme et le serveur. Ré-exportée ici pour
+ * que le reste du serveur continue de l'importer d'un seul endroit.
+ */
+export { PLAN_SEAT_LIMITS, PLAN_PORTAL_SEAT_LIMITS } from '../constants/plans.js';
 
 export const emptyDb = () => ({
   companies: [],

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Mail } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
+import { SELLABLE_PLANS, formatDT } from '../constants/plans';
 
 const CONTACT_EMAIL = 'contact@taches-and-cash.com';
 
@@ -11,54 +12,32 @@ interface PricingPlan {
   price: string;
   period?: string;
   seats: string;
+  portalSeats: string;
   features: string[];
   cta: string;
   highlighted?: boolean;
 }
 
-const PLANS: PricingPlan[] = [
-  {
-    name: 'Freelance',
-    tagline: 'Pour un indépendant qui démarre',
-    price: 'Gratuit',
-    seats: '1 utilisateur',
-    features: [
-      'Toutes les vues et fonctionnalités accessibles',
-      'Suivi du temps & gestion des tâches',
-      'Facturation & trésorerie',
-    ],
-    cta: 'Commencer gratuitement',
-  },
-  {
-    name: 'Équipe',
-    tagline: 'Pour les petites équipes',
-    price: '50 DT',
-    period: '/mois',
-    seats: "Jusqu'à 5 utilisateurs",
-    features: [
-      'Toutes les vues et fonctionnalités accessibles',
-      'Suivi du temps & gestion des tâches',
-      'Facturation & trésorerie',
-      "Tableau de bord & performance d'équipe",
-    ],
-    cta: 'Essai gratuit',
-    highlighted: true,
-  },
-  {
-    name: 'Croissance',
-    tagline: 'Pour les équipes en expansion',
-    price: '80 DT',
-    period: '/mois',
-    seats: "Jusqu'à 10 utilisateurs",
-    features: [
-      'Toutes les vues et fonctionnalités accessibles',
-      'Suivi du temps & gestion des tâches',
-      'Facturation & trésorerie',
-      "Tableau de bord & performance d'équipe",
-    ],
-    cta: 'Essai gratuit',
-  },
-];
+/**
+ * Les cartes de tarifs sont dérivées de [plans.ts](../constants/plans.ts), la
+ * même liste que lit le serveur : un prix corrigé ici et pas là-bas produirait
+ * une page publique qui annonce un montant et un e-mail de RIB qui en demande
+ * un autre. Cette interface ne fait que mettre la liste en forme d'affichage.
+ */
+const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
+  name: p.label,
+  tagline: p.tagline,
+  price: formatDT(p.priceDT),
+  period: '/mois',
+  seats: `${p.seatLimit} utilisateurs`,
+  portalSeats: `${p.portalSeatLimit} comptes portail client`,
+  features: p.features,
+  cta: 'Essai gratuit',
+  highlighted: p.highlighted,
+}));
+
+/** L'offre mise en avant : celle que visent tous les boutons « Essai gratuit ». */
+const FEATURED_PLAN = (PLANS.find(p => p.highlighted) || PLANS[0]).name;
 
 const HOME_FEATURES: { title: string; description: string; iconBg: string; icon: React.ReactNode }[] = [
   {
@@ -198,17 +177,17 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             >
               Se connecter
             </button>
-            {/* Dropped on small screens: it opens the same signup modal as
-                "Essai gratuit", just on a different plan, so it's the one of
-                the three that costs nothing to lose. */}
+            {/* Dropped on small screens: it opens exactly the same signup
+                modal as "Essai gratuit" beside it, so it's the one of the
+                three that costs nothing to lose. */}
             <button
-              onClick={() => setModalPlan('Freelance')}
+              onClick={() => setModalPlan(FEATURED_PLAN)}
               className="hidden min-[561px]:inline-block px-4 py-2.5 rounded-[10px] text-[14px] font-bold text-navy bg-white border-[1.5px] border-[#E6E9EE] hover:border-navy transition-colors whitespace-nowrap"
             >
               Créer un compte
             </button>
             <button
-              onClick={() => setModalPlan('Équipe')}
+              onClick={() => setModalPlan(FEATURED_PLAN)}
               className="px-3 sm:px-[18px] py-2.5 sm:py-[11px] rounded-[10px] text-[13px] sm:text-[14px] font-bold text-white bg-navy hover:bg-turquoise transition-colors whitespace-nowrap"
             >
               Essai gratuit
@@ -235,7 +214,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </p>
                 <div className="mt-8 flex gap-3.5 flex-wrap">
                   <button
-                    onClick={() => setModalPlan('Équipe')}
+                    onClick={() => setModalPlan(FEATURED_PLAN)}
                     className="bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] transition-colors"
                   >
                     Essai gratuit
@@ -496,7 +475,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <CheckRow text="Coût calculé automatiquement dès l'arrêt du chronomètre" />
                 </div>
                 <button
-                  onClick={() => setModalPlan('Équipe')}
+                  onClick={() => setModalPlan(FEATURED_PLAN)}
                   className="inline-block mt-8 bg-navy text-white px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-turquoise transition-colors"
                 >
                   Essayer le suivi du temps
@@ -519,7 +498,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <CheckRow onDark text="Chaque facture rattachée à sa mission et son flux de trésorerie" />
                 </div>
                 <button
-                  onClick={() => setModalPlan('Équipe')}
+                  onClick={() => setModalPlan(FEATURED_PLAN)}
                   className="inline-block mt-8 bg-turquoise text-navy px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-white transition-colors"
                 >
                   Créer une facture
@@ -603,6 +582,10 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                     {plan.period && <span className={`text-[14px] ${plan.highlighted ? 'text-white/55' : 'text-[#8A93A0]'}`}>{plan.period}</span>}
                   </div>
                   <p className={`text-[13px] mt-1 ${plan.highlighted ? 'text-white/55' : 'text-[#8A93A0]'}`}>{plan.seats}</p>
+                  {/* Les comptes du portail client se comptent dans un panier
+                      séparé des sièges de l'équipe — la carte le dit, faute de
+                      quoi « 5 utilisateurs + 50 portail » se lit comme 55. */}
+                  <p className={`text-[13px] ${plan.highlighted ? 'text-turquoise' : 'text-[#00857C]'}`}>+ {plan.portalSeats}</p>
 
                   <div className={`h-px my-6 ${plan.highlighted ? 'bg-white/[0.12]' : 'bg-[#EEF1F4]'}`} />
 
@@ -632,7 +615,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </div>
 
             <p className="mt-9 text-center text-[13.5px] text-[#8A93A0]">
-              Besoin de plus de 10 utilisateurs ?{' '}
+              Besoin de plus de 15 utilisateurs ?{' '}
               <button onClick={() => setModalPlan('Sur mesure')} className="text-turquoise font-semibold hover:underline">
                 Contactez-nous
               </button>{' '}
@@ -653,10 +636,10 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <p className="mt-4 text-[15.5px] text-white/65 max-w-[480px] mx-auto">
               {view === 'home'
                 ? 'Rejoignez les équipes qui pilotent leur rentabilité avec Tâches & Cash.'
-                : "Créez votre compte en quelques minutes, aucune carte bancaire requise pour l'offre Freelance."}
+                : "Créez votre compte en quelques minutes — l'essai est gratuit, aucune carte bancaire requise."}
             </p>
             <button
-              onClick={() => setModalPlan('Freelance')}
+              onClick={() => setModalPlan(FEATURED_PLAN)}
               className="mt-7 inline-block px-[30px] py-4 rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white transition-colors"
             >
               {view === 'home' ? 'Démarrer maintenant' : 'Créer un compte'}

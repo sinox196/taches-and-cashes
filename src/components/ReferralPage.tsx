@@ -1,29 +1,42 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Gift, Copy, Check, Loader2, Users2, CalendarPlus, Ticket } from 'lucide-react';
+import { Gift, Copy, Check, Loader2, Users2, Ticket, Lock, Hourglass } from 'lucide-react';
 
 /**
  * Parrainage.
  *
- * L'entreprise partage son lien ; si l'invité crée un compte, elle gagne un
- * mois gratuit. La forme que prend ce mois dépend de son état — essai
- * prolongé, ou avoir à valoir sur la prochaine facture — et c'est le serveur
- * qui tranche (voir `grantReferralReward` dans server.ts) ; cette page se
- * contente de dire laquelle a été appliquée.
+ * Deux règles décident de tout ce que cette page affiche, et les deux sont
+ * appliquées par le serveur — l'écran ne fait que les rendre lisibles :
+ *
+ *  - **seule une entreprise abonnée peut parrainer** : sans abonnement actif
+ *    il n'y a pas de lien du tout (`eligible: false`), et la page le dit au
+ *    lieu d'afficher un lien que l'inscription refuserait ;
+ *  - **rien n'est gagné à l'inscription du filleul** : il faut qu'il souscrive.
+ *    Un filleul inscrit mais pas encore abonné est donc « en attente », pas un
+ *    mois acquis — compter les inscrits comme des mois gagnés promettrait ce
+ *    qui n'a pas été accordé.
+ *
+ * De son côté le filleul obtient 10 % de remise sur son premier abonnement.
  */
 
 interface ReferralEntry {
   id: string;
   companyName: string;
-  rewardKind: 'TRIAL_EXTENDED' | 'CREDIT';
+  /** PENDING tant que le filleul n'a pas souscrit ; CONFIRMED une fois le mois accordé. */
+  status: 'PENDING' | 'CONFIRMED';
+  rewardKind?: 'TRIAL_EXTENDED' | 'CREDIT';
   rewardMonths: number;
   createdAt: string;
+  confirmedAt: string | null;
 }
 
 interface ReferralData {
+  /** L'abonnement est actif : le parrainage est ouvert. */
+  eligible: boolean;
   code: string;
   link: string;
   rewardDays: number;
+  discountPercent: number;
   creditMonths: number;
   status: string;
   trialEndsAt: string | null;
@@ -82,73 +95,81 @@ export const ReferralPage: React.FC = () => {
     );
   }
 
-  const monthsEarned = data.referrals.length;
+  // Un mois n'est gagné que par un filleul qui a réellement souscrit — les
+  // autres sont encore en attente. Compter les inscrits comme des mois gagnés
+  // afficherait une récompense que le serveur n'a pas accordée.
+  const confirmed = data.referrals.filter(r => r.status === 'CONFIRMED').length;
+  const pending = data.referrals.length - confirmed;
 
   return (
     <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col gap-4 sm:gap-6 max-w-[1000px] w-full mx-auto">
       <div>
         <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">Parrainage</h1>
         <p className="text-[12px] text-gray-500 mt-1">
-          Invitez un confrère : dès qu'il crée son compte, vous gagnez un mois gratuit.
+          Invitez un confrère : il obtient {data.discountPercent} % de remise sur son premier abonnement, et vous
+          gagnez un mois gratuit dès qu'il souscrit.
         </p>
       </div>
 
-      {/* Le lien : la seule chose que l'utilisateur vient chercher ici. */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-9 h-9 rounded-full bg-turquoise/10 flex items-center justify-center shrink-0">
-            <Gift className="w-4.5 h-4.5 text-turquoise" />
+      {/* Le lien : la seule chose que l'utilisateur vient chercher ici — sauf
+          si son propre abonnement n'est pas actif, auquel cas il n'y en a
+          pas, et le dire vaut mieux que montrer un lien sans valeur. */}
+      {!data.eligible ? (
+        <div className="bg-white border border-gray-200 rounded-xl p-5 flex items-start gap-3">
+          <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
+            <Lock className="w-4.5 h-4.5 text-gray-400" />
           </div>
           <div>
-            <p className="text-[14px] font-semibold text-gray-900 leading-tight">Votre lien d'invitation</p>
-            <p className="text-[12px] text-gray-500 leading-tight">Code : <span className="font-mono font-semibold text-gray-700">{data.code}</span></p>
+            <p className="text-[14px] font-semibold text-gray-900 leading-tight">
+              Le parrainage s'ouvre avec votre abonnement
+            </p>
+            <p className="text-[12.5px] text-gray-500 mt-1 leading-relaxed">
+              Votre lien d'invitation est créé dès que votre abonnement est actif. Vous pourrez alors offrir{' '}
+              {data.discountPercent} % de remise à un confrère et gagner un mois gratuit à chaque souscription.
+            </p>
           </div>
         </div>
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-9 h-9 rounded-full bg-turquoise/10 flex items-center justify-center shrink-0">
+              <Gift className="w-4.5 h-4.5 text-turquoise" />
+            </div>
+            <div>
+              <p className="text-[14px] font-semibold text-gray-900 leading-tight">Votre lien d'invitation</p>
+              <p className="text-[12px] text-gray-500 leading-tight">Code : <span className="font-mono font-semibold text-gray-700">{data.code}</span></p>
+            </div>
+          </div>
 
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            readOnly
-            value={data.link}
-            onFocus={e => e.currentTarget.select()}
-            className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-[13px] font-mono bg-gray-50 text-gray-700"
-          />
-          <button
-            onClick={copy}
-            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-colors shrink-0 ${
-              copied ? 'bg-emerald-600 text-white' : 'bg-navy text-white hover:bg-navy-hover'
-            }`}
-          >
-            {copied ? <><Check className="w-4 h-4" /> Copié</> : <><Copy className="w-4 h-4" /> Copier le lien</>}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              readOnly
+              value={data.link}
+              onFocus={e => e.currentTarget.select()}
+              className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-[13px] font-mono bg-gray-50 text-gray-700"
+            />
+            <button
+              onClick={copy}
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-colors shrink-0 ${
+                copied ? 'bg-emerald-600 text-white' : 'bg-navy text-white hover:bg-navy-hover'
+              }`}
+            >
+              {copied ? <><Check className="w-4 h-4" /> Copié</> : <><Copy className="w-4 h-4" /> Copier le lien</>}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <Stat icon={Users2} label="Filleuls inscrits" value={String(data.referrals.length)} />
+        <Stat icon={Hourglass} label="En attente d'abonnement" value={String(pending)} />
+        <Stat icon={Gift} label="Mois gagnés" value={String(confirmed)} tone={confirmed > 0 ? 'good' : undefined} />
         <Stat
-          icon={Users2}
-          label="Filleuls inscrits"
-          value={String(monthsEarned)}
+          icon={Ticket}
+          label="Mois à valoir"
+          value={String(data.creditMonths)}
+          tone={data.creditMonths > 0 ? 'good' : undefined}
         />
-        <Stat
-          icon={Gift}
-          label="Mois gagnés"
-          value={String(monthsEarned)}
-        />
-        {data.status === 'TRIAL' ? (
-          <Stat
-            icon={CalendarPlus}
-            label="Essai jusqu'au"
-            value={fdate(data.trialEndsAt || '')}
-            tone="good"
-          />
-        ) : (
-          <Stat
-            icon={Ticket}
-            label="Mois à valoir"
-            value={String(data.creditMonths)}
-            tone={data.creditMonths > 0 ? 'good' : undefined}
-          />
-        )}
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -165,23 +186,34 @@ export const ReferralPage: React.FC = () => {
               <li key={r.id} className="px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
                 <div className="min-w-0 flex-1">
                   <p className="text-[13.5px] font-medium text-gray-900 truncate">{r.companyName}</p>
-                  <p className="text-[12px] text-gray-500">Inscrit le {fdate(r.createdAt)}</p>
+                  <p className="text-[12px] text-gray-500">
+                    Inscrit le {fdate(r.createdAt)}
+                    {r.status === 'CONFIRMED' && r.confirmedAt && ` — abonné le ${fdate(r.confirmedAt)}`}
+                  </p>
                 </div>
-                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11.5px] font-medium bg-emerald-50 text-emerald-700 self-start shrink-0">
-                  <Check className="w-3.5 h-3.5" />
-                  {r.rewardKind === 'TRIAL_EXTENDED'
-                    ? `+${r.rewardMonths} mois d'essai`
-                    : `+${r.rewardMonths} mois à valoir`}
-                </span>
+                {r.status === 'CONFIRMED' ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11.5px] font-medium bg-emerald-50 text-emerald-700 self-start shrink-0">
+                    <Check className="w-3.5 h-3.5" />
+                    {r.rewardKind === 'TRIAL_EXTENDED'
+                      ? `+${r.rewardMonths} mois d'essai`
+                      : `+${r.rewardMonths} mois à valoir`}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11.5px] font-medium bg-amber-50 text-amber-700 self-start shrink-0">
+                    <Hourglass className="w-3.5 h-3.5" />
+                    En attente d'abonnement
+                  </span>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      <p className="text-[11.5px] text-gray-400">
-        Le mois gagné prolonge votre essai s'il est en cours, sinon il est enregistré comme un avoir
-        déduit de votre prochaine échéance.
+      <p className="text-[11.5px] text-gray-400 leading-relaxed">
+        Le mois est gagné lorsque votre filleul souscrit son abonnement, pas à la création de son compte :
+        une inscription qui n'aboutit pas ne rapporte rien. Il est enregistré comme un avoir déduit de votre
+        prochaine échéance.
       </p>
     </main>
   );

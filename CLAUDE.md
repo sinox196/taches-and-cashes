@@ -258,23 +258,93 @@ Column management (add/edit/remove a colonne, cascading its cells on delete) and
 
 Deliberately deferred to V2/V3 per the spec's own phasing table (do not build without an explicit request): automatic task generation from an échéance into time entries, attachments on document items, automatic email/notification reminders, average document-receipt-delay statistics, and any cross-cabinet template sharing.
 
+### Offres et sièges
+
+Le catalogue vit dans [src/constants/plans.ts](src/constants/plans.ts) — une
+seule liste, lue par la page publique, la console plateforme et `server.ts`,
+comme `roles.ts` et `paymentModes.ts`. Trois packs : **Pack 5 / 70 DT**,
+**Pack 10 / 100 DT**, **Pack 15 / 130 DT**, chacun avec dix fois son nombre de
+sièges en comptes portail client (50 / 100 / 150) et l'intégralité des vues,
+factures comprises et sans plafond. Changer un prix, c'est éditer une ligne :
+une valeur corrigée sur la page de tarifs mais pas côté serveur produirait une
+page qui annonce un montant et un e-mail de RIB qui en demande un autre.
+
+**Les offres retirées restent dans la liste** (`legacy: true`) — `FREELANCE`,
+`EQUIPE`, `CROISSANCE`. Une entreprise inscrite sous l'ancien catalogue les
+porte encore dans sa fiche ; les effacer lui ferait perdre son libellé et sa
+limite de sièges du jour au lendemain. Elles ne sont simplement plus proposées,
+ni sur la page publique, ni à l'inscription (`isSellablePlan`), et la console ne
+garde leur option dans le `<select>` que pour l'entreprise qui les porte. Même
+règle de récupération que `normalizeBalance()` : on lit la forme ancienne, on ne
+la réécrit pas.
+
+**Les sièges se comptent en deux paniers séparés** : le back-office
+(`seatLimit`) et le portail client (`portalSeatLimit`), et `seatLimitError()`
+dans server.ts est leur unique arbitre. Un comptage unique — ce qu'il y avait —
+laissait cinquante clients connectés manger les cinq sièges de l'équipe.
+`PUT /api/users/:id` revérifie au **changement de rôle** : sans ça la limite se
+contournait en créant un compte portail puis en le repassant collaborateur.
+L'ordre de résolution est fiche entreprise (un cabinet peut négocier plus que
+son offre), puis offre vendue, puis **rien du tout** — ce dernier cas n'est pas
+un oubli : une entreprise sur une offre retirée, ou l'entreprise historique,
+n'a jamais souscrit de quota de comptes portail et lui en imposer un
+casserait un portail déjà en service. Un `0` écrit sur la fiche, lui, veut bien
+dire zéro : c'est une valeur saisie, pas une absence.
+
 ### Parrainage
 
-Une entreprise partage un lien (`/?ref=CODE`) ; si l'invité crée un compte, le
-parrain gagne un mois gratuit. Page [ReferralPage.tsx](src/components/ReferralPage.tsx),
-entrée de nav « Parrainage » derrière `MANAGE_USERS` — c'est l'abonnement de
-l'entreprise qui est en jeu.
+Une entreprise partage un lien (`/?ref=CODE`). Page
+[ReferralPage.tsx](src/components/ReferralPage.tsx), entrée de nav
+« Parrainage » derrière `MANAGE_USERS` — c'est l'abonnement de l'entreprise qui
+est en jeu.
 
-**Ce que « un mois gratuit » veut dire dépend de l'état du parrain, et c'est le
-modèle de données qui l'impose.** Une entreprise en essai a un `trialEndsAt` :
-on le repousse de 30 jours, tout de suite, depuis la fin d'essai en cours (et
-non depuis aujourd'hui, sinon un parrainage en début d'essai ajouterait moins
-d'un mois). Une entreprise déjà active a `trialEndsAt: null` — la confirmation
-de paiement l'efface — et sa facturation vit hors de l'app : la récompense
-devient un avoir, `referralCreditMonths`, **affiché dans la console plateforme**
-pour que l'admin l'applique à la prochaine échéance. Sans cet affichage le mois
-promis n'existerait jamais. Les deux branches s'excluent et chaque parrainage
-écrit une ligne dans `referrals` (`rewardKind`), donc pas de double comptage.
+**Seule une entreprise dont l'abonnement est actif peut parrainer.** Un compte
+en essai n'a encore rien payé ; lui laisser distribuer des mois gratuits ferait
+du parrainage une machine à prolonger un essai avec de faux comptes. Le
+`referralCode` n'est donc pas créé tant que le statut n'est pas `ACTIVE`
+(`canRefer`), la page affiche un état verrouillé au lieu d'un lien sans valeur,
+et `/api/signup` **revérifie le statut du parrain** : un lien partagé reste
+valide indéfiniment, l'abonnement non.
+
+**Rien n'est accordé à l'inscription.** Les deux récompenses tombent au moment
+où le filleul paie, c'est-à-dire à `POST /api/platform/companies/:id/confirm` :
+le filleul obtient **10 % de remise** sur son premier abonnement
+(`REFERRAL_DISCOUNT_PERCENT`), le parrain gagne **un mois gratuit**. Si le
+filleul ne souscrit jamais, personne ne gagne rien. C'est ce qui rend le
+dispositif inabusable par de fausses inscriptions — la version précédente
+créditait dès la création du compte, et le disait elle-même comme sa limite
+connue.
+
+Le chemin est donc en deux temps, et chacun a sa fonction :
+`recordPendingReferral()` écrit à l'inscription une ligne `referrals` en
+`status: 'PENDING'` — elle dit « quelqu'un s'est inscrit avec votre lien », ce
+que le parrain a le droit de voir, et rien de plus ; `settleReferralOnPayment()`
+la passe `CONFIRMED` et crédite. **C'est cette ligne qui rend l'opération
+idempotente** : elle n'agit que sur un `PENDING`, donc reconfirmer une
+entreprise (ré-appuyer sur le bouton, corriger l'offre) ne crédite pas un
+deuxième mois. Elle ne lève jamais : une activation d'abonnement déjà décidée
+ne doit pas échouer sur un parrainage.
+
+**La remise est promise à l'inscription, consommée à la confirmation.**
+`referralDiscountPercent` est posé sur la fiche du filleul, et
+`referralDiscountUsedAt` la retire une fois la première échéance passée — c'est
+une remise de bienvenue, pas un tarif. Entre les deux, elle doit se **voir là
+où on encaisse** : l'e-mail de RIB annonce le montant remisé (annoncer le prix
+plein puis facturer moins est la meilleure façon de rater un encaissement), et
+la console plateforme l'affiche sous l'offre. Le prix retenu est figé sur la
+fiche (`subscriptionPriceDT`) à la confirmation, pour ne pas bouger quand le
+catalogue bougera.
+
+**Ce que « un mois gratuit » veut dire dépend de l'état du parrain.** Par la
+règle ci-dessus il est actif, donc `trialEndsAt: null` (la confirmation de
+paiement l'efface) et sa facturation vit hors de l'app : la récompense est un
+avoir, `referralCreditMonths`, **affiché dans la console plateforme** pour que
+l'admin l'applique à la prochaine échéance. Sans cet affichage le mois promis
+n'existerait jamais. La branche « essai prolongé » (`TRIAL_EXTENDED`, +30 jours
+depuis la fin d'essai en cours et non depuis aujourd'hui) ne sert plus qu'aux
+lignes écrites avant cette règle, et reste là pour elles — comme se lit
+`status` absent, qui vaut `CONFIRMED` : un parrainage déjà acquis ne doit pas
+repasser « en attente » à l'écran.
 
 Le `referralCode` est créé **à la première consultation** de la page, pas à
 l'inscription : les entreprises déjà en base n'en ont pas, et une migration
@@ -285,15 +355,14 @@ Le lien est construit côté serveur depuis l'origine réellement appelée : cod
 en dur il serait faux en local comme sur un domaine personnalisé.
 
 Un code inconnu **n'échoue pas** l'inscription (un lien tronqué en route ne doit
-pas coûter un client) et la récompense est accordée *après* la création de
-l'entreprise, dans un `try/catch` : un parrainage perdu ne fait jamais échouer
-une inscription déjà aboutie.
+pas coûter un client), et l'écriture de la ligne de parrainage se fait *après*
+la création de l'entreprise, dans un `try/catch` : un parrainage perdu ne fait
+jamais échouer une inscription déjà aboutie.
 
-**Ce qui n'est délibérément pas construit** : la récompense tombe à la création
-du compte, comme demandé, et non à la conversion du filleul en payant. C'est
-donc abusable par de fausses inscriptions — l'unicité de l'email freine le cas
-trivial, rien de plus. Conditionner la récompense au passage en `ACTIVE` est un
-changement d'une ligne dans `grantReferralReward`, à faire si l'abus apparaît.
+**Ce qui n'est délibérément pas construit** : on ne se parraine pas soi-même sur
+la seule base de l'adresse de contact — c'est le garde-fou minimal, pas une
+politique anti-fraude. Il n'existe pas non plus d'écran pour appliquer l'avoir :
+la facturation vit hors de l'app, la console l'affiche et un humain le déduit.
 
 ### Portail client
 

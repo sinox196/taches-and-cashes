@@ -8,7 +8,11 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, DEFAULT_LEAVE_ENTITLEMENT } from './src/server/database.js';
-import { LEGACY_COMPANY_ID, TRIAL_DAYS, PLAN_SEAT_LIMITS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
+import { LEGACY_COMPANY_ID, TRIAL_DAYS, ADMIN_PERMISSIONS } from './src/server/db-types.js';
+import {
+  PLAN_SEAT_LIMITS, PLAN_PORTAL_SEAT_LIMITS, SELLABLE_PLANS, isSellablePlan, DEFAULT_PLAN_ID,
+  planMeta, planLabel, formatDT, REFERRAL_DISCOUNT_PERCENT, discountedPriceDT,
+} from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
 import { toPaymentMode, isCashMode } from './src/constants/paymentModes.js';
@@ -757,6 +761,45 @@ async function startServer() {
     }
   });
 
+  /**
+   * Les sièges se comptent en **deux paniers séparés** : le back-office
+   * (collaborateurs, superviseurs, administrateurs) et le portail client.
+   * Une offre « pack 5 utilisateurs + 50 comptes portail » n'a pas de sens si
+   * les cinquante clients mangent les cinq sièges de l'équipe — c'est
+   * exactement ce que faisait le comptage unique.
+   *
+   * Les limites viennent de la fiche entreprise si elle en porte (un cabinet
+   * peut en négocier plus que son offre n'en donne), sinon de l'offre. Zéro
+   * ou absent des deux côtés = illimité : c'est ce qui laisse l'entreprise
+   * historique et toute fiche antérieure à ce champ fonctionner sans
+   * migration.
+   */
+  const seatLimitError = async (company: any, users: any[], role: string): Promise<string | null> => {
+    if (!company) return null;
+    const portal = role === CLIENT_ROLE;
+    // La fiche entreprise d'abord (un cabinet peut négocier plus que son
+    // offre), l'offre ensuite, et **rien du tout en dernier**. Ce dernier cas
+    // n'est pas un oubli : une entreprise restée sur une offre retirée — ou
+    // l'entreprise historique, dont l'offre n'est pas au catalogue — n'a
+    // jamais souscrit un quota de comptes portail, et lui en imposer un
+    // aujourd'hui casserait un portail déjà en service. Un `0` écrit *sur la
+    // fiche* veut bien dire zéro : c'est une valeur saisie, pas une absence.
+    const sellablePlan = SELLABLE_PLANS.find(p => p.id === company.plan) || null;
+    const stored = Number(portal ? company.portalSeatLimit : company.seatLimit);
+    const limit = Number.isFinite(stored)
+      ? stored
+      : sellablePlan
+        ? (portal ? sellablePlan.portalSeatLimit : sellablePlan.seatLimit)
+        : null;
+    if (limit === null) return null;
+
+    const used = users.filter((u: any) => (u.role === CLIENT_ROLE) === portal).length;
+    if (used < limit) return null;
+    return portal
+      ? `Limite de ${limit} compte(s) portail client atteinte pour votre offre.`
+      : `Limite de ${limit} utilisateur(s) atteinte pour votre offre.`;
+  };
+
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
@@ -768,12 +811,8 @@ async function startServer() {
       }
 
       const company = await db.getCompanyById(req.user.companyId);
-      if (company?.seatLimit) {
-        const currentSeats = (await db.getAllUsers(req.user.companyId)).length;
-        if (currentSeats >= company.seatLimit) {
-          return res.status(403).json({ error: `Limite de ${company.seatLimit} utilisateur(s) atteinte pour votre offre.` });
-        }
-      }
+      const seatError = await seatLimitError(company, await db.getAllUsers(req.user.companyId), role);
+      if (seatError) return res.status(403).json({ error: seatError });
 
       const hashed = await bcrypt.hash(password, 10);
 
@@ -831,6 +870,18 @@ async function startServer() {
     try {
       const id = parseInt(req.params.id, 10);
       const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId } = req.body;
+
+      // Changer de panier — d'un compte du back-office vers le portail client
+      // ou l'inverse — revient à prendre un siège dans l'autre panier. Sans ce
+      // contrôle, la limite se contournait en créant un compte portail puis
+      // en le repassant collaborateur.
+      const existingUser = await db.getUserById(req.user.companyId, id);
+      if (existingUser && role && role !== existingUser.role
+          && (role === CLIENT_ROLE) !== (existingUser.role === CLIENT_ROLE)) {
+        const others = (await db.getAllUsers(req.user.companyId)).filter((u: any) => u.id !== id);
+        const seatError = await seatLimitError(await db.getCompanyById(req.user.companyId), others, role);
+        if (seatError) return res.status(403).json({ error: seatError });
+      }
       
       const simSalaire = typeof salaireBrut === 'number' ? salaireBrut : 0;
       const simRegime = typeof regimeHoraire === 'number' ? regimeHoraire : 0;
@@ -5949,24 +6000,42 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    */
   // ---- Parrainage --------------------------------------------------------
   //
-  // Une entreprise partage un lien ; si l'invité crée un compte, le parrain
-  // gagne un mois gratuit.
+  // **Seule une entreprise dont l'abonnement est actif peut parrainer.** Un
+  // compte en essai n'a encore rien payé ; lui laisser distribuer des mois
+  // gratuits ferait du parrainage une machine à prolonger un essai avec de
+  // faux comptes. Le lien n'existe donc pas tant que l'abonnement n'est pas
+  // actif, et `/api/signup` revérifie le statut du parrain — le lien d'une
+  // entreprise devenue inactive entre-temps ne vaut plus rien.
   //
-  // **Ce que « un mois gratuit » veut dire dépend de l'état du parrain**, et
-  // c'est le modèle de données qui l'impose, pas un choix de confort :
-  //  - une entreprise en essai a un `trialEndsAt` — on le repousse de 30 jours,
-  //    tout de suite. Pour un essai il n'y a rien à facturer plus tard : la
-  //    récompense doit atterrir maintenant ou elle n'atterrira jamais.
-  //  - une entreprise déjà active a `trialEndsAt: null` (la confirmation de
-  //    paiement l'efface) et sa facturation vit hors de l'app. La récompense
-  //    devient donc un **avoir**, `referralCreditMonths`, que la console
-  //    plateforme affiche pour que l'admin l'applique à la prochaine échéance.
+  // **Rien n'est accordé à l'inscription.** Les deux récompenses tombent au
+  // moment où le filleul paie, c'est-à-dire à la confirmation de paiement
+  // dans la console plateforme :
+  //  - le filleul obtient **10 % de remise** sur l'abonnement qu'il souscrit
+  //    (`referralDiscountPercent`, posé sur sa fiche à l'inscription et
+  //    consommé à la confirmation) ;
+  //  - le parrain gagne **un mois gratuit**.
   //
-  // Les deux branches s'excluent, et chaque parrainage écrit une ligne dans
-  // `referrals` : jamais de double comptage, et une trace de ce qui a été
-  // accordé et sous quelle forme.
+  // Si le filleul ne souscrit jamais, personne ne gagne rien : la ligne de
+  // `referrals` reste `PENDING` et aucun avoir n'est écrit. C'est ce qui rend
+  // le dispositif inabusable par de fausses inscriptions — la version
+  // précédente créditait dès la création du compte.
+  //
+  // **Ce que « un mois gratuit » veut dire dépend de l'état du parrain.** Par
+  // la règle ci-dessus il est actif, donc `trialEndsAt: null` (la confirmation
+  // de paiement l'efface) et sa facturation vit hors de l'app : la récompense
+  // est un **avoir**, `referralCreditMonths`, que la console plateforme
+  // affiche pour que l'admin l'applique à la prochaine échéance. La branche
+  // « essai prolongé » ne sert plus qu'aux lignes écrites avant cette règle,
+  // et reste là pour elles.
+  //
+  // Chaque parrainage écrit une ligne dans `referrals`, portée par le
+  // parrain : jamais de double comptage, et une trace de ce qui a été accordé,
+  // quand, et sous quelle forme.
 
   const REFERRAL_REWARD_DAYS = 30;
+
+  /** Un lien de parrainage ne fonctionne que pour une entreprise abonnée. */
+  const canRefer = (company: any) => company?.status === 'ACTIVE';
 
   /** Sans I, O, 0 ni 1 : le code se lit à voix haute et se recopie à la main. */
   const REFERRAL_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -5982,6 +6051,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    */
   const referralCodeFor = async (company: any): Promise<string> => {
     if (company.referralCode) return company.referralCode;
+    // Pas de code tant que l'abonnement n'est pas actif : un lien qu'on ne
+    // peut pas encore utiliser n'a aucune raison d'être fabriqué, et il serait
+    // partagé avant de valoir quoi que ce soit.
+    if (!canRefer(company)) return '';
     const companies = await db.getAllCompanies();
     const taken = new Set(companies.map((c: any) => c.referralCode).filter(Boolean));
     let code = newReferralCode();
@@ -5991,41 +6064,89 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   };
 
   /**
-   * Accorde le mois gagné et journalise le parrainage. Retourne la forme prise
-   * par la récompense, pour que l'appelant puisse le dire au parrain.
+   * Journalise le parrainage à l'inscription du filleul, **sans rien
+   * accorder**. La ligne naît `PENDING` : elle dit « quelqu'un s'est inscrit
+   * avec votre lien », ce que le parrain a le droit de voir, et rien de plus.
+   * La récompense attend le paiement (`settleReferralOnPayment`).
    */
-  const grantReferralReward = async (referrer: any, invitee: any) => {
-    const onTrial = referrer.status === 'TRIAL' && referrer.trialEndsAt;
-    let rewardKind: 'TRIAL_EXTENDED' | 'CREDIT';
-
-    if (onTrial) {
-      // Depuis la fin d'essai en cours, pas depuis aujourd'hui : un parrainage
-      // en début d'essai ajouterait sinon moins d'un mois.
-      const base = new Date(referrer.trialEndsAt).getTime();
-      const from = Number.isFinite(base) ? base : Date.now();
-      await db.updateCompany(referrer.id, {
-        trialEndsAt: new Date(from + REFERRAL_REWARD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
-      });
-      rewardKind = 'TRIAL_EXTENDED';
-    } else {
-      await db.updateCompany(referrer.id, {
-        referralCreditMonths: num(Number(referrer.referralCreditMonths), 0) + 1,
-      });
-      rewardKind = 'CREDIT';
-    }
-
-    await db.createReferral(referrer.id, {
+  const recordPendingReferral = async (referrer: any, invitee: any) =>
+    db.createReferral(referrer.id, {
       id: genId('ref'),
       referredCompanyId: invitee.id,
       referredCompanyName: invitee.name,
       referredContactEmail: invitee.contactEmail || '',
-      rewardKind,
+      status: 'PENDING',
       rewardMonths: 1,
+      discountPercent: REFERRAL_DISCOUNT_PERCENT,
       createdAt: new Date().toISOString(),
     });
 
-    return rewardKind;
+  /**
+   * Le filleul vient de payer : c'est ici, et seulement ici, que les deux
+   * récompenses tombent. Appelée par la confirmation de paiement.
+   *
+   * Idempotente par la ligne `referrals` : elle n'agit que sur une ligne
+   * encore `PENDING`, donc reconfirmer une entreprise (ré-appuyer sur le
+   * bouton, changer d'offre) ne crédite pas un deuxième mois.
+   *
+   * Ne renvoie jamais d'erreur à l'appelant : un parrainage perdu ne doit pas
+   * faire échouer une activation d'abonnement déjà décidée.
+   */
+  const settleReferralOnPayment = async (invitee: any) => {
+    try {
+      if (!invitee?.referredByCompanyId) return null;
+      const referrer = await db.getCompanyById(invitee.referredByCompanyId);
+      if (!referrer) return null;
+
+      const rows = await db.getAllReferrals(referrer.id);
+      const row = rows.find((r: any) => String(r.referredCompanyId) === String(invitee.id));
+      // Pas de ligne (parrainage antérieur à cette règle) ou déjà réglée :
+      // ne rien faire plutôt que d'en inventer une seconde.
+      if (!row || row.status !== 'PENDING') return null;
+
+      // La branche « essai prolongé » ne peut plus se produire pour un
+      // parrainage écrit sous la règle actuelle — un parrain est actif par
+      // construction. Elle reste pour les fiches qui l'étaient encore quand
+      // leur ligne a été créée.
+      let rewardKind: 'TRIAL_EXTENDED' | 'CREDIT';
+      if (referrer.status === 'TRIAL' && referrer.trialEndsAt) {
+        // Depuis la fin d'essai en cours, pas depuis aujourd'hui : sinon un
+        // parrainage en début d'essai ajouterait moins d'un mois.
+        const base = new Date(referrer.trialEndsAt).getTime();
+        const from = Number.isFinite(base) ? base : Date.now();
+        await db.updateCompany(referrer.id, {
+          trialEndsAt: new Date(from + REFERRAL_REWARD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+        });
+        rewardKind = 'TRIAL_EXTENDED';
+      } else {
+        await db.updateCompany(referrer.id, {
+          referralCreditMonths: num(Number(referrer.referralCreditMonths), 0) + 1,
+        });
+        rewardKind = 'CREDIT';
+      }
+
+      await db.updateReferral(referrer.id, row.id, {
+        status: 'CONFIRMED',
+        rewardKind,
+        confirmedAt: new Date().toISOString(),
+      });
+      return rewardKind;
+    } catch (e) {
+      console.error('referral settlement failed', e);
+      return null;
+    }
   };
+
+  /**
+   * La remise que porte encore une entreprise : 10 % obtenus par le lien d'un
+   * parrain, tant qu'elle n'a pas été consommée par une première
+   * confirmation de paiement. Zéro sinon — c'est une remise de bienvenue, pas
+   * un tarif.
+   */
+  const pendingReferralDiscount = (company: any): number =>
+    company?.referredByCompanyId && !company?.referralDiscountUsedAt
+      ? num(Number(company.referralDiscountPercent), REFERRAL_DISCOUNT_PERCENT)
+      : 0;
 
   /**
    * Le tableau de bord parrainage de l'entreprise connectée : son lien, ce
@@ -6037,26 +6158,36 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const company = await db.getCompanyById(req.user.companyId);
       if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
 
+      const eligible = canRefer(company);
       const code = await referralCodeFor(company);
       const referrals = (await db.getAllReferrals(company.id))
         .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
       res.json({
+        // Sans abonnement actif il n'y a ni code ni lien : la page le dit et
+        // n'affiche pas un lien qui serait refusé à l'inscription.
+        eligible,
         code,
         // Construit côté serveur à partir de l'origine réellement appelée :
         // codée en dur, l'URL serait fausse en local comme sur un domaine
         // personnalisé, et le lien partagé ne mènerait nulle part.
-        link: `${req.protocol}://${req.get('host')}/?ref=${code}`,
+        link: code ? `${req.protocol}://${req.get('host')}/?ref=${code}` : '',
         rewardDays: REFERRAL_REWARD_DAYS,
+        discountPercent: REFERRAL_DISCOUNT_PERCENT,
         creditMonths: num(Number(company.referralCreditMonths), 0),
         status: company.status,
         trialEndsAt: company.trialEndsAt || null,
         referrals: referrals.map((r: any) => ({
           id: r.id,
           companyName: r.referredCompanyName,
+          // Une ligne écrite avant cette règle n'a pas de `status` mais avait
+          // déjà été payée : elle se lit CONFIRMED, sinon un parrainage acquis
+          // repasserait « en attente » à l'écran.
+          status: r.status || 'CONFIRMED',
           rewardKind: r.rewardKind,
           rewardMonths: r.rewardMonths,
           createdAt: r.createdAt,
+          confirmedAt: r.confirmedAt || null,
         })),
       });
     } catch (error) {
@@ -6076,7 +6207,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const phone = text(req.body?.phone, 40);
       const password = String(req.body?.password ?? '');
       const confirmPassword = String(req.body?.confirmPassword ?? '');
-      const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : 'FREELANCE';
+      const plan = isSellablePlan(req.body?.plan) ? req.body.plan : DEFAULT_PLAN_ID;
       const secteur: Secteur = SECTEURS.some(s => s.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
 
       if (!companyName || !contactName || !contactEmail || !phone) {
@@ -6114,7 +6245,9 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // même monde. Le garde-fou minimal, pas une politique anti-fraude.
       const selfReferral = !!referrer
         && String(referrer.contactEmail || '').toLowerCase() === contactEmail.toLowerCase();
-      const validReferrer = referrer && !selfReferral ? referrer : null;
+      // Le statut est revérifié ici et pas seulement à la création du code :
+      // un lien partagé reste valide indéfiniment, l'abonnement du parrain non.
+      const validReferrer = referrer && !selfReferral && canRefer(referrer) ? referrer : null;
 
       const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
       const company = await db.createCompany({
@@ -6123,23 +6256,28 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         status: 'TRIAL',
         plan,
         seatLimit: PLAN_SEAT_LIMITS[plan] || 1,
+        portalSeatLimit: PLAN_PORTAL_SEAT_LIMITS[plan] || 0,
         secteur,
         createdAt: new Date().toISOString(),
         trialEndsAt,
         contactName, contactEmail, phone,
         referredByCompanyId: validReferrer ? validReferrer.id : null,
+        // La remise est *promise* ici, pas accordée : elle ne vaut que sur
+        // l'abonnement effectivement souscrit, et c'est la confirmation de
+        // paiement qui la consomme.
+        referralDiscountPercent: validReferrer ? REFERRAL_DISCOUNT_PERCENT : 0,
       });
 
-      // La récompense est accordée une fois l'entreprise réellement créée :
-      // créditer avant laisserait un mois offert pour une inscription qui
-      // échoue plus loin.
+      // Le parrainage est seulement *journalisé* — la récompense attend que
+      // le filleul paie. Écrit après la création de l'entreprise : une ligne
+      // pointant sur une inscription qui échoue plus loin ne vaudrait rien.
       if (validReferrer) {
         try {
-          await grantReferralReward(validReferrer, company);
+          await recordPendingReferral(validReferrer, company);
         } catch (e) {
           // Un parrainage perdu ne doit jamais faire échouer une inscription
           // déjà aboutie — l'entreprise et son compte existent à ce stade.
-          console.error('referral reward failed', e);
+          console.error('referral record failed', e);
         }
       }
 
@@ -6345,6 +6483,16 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         }
         updates.seatLimit = Math.floor(seats);
       }
+      // Les comptes du portail client se négocient comme les sièges du
+      // back-office, et se comptent dans un panier séparé — d'où un champ à
+      // part plutôt qu'un total.
+      if (req.body?.portalSeatLimit !== undefined && req.body.portalSeatLimit !== '') {
+        const portalSeats = Number(req.body.portalSeatLimit);
+        if (!Number.isFinite(portalSeats) || portalSeats < 0) {
+          return res.status(400).json({ error: 'Le nombre de comptes portail doit être un entier positif ou nul' });
+        }
+        updates.portalSeatLimit = Math.floor(portalSeats);
+      }
       // Prolonger ou raccourcir un essai — la seule date que la console a une
       // raison de toucher.
       if (req.body?.trialEndsAt !== undefined) {
@@ -6463,15 +6611,31 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     try {
       const company = await db.getCompanyById(req.params.id);
       if (!company) return res.status(404).json({ error: 'Not found' });
-      const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : company.plan;
+      const plan = isSellablePlan(req.body?.plan) ? req.body.plan : company.plan;
       const bank = await db.getPlatformSettings();
+
+      // Le prix annoncé est celui de l'offre, remise de parrainage déduite si
+      // l'entreprise en porte une : c'est le montant qu'on lui demande de
+      // virer, donc c'est celui qui doit figurer dans le mail. L'annoncer plein
+      // puis facturer moins (ou l'inverse) est la seule façon sûre de rater un
+      // encaissement.
+      const meta = planMeta(plan);
+      const discount = pendingReferralDiscount(company);
+      const net = meta ? discountedPriceDT(meta.priceDT, discount) : 0;
+      const priceHtml = meta
+        ? (discount > 0
+          ? `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(net))} / mois
+               <span style="color:#8A93A0;"> (au lieu de ${escapeHtml(formatDT(meta.priceDT))} — remise parrainage de ${discount} % sur votre premier abonnement)</span></p>`
+          : `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(meta.priceDT))} / mois</p>`)
+        : '';
 
       const { sent } = await sendMail({
         to: company.contactEmail,
-        subject: `Coordonnées de paiement — ${plan}`,
+        subject: `Coordonnées de paiement — ${planLabel(plan)}`,
         html: `
           <p>Bonjour ${escapeHtml(company.contactName || '')},</p>
-          <p>Voici les coordonnées bancaires pour activer votre abonnement <strong>${escapeHtml(plan)}</strong> :</p>
+          <p>Voici les coordonnées bancaires pour activer votre abonnement <strong>${escapeHtml(planLabel(plan))}</strong> :</p>
+          ${priceHtml}
           <p>
             <strong>Banque :</strong> ${escapeHtml(bank.bankName || '')}<br/>
             <strong>RIB :</strong> ${escapeHtml(bank.rib || '')}<br/>
@@ -6507,15 +6671,35 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     try {
       const company = await db.getCompanyById(req.params.id);
       if (!company) return res.status(404).json({ error: 'Not found' });
-      const plan = ['FREELANCE', 'EQUIPE', 'CROISSANCE'].includes(req.body?.plan) ? req.body.plan : company.plan;
+      const plan = isSellablePlan(req.body?.plan) ? req.body.plan : company.plan;
+      const meta = planMeta(plan);
+
+      // La remise de parrainage est consommée **ici**, au moment où le filleul
+      // paie : c'est la première échéance qu'elle concerne, et le prix retenu
+      // est figé sur la fiche (`subscriptionPriceDT`) pour que la console
+      // n'ait pas à le recalculer plus tard, quand le catalogue aura bougé.
+      const discount = pendingReferralDiscount(company);
+      const price = meta ? discountedPriceDT(meta.priceDT, discount) : null;
 
       const updated = await db.updateCompany(company.id, {
         status: 'ACTIVE',
         plan,
         seatLimit: PLAN_SEAT_LIMITS[plan] || company.seatLimit,
+        // Seule une offre encore vendue pose un quota de comptes portail.
+        // L'écrire depuis une offre retirée (qui n'en donne aucun) fixerait un
+        // zéro sur la fiche — donc « aucun compte portail » — là où
+        // l'entreprise n'a jamais rien souscrit de tel.
+        ...(meta && !meta.legacy ? { portalSeatLimit: meta.portalSeatLimit } : {}),
         trialEndsAt: null,
         confirmedAt: new Date().toISOString(),
+        ...(price !== null ? { subscriptionPriceDT: price } : {}),
+        ...(discount > 0 ? { referralDiscountUsedAt: new Date().toISOString() } : {}),
       });
+
+      // Le parrain gagne son mois maintenant, et pas avant : c'est le paiement
+      // du filleul qui déclenche la récompense. Ne lève jamais — une
+      // activation déjà décidée ne doit pas échouer sur un parrainage.
+      await settleReferralOnPayment(updated || company);
 
       const users = await db.getAllUsers(company.id);
       const admin = users.find((u: any) => u.role === 'ADMIN');
@@ -6525,7 +6709,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         subject: 'Votre abonnement Tâches & Cash est activé',
         html: `
           <p>Bonjour ${escapeHtml(company.contactName || '')},</p>
-          <p>Votre paiement a bien été reçu — votre abonnement <strong>${escapeHtml(plan)}</strong> est maintenant actif.</p>
+          <p>Votre paiement a bien été reçu — votre abonnement <strong>${escapeHtml(planLabel(plan))}</strong> est maintenant actif.</p>
+          ${discount > 0 && price !== null
+            ? `<p>La remise de parrainage de ${discount} % a bien été appliquée : <strong>${escapeHtml(formatDT(price))} / mois</strong>.</p>`
+            : ''}
           <p>Connectez-vous avec votre identifiant habituel : <strong>${escapeHtml(admin?.username || '')}</strong> sur
              <a href="https://taches-and-cash.com">taches-and-cash.com</a>.</p>
           <p>Merci de votre confiance.</p>

@@ -9,6 +9,7 @@ interface Company {
   status: string;
   plan: string;
   seatLimit: number;
+  portalSeatLimit?: number;
   trialEndsAt: string | null;
   contactName?: string;
   contactEmail?: string;
@@ -44,6 +45,7 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
   const [contactEmail, setContactEmail] = useState(company.contactEmail || '');
   const [phone, setPhone] = useState(company.phone || '');
   const [seatLimit, setSeatLimit] = useState<string>(String(company.seatLimit ?? ''));
+  const [portalSeatLimit, setPortalSeatLimit] = useState<string>(String(company.portalSeatLimit ?? ''));
   const [trialEndsAt, setTrialEndsAt] = useState((company.trialEndsAt || '').slice(0, 10));
 
   const [saving, setSaving] = useState(false);
@@ -89,7 +91,7 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
       const res = await fetch(`/api/platform/companies/${company.id}`, {
         method: 'PUT',
         headers: authHeaders,
-        body: JSON.stringify({ name, contactName, contactEmail, phone, seatLimit, trialEndsAt }),
+        body: JSON.stringify({ name, contactName, contactEmail, phone, seatLimit, portalSeatLimit, trialEndsAt }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       onSaved();
@@ -175,7 +177,7 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
 
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Sièges</label>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Sièges (back-office)</label>
               <input
                 type="number"
                 min={1}
@@ -184,6 +186,20 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
               />
               <p className="text-[10.5px] text-gray-400 mt-1">Peut dépasser ce que l'offre donne, si c'est négocié.</p>
+            </div>
+            {/* Panier séparé : les comptes du portail ne consomment pas les
+                sièges de l'équipe, sinon un cabinet avec cinquante clients
+                connectés n'aurait plus de place pour ses collaborateurs. */}
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Comptes portail client</label>
+              <input
+                type="number"
+                min={0}
+                value={portalSeatLimit}
+                onChange={e => setPortalSeatLimit(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+              />
+              <p className="text-[10.5px] text-gray-400 mt-1">Comptés à part des sièges. 0 = aucun.</p>
             </div>
             <div>
               <label className="block text-[12px] font-semibold text-gray-700 mb-1">Fin d'essai</label>
