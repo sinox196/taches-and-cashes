@@ -60,7 +60,7 @@ export async function initDb(): Promise<Database> {
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
   'absenceAuthorizations', 'loans', 'advances', 'attendanceRecords', 'referrals', 'leaveBalances', 'timeEntries', 'messages',
-  'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories',
+  'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories', 'messageGroups',
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
@@ -98,6 +98,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.echeanceStatuses) db.echeanceStatuses = [];
     if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
     if (!db.orders) db.orders = [];
+    if (!db.messageGroups) db.messageGroups = [];
     if (!db.platformSettings) db.platformSettings = defaultPlatformSettings();
 
     // Legacy single-row settings -> one row per company, keyed like every
@@ -513,6 +514,47 @@ async function initJsonDb(): Promise<Database> {
       await saveDb();
       return row;
     },
+    markGroupMessagesRead: async (companyId: string, groupId: string, readerId: number) => {
+      let changed = 0;
+      for (const m of db.messages) {
+        if (m.companyId !== companyId || m.groupId !== groupId) continue;
+        if (m.fromUserId === readerId) continue;
+        const readBy: number[] = Array.isArray(m.readBy) ? m.readBy : [];
+        if (readBy.includes(readerId)) continue;
+        m.readBy = [...readBy, readerId];
+        changed++;
+      }
+      if (changed > 0) await saveDb();
+      return changed;
+    },
+
+    getAllMessageGroups: async (companyId: string) => scoped(db.messageGroups, companyId),
+    getMessageGroupById: async (companyId: string, id: string) =>
+      db.messageGroups.find((g: any) => g.companyId === companyId && String(g.id) === String(id)),
+    createMessageGroup: async (companyId: string, group: any) => {
+      const row = { ...group, companyId };
+      db.messageGroups.push(row);
+      await saveDb();
+      return row;
+    },
+    updateMessageGroup: async (companyId: string, id: string, updates: any) => {
+      const index = db.messageGroups.findIndex((g: any) => g.companyId === companyId && String(g.id) === String(id));
+      if (index === -1) return null;
+      db.messageGroups[index] = { ...db.messageGroups[index], ...updates };
+      await saveDb();
+      return db.messageGroups[index];
+    },
+    deleteMessageGroup: async (companyId: string, id: string) => {
+      const index = db.messageGroups.findIndex((g: any) => g.companyId === companyId && String(g.id) === String(id));
+      if (index === -1) return false;
+      db.messageGroups.splice(index, 1);
+      // Les messages du groupe partent avec lui : les garder laisserait des
+      // lignes que plus aucun fil ne peut afficher.
+      db.messages = db.messages.filter((m: any) => !(m.companyId === companyId && String(m.groupId) === String(id)));
+      await saveDb();
+      return true;
+    },
+
     /** Marks every message from `fromUserId` to `readerId` as read. Returns how many changed. */
     markMessagesRead: async (companyId: string, readerId: number, fromUserId: number) => {
       let changed = 0;

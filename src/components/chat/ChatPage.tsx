@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { roleMeta } from '../../constants/roles';
-import { Loader2, Send, MessageCircle, Check, CheckCheck, ArrowLeft } from 'lucide-react';
+import { Loader2, Send, MessageCircle, Check, CheckCheck, ArrowLeft, Users, Plus, Settings2 } from 'lucide-react';
+import { GroupModal, type ChatGroup } from './GroupModal';
 
 interface Contact {
   id: number;
@@ -15,11 +16,26 @@ interface Contact {
 interface ChatMessage {
   id: string;
   fromUserId: number;
-  toUserId: number;
+  toUserId: number | null;
+  /** Présent = message de groupe ; le destinataire n'est plus unique. */
+  groupId?: string | null;
   body: string;
   createdAt: string;
   readAt: string | null;
+  /** Lecteurs d'un message de groupe — `readAt` ne sait porter qu'un lecteur. */
+  readBy?: number[];
 }
+
+/**
+ * Une conversation ouverte : un collègue, ou un groupe. Un type somme plutôt
+ * que deux états parallèles — deux `selected` auraient fini par être tous
+ * deux renseignés, et le fil affiché n'aurait plus eu de source unique.
+ */
+type Selection =
+  | { kind: 'dm'; contact: Contact }
+  | { kind: 'group'; group: ChatGroup };
+
+const selectionId = (s: Selection) => (s.kind === 'dm' ? String(s.contact.id) : s.group.id);
 
 const initials = (name: string) =>
   name
@@ -54,13 +70,16 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
   const { token, user } = useAuth();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
-  const [selected, setSelected] = useState<Contact | null>(null);
+  const [groups, setGroups] = useState<ChatGroup[]>([]);
+  const [selected, setSelected] = useState<Selection | null>(null);
+  /** `false` = fermé, `null` = création, objet = modification. */
+  const [groupEditor, setGroupEditor] = useState<false | { group: ChatGroup | null }>(false);
   const [thread, setThread] = useState<ChatMessage[]>([]);
   const [loadingThread, setLoadingThread] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const selectedRef = useRef<Contact | null>(null);
+  const selectedRef = useRef<Selection | null>(null);
   selectedRef.current = selected;
   // Reporting the unread total to the shell happens in an effect below, never
   // from inside a state updater: those run during render, and updating App
@@ -88,23 +107,53 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
     }
   }, [token]);
 
-  useEffect(() => { fetchContacts(); }, [fetchContacts]);
+  const fetchGroups = useCallback(async () => {
+    try {
+      const res = await fetch('/api/messages/groups', { headers: authHeaders });
+      if (res.ok) {
+        const data: ChatGroup[] = await res.json();
+        setGroups(data);
+        // Le groupe ouvert suit ses propres mises à jour (renommage, membres,
+        // non-lus) ; s'il a disparu — supprimé, ou j'en ai été retiré — le fil
+        // se referme au lieu de rester affiché sur un groupe qui n'existe plus.
+        setSelected(prev => {
+          if (prev?.kind !== 'group') return prev;
+          const fresh = data.find(g => g.id === prev.group.id);
+          return fresh ? { kind: 'group', group: fresh } : null;
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load groups', e);
+    }
+  }, [token]);
+
+  useEffect(() => { fetchContacts(); fetchGroups(); }, [fetchContacts, fetchGroups]);
 
   useEffect(() => {
     if (loadingContacts) return;
-    onUnreadRef.current?.(contacts.reduce((s, c) => s + c.unreadCount, 0));
-  }, [contacts, loadingContacts]);
+    // Les groupes comptent dans la même pastille que les fils directs : un
+    // total qui en ignore la moitié ne veut plus rien dire.
+    onUnreadRef.current?.(
+      contacts.reduce((s, c) => s + c.unreadCount, 0) + groups.reduce((s, g) => s + g.unreadCount, 0),
+    );
+  }, [contacts, groups, loadingContacts]);
 
-  const openThread = async (contact: Contact) => {
-    setSelected(contact);
+  /** Un seul chemin pour les deux sortes de fil : l'URL seule diffère. */
+  const openThread = async (sel: Selection) => {
+    setSelected(sel);
     setLoadingThread(true);
+    const url = sel.kind === 'dm'
+      ? `/api/messages/thread/${sel.contact.id}`
+      : `/api/messages/group/${sel.group.id}`;
     try {
-      const res = await fetch(`/api/messages/thread/${contact.id}`, { headers: authHeaders });
-      if (res.ok) {
-        setThread(await res.json());
+      const res = await fetch(url, { headers: authHeaders });
+      if (res.ok) setThread(await res.json());
+      // Ouvrir le fil le marque lu côté serveur ; on le reflète tout de suite.
+      if (sel.kind === 'dm') {
+        setContacts(prev => prev.map(c => (c.id === sel.contact.id ? { ...c, unreadCount: 0 } : c)));
+      } else {
+        setGroups(prev => prev.map(g => (g.id === sel.group.id ? { ...g, unreadCount: 0 } : g)));
       }
-      // Opening the thread marks it read server-side; reflect that locally.
-      setContacts(prev => prev.map(c => (c.id === contact.id ? { ...c, unreadCount: 0 } : c)));
     } catch (e) {
       console.error('Failed to load thread', e);
     } finally {
@@ -133,21 +182,40 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
           const payload = JSON.parse(event.data);
           if (payload.type === 'message') {
             const msg: ChatMessage = payload.message;
-            const other = msg.fromUserId === user?.id ? msg.toUserId : msg.fromUserId;
-            const isOpenThread = selectedRef.current?.id === other;
+            const cur = selectedRef.current;
 
-            if (isOpenThread) {
-              setThread(prev => mergeIncoming(prev, msg));
-              if (msg.toUserId === user?.id) {
-                // I have the thread open, so mark it read right away.
-                fetch(`/api/messages/thread/${other}`, { headers: authHeaders }).catch(() => {});
+            if (msg.groupId) {
+              const isOpen = cur?.kind === 'group' && cur.group.id === msg.groupId;
+              if (isOpen) {
+                setThread(prev => mergeIncoming(prev, msg));
+                // Le fil est sous les yeux : le marquer lu tout de suite, comme
+                // pour un message direct.
+                if (msg.fromUserId !== user?.id) {
+                  fetch(`/api/messages/group/${msg.groupId}`, { headers: authHeaders }).catch(() => {});
+                }
               }
+              fetchGroups();
+            } else {
+              const other = msg.fromUserId === user?.id ? msg.toUserId : msg.fromUserId;
+              const isOpen = cur?.kind === 'dm' && cur.contact.id === other;
+              if (isOpen) {
+                setThread(prev => mergeIncoming(prev, msg));
+                if (msg.toUserId === user?.id) {
+                  // I have the thread open, so mark it read right away.
+                  fetch(`/api/messages/thread/${other}`, { headers: authHeaders }).catch(() => {});
+                }
+              }
+              fetchContacts();
             }
-            fetchContacts();
           } else if (payload.type === 'read') {
-            if (selectedRef.current?.id === payload.by) {
+            const cur = selectedRef.current;
+            if (cur?.kind === 'dm' && cur.contact.id === payload.by) {
               setThread(prev => prev.map(m => (m.toUserId === payload.by ? m : { ...m, readAt: m.readAt ?? new Date().toISOString() })));
             }
+          } else if (payload.type === 'groups' || payload.type === 'groupRead') {
+            // Un groupe créé, renommé, quitté ou lu par quelqu'un d'autre :
+            // la liste se recharge, elle porte déjà tout ce qui change.
+            fetchGroups();
           }
         } catch (e) {
           console.error('Bad SSE payload', e);
@@ -185,7 +253,8 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
     const twin = (m: ChatMessage) =>
       m.id.startsWith('pending-') &&
       m.fromUserId === msg.fromUserId &&
-      m.toUserId === msg.toUserId &&
+      String(m.toUserId ?? '') === String(msg.toUserId ?? '') &&
+      String(m.groupId ?? '') === String(msg.groupId ?? '') &&
       m.body === msg.body;
 
     if (prev.some(m => m.id === msg.id)) return prev.filter(m => !twin(m));
@@ -201,10 +270,12 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
     setSending(true);
     setDraft('');
     // Optimistic: show it immediately, replace on failure with nothing (kept simple).
+    const isGroup = selected.kind === 'group';
     const optimistic: ChatMessage = {
       id: `pending-${++pendingSeq.current}`,
       fromUserId: user!.id,
-      toUserId: selected.id,
+      toUserId: isGroup ? null : selected.contact.id,
+      groupId: isGroup ? selected.group.id : null,
       body,
       createdAt: new Date().toISOString(),
       readAt: null,
@@ -214,12 +285,12 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ toUserId: selected.id, body }),
+        body: JSON.stringify(isGroup ? { groupId: selected.group.id, body } : { toUserId: selected.contact.id, body }),
       });
       if (res.ok) {
         const saved: ChatMessage = await res.json();
         setThread(prev => mergeIncoming(prev, saved));
-        fetchContacts();
+        if (isGroup) fetchGroups(); else fetchContacts();
       } else {
         setThread(prev => prev.filter(m => m.id !== optimistic.id));
       }
@@ -248,11 +319,68 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
           selected ? 'hidden md:flex' : 'flex'
         }`}
       >
-        <div className="p-4 border-b border-gray-100">
-          <h1 className="text-[16px] font-bold text-gray-900">Messages</h1>
-          <p className="text-[12px] text-gray-500 mt-0.5">Discutez avec l'équipe</p>
+        <div className="p-4 border-b border-gray-100 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-[16px] font-bold text-gray-900">Messages</h1>
+            <p className="text-[12px] text-gray-500 mt-0.5">Discutez avec l'équipe</p>
+          </div>
+          {/* Un compte portail n'a pas de groupes : le bouton n'existe pas
+              pour lui, et le serveur refuserait la création de toute façon. */}
+          {user?.role !== 'CLIENT' && (
+            <button
+              onClick={() => setGroupEditor({ group: null })}
+              title="Créer un groupe de discussion"
+              className="shrink-0 px-2.5 py-1.5 rounded-lg bg-navy text-white text-[11.5px] font-semibold hover:bg-navy-hover flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" /> Groupe
+            </button>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto">
+          {groups.length > 0 && (
+            <>
+              <div className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Users className="w-3 h-3" /> Groupes
+              </div>
+              {groups.map(g => {
+                const isActive = selected?.kind === 'group' && selected.group.id === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => openThread({ kind: 'group', group: g })}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-gray-50 transition-colors ${
+                      isActive ? 'bg-gray-100' : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-turquoise/15 text-turquoise flex items-center justify-center shrink-0">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[13px] font-medium text-gray-900 truncate">{g.name}</span>
+                        {g.lastMessage && (
+                          <span className="text-[10px] text-gray-400 shrink-0">{formatTime(g.lastMessage.createdAt)}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-0.5">
+                        <span className="text-[11px] text-gray-500 truncate">
+                          {g.lastMessage ? g.lastMessage.body : `${g.members.length} participants`}
+                        </span>
+                        {g.unreadCount > 0 && (
+                          <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+                            {g.unreadCount > 99 ? '99+' : g.unreadCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+              <div className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                Messages directs
+              </div>
+            </>
+          )}
           {loadingContacts ? (
             <div className="flex items-center justify-center p-8">
               <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
@@ -262,11 +390,11 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
           ) : (
             contacts.map(c => {
               const meta = roleMeta(c.role);
-              const isActive = selected?.id === c.id;
+              const isActive = selected?.kind === 'dm' && selected.contact.id === c.id;
               return (
                 <button
                   key={c.id}
-                  onClick={() => openThread(c)}
+                  onClick={() => openThread({ kind: 'dm', contact: c })}
                   className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-gray-50 transition-colors ${
                     isActive ? 'bg-gray-100' : 'hover:bg-gray-50'
                   }`}
@@ -316,13 +444,36 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
               >
                 <ArrowLeft className="w-[18px] h-[18px]" />
               </button>
-              <div className="w-8 h-8 rounded-full bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                {initials(selected.fullName)}
-              </div>
-              <div className="min-w-0">
-                <div className="text-[13px] font-semibold text-gray-900 truncate">{selected.fullName}</div>
-                <div className="text-[11px] text-gray-400 truncate">{roleMeta(selected.role).label}</div>
-              </div>
+              {selected.kind === 'group' ? (
+                <>
+                  <div className="w-8 h-8 rounded-full bg-turquoise/15 text-turquoise flex items-center justify-center shrink-0">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold text-gray-900 truncate">{selected.group.name}</div>
+                    <div className="text-[11px] text-gray-400 truncate">
+                      {selected.group.members.map(m => m.fullName).join(', ')}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setGroupEditor({ group: selected.group })}
+                    title="Modifier le groupe"
+                    className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                  >
+                    <Settings2 className="w-4 h-4" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
+                    {initials(selected.contact.fullName)}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-gray-900 truncate">{selected.contact.fullName}</div>
+                    <div className="text-[11px] text-gray-400 truncate">{roleMeta(selected.contact.role).label}</div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 space-y-1">
@@ -339,6 +490,17 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
                   const mine = m.fromUserId === user?.id;
                   const prev = thread[i - 1];
                   const showDay = !prev || formatDay(prev.createdAt) !== formatDay(m.createdAt);
+                  // Dans un groupe, « qui parle » n'est plus déductible du
+                  // côté de la bulle. Le nom n'est répété que lorsque
+                  // l'auteur change, sinon une suite de messages du même
+                  // collègue devient illisible.
+                  const showAuthor = selected.kind === 'group' && !mine
+                    && (!prev || prev.fromUserId !== m.fromUserId || showDay);
+                  const authorName = showAuthor
+                    ? (selected.kind === 'group'
+                      ? selected.group.members.find(x => x.id === m.fromUserId)?.fullName
+                      : '') || 'Collaborateur'
+                    : '';
                   return (
                     <React.Fragment key={m.id}>
                       {showDay && (
@@ -354,10 +516,19 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
                               : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm'
                           }`}
                         >
+                          {showAuthor && (
+                            <div className="text-[10.5px] font-semibold text-turquoise mb-0.5">{authorName}</div>
+                          )}
                           <div className="whitespace-pre-wrap break-words">{m.body}</div>
                           <div className={`flex items-center gap-1 mt-1 ${mine ? 'justify-end text-white/60' : 'justify-end text-gray-400'}`}>
                             <span className="text-[10px]">{formatTime(m.createdAt)}</span>
-                            {mine && (m.readAt ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
+                            {/* Dans un groupe, « lu » n'a pas de réponse
+                                unique : la double coche dirait que tout le
+                                monde a lu alors qu'on ne sait que compter les
+                                lecteurs. On ne l'affiche donc que pour un fil
+                                direct. */}
+                            {mine && selected.kind === 'dm'
+                              && (m.readAt ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />)}
                           </div>
                         </div>
                       </div>
@@ -394,6 +565,25 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
           </>
         )}
       </div>
+
+      {groupEditor && (
+        <GroupModal
+          group={groupEditor.group}
+          contacts={contacts}
+          onClose={() => setGroupEditor(false)}
+          onSaved={(g) => {
+            setGroupEditor(false);
+            fetchGroups();
+            openThread({ kind: 'group', group: g });
+          }}
+          onDeleted={() => {
+            setGroupEditor(false);
+            setSelected(null);
+            setThread([]);
+            fetchGroups();
+          }}
+        />
+      )}
     </div>
   );
 };

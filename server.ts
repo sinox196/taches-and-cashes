@@ -4813,10 +4813,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         .filter((u: any) => u.id !== req.user.id)
         .filter((u: any) => !isClientViewer || u.role !== CLIENT_ROLE)
         .map((u: any) => {
-          const thread = messages.filter((m: any) =>
+          // `!m.groupId` : un message de groupe porte bien un `fromUserId`,
+          // mais pas de destinataire unique — sans ce filtre il remonterait
+          // dans le fil direct de son auteur.
+          const thread = messages.filter((m: any) => !m.groupId && (
             (m.fromUserId === req.user.id && m.toUserId === u.id) ||
             (m.fromUserId === u.id && m.toUserId === req.user.id)
-          );
+          ));
           const last = thread[thread.length - 1];
           const unreadCount = thread.filter((m: any) => m.toUserId === req.user.id && m.fromUserId === u.id && !m.readAt).length;
           return {
@@ -4841,12 +4844,224 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  // ---------------------------------------------------------
+  // Conversations de groupe
+  // ---------------------------------------------------------
+  //
+  // Un groupe est une liste de membres et un nom ; un message de groupe porte
+  // `groupId` au lieu de `toUserId`. La lecture s'y note dans `readBy` (un
+  // tableau d'ids) et non dans `readAt` : un message direct a un lecteur, un
+  // message de groupe en a N, et compresser les deux dans un seul horodatage
+  // aurait fait passer le fil pour lu dès que le premier membre l'ouvre.
+  //
+  // **Les groupes sont internes au cabinet.** Un compte client n'en crée pas,
+  // n'en voit aucun et ne peut y être ajouté : c'est le cas que le drapeau
+  // `isInternal` sur les messages annonçait depuis le début — dans un fil à
+  // plusieurs, l'appartenance au fil ne suffit plus à tenir une note interne
+  // hors de portée. Refusé côté serveur, pas seulement absent de l'écran.
+
+  /** Membres valides : de l'entreprise, jamais un compte portail, jamais deux fois. */
+  const sanitizeGroupMembers = async (companyId: string, raw: any, ownerId: number) => {
+    const wanted = Array.isArray(raw) ? raw : [];
+    const users = await db.getAllUsers(companyId);
+    const byId = new Map(users.map((u: any) => [u.id, u]));
+    const ids = new Set<number>([ownerId]);
+    for (const v of wanted) {
+      const id = parseInt(v, 10);
+      const u = byId.get(id);
+      if (!u || u.role === CLIENT_ROLE) continue;
+      ids.add(id);
+    }
+    return [...ids];
+  };
+
+  const isGroupMember = (group: any, userId: number) =>
+    Array.isArray(group?.memberIds) && group.memberIds.includes(userId);
+
+  /** La vue d'un groupe pour un membre : dernier message et non-lus compris. */
+  const groupSummary = (group: any, messages: any[], usersById: Map<number, any>, meId: number) => {
+    const thread = messages.filter((m: any) => String(m.groupId) === String(group.id));
+    const last = thread[thread.length - 1];
+    const unreadCount = thread.filter((m: any) =>
+      m.fromUserId !== meId && !(Array.isArray(m.readBy) ? m.readBy : []).includes(meId)).length;
+    return {
+      id: group.id,
+      name: group.name,
+      memberIds: group.memberIds,
+      members: (group.memberIds || []).map((id: number) => {
+        const u = usersById.get(id);
+        return { id, fullName: u?.fullName || u?.username || `#${id}`, role: u?.role || '' };
+      }),
+      createdBy: group.createdBy,
+      lastMessage: last
+        ? { body: last.body, createdAt: last.createdAt, fromUserId: last.fromUserId }
+        : null,
+      unreadCount,
+    };
+  };
+
+  // GET /api/messages/groups — mes groupes.
+  app.get('/api/messages/groups', authenticate, async (req: any, res: any) => {
+    try {
+      // Un client n'a pas de groupes : la liste vide, pas une erreur — l'écran
+      // de messagerie lui reste ouvert pour ses échanges directs.
+      if (req.user.role === CLIENT_ROLE) return res.json([]);
+      const [groups, messages, users] = await Promise.all([
+        db.getAllMessageGroups(req.user.companyId),
+        db.getAllMessages(req.user.companyId),
+        db.getAllUsers(req.user.companyId),
+      ]);
+      const usersById = new Map(users.map((u: any) => [u.id, u]));
+      res.json(
+        groups
+          .filter((g: any) => isGroupMember(g, req.user.id))
+          .map((g: any) => groupSummary(g, messages, usersById, req.user.id))
+          .sort((a: any, b: any) => {
+            const ta = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+            const tb = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+            if (ta !== tb) return tb - ta;
+            return String(a.name).localeCompare(String(b.name));
+          }),
+      );
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/messages/groups — créer un groupe.
+  app.post('/api/messages/groups', authenticate, async (req: any, res: any) => {
+    try {
+      if (req.user.role === CLIENT_ROLE) return res.status(403).json({ error: 'Réservé aux comptes du cabinet.' });
+      const name = String(req.body?.name ?? '').trim().slice(0, 80);
+      if (!name) return res.status(400).json({ error: 'Le nom du groupe est requis.' });
+
+      const memberIds = await sanitizeGroupMembers(req.user.companyId, req.body?.memberIds, req.user.id);
+      if (memberIds.length < 2) {
+        return res.status(400).json({ error: 'Un groupe demande au moins un autre participant.' });
+      }
+
+      const group = await db.createMessageGroup(req.user.companyId, {
+        id: `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        memberIds,
+        createdBy: req.user.id,
+        createdAt: new Date().toISOString(),
+      });
+
+      const users = await db.getAllUsers(req.user.companyId);
+      const usersById = new Map(users.map((u: any) => [u.id, u]));
+      const summary = groupSummary(group, [], usersById, req.user.id);
+      res.status(201).json(summary);
+      // Les autres membres voient le groupe apparaître sans recharger.
+      for (const id of memberIds) sendToUser(req.user.companyId, id, { type: 'groups' });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // PUT /api/messages/groups/:id — renommer, ajouter ou retirer des membres.
+  app.put('/api/messages/groups/:id', authenticate, async (req: any, res: any) => {
+    try {
+      const group = await db.getMessageGroupById(req.user.companyId, String(req.params.id));
+      if (!group) return res.status(404).json({ error: 'Groupe introuvable' });
+      // N'importe quel membre peut modifier le groupe : c'est une conversation
+      // d'équipe, pas la propriété de qui l'a ouverte.
+      if (!isGroupMember(group, req.user.id)) return res.status(403).json({ error: 'Vous ne faites pas partie de ce groupe.' });
+
+      const updates: any = {};
+      if (req.body?.name !== undefined) {
+        const name = String(req.body.name).trim().slice(0, 80);
+        if (!name) return res.status(400).json({ error: 'Le nom du groupe est requis.' });
+        updates.name = name;
+      }
+      if (req.body?.memberIds !== undefined) {
+        // Le créateur reste membre : le retirer laisserait un groupe que plus
+        // personne ne peut rattacher à son auteur.
+        const memberIds = await sanitizeGroupMembers(req.user.companyId, req.body.memberIds, group.createdBy);
+        if (memberIds.length < 2) return res.status(400).json({ error: 'Un groupe demande au moins deux participants.' });
+        updates.memberIds = memberIds;
+      }
+
+      const updated = await db.updateMessageGroup(req.user.companyId, String(req.params.id), updates);
+      const [messages, users] = await Promise.all([
+        db.getAllMessages(req.user.companyId),
+        db.getAllUsers(req.user.companyId),
+      ]);
+      const usersById = new Map(users.map((u: any) => [u.id, u]));
+      res.json(groupSummary(updated, messages, usersById, req.user.id));
+      // Les anciens membres aussi : c'est ce qui fait disparaître le groupe de
+      // leur liste quand ils viennent d'en être retirés.
+      for (const id of new Set([...(group.memberIds || []), ...(updated.memberIds || [])])) {
+        sendToUser(req.user.companyId, id as number, { type: 'groups' });
+      }
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // DELETE /api/messages/groups/:id — supprimer le groupe et ses messages.
+  app.delete('/api/messages/groups/:id', authenticate, async (req: any, res: any) => {
+    try {
+      const group = await db.getMessageGroupById(req.user.companyId, String(req.params.id));
+      if (!group) return res.status(404).json({ error: 'Groupe introuvable' });
+      // Supprimer efface la conversation pour tout le monde : réservé à qui l'a
+      // créée, ou à un administrateur.
+      if (group.createdBy !== req.user.id && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: "Seul le créateur du groupe ou un administrateur peut le supprimer." });
+      }
+      await db.deleteMessageGroup(req.user.companyId, String(req.params.id));
+      res.json({ success: true });
+      for (const id of group.memberIds || []) sendToUser(req.user.companyId, id, { type: 'groups' });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/messages/group/:id — le fil d'un groupe, marqué lu au passage.
+  app.get('/api/messages/group/:id', authenticate, async (req: any, res: any) => {
+    try {
+      const group = await db.getMessageGroupById(req.user.companyId, String(req.params.id));
+      if (!group) return res.status(404).json({ error: 'Groupe introuvable' });
+      if (!isGroupMember(group, req.user.id)) return res.status(403).json({ error: 'Vous ne faites pas partie de ce groupe.' });
+
+      const messages = await db.getAllMessages(req.user.companyId);
+      const thread = messages
+        .filter((m: any) => String(m.groupId) === String(req.params.id))
+        .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      const changed = await db.markGroupMessagesRead(req.user.companyId, String(req.params.id), req.user.id);
+      if (changed > 0) {
+        for (const id of group.memberIds || []) {
+          if (id !== req.user.id) sendToUser(req.user.companyId, id, { type: 'groupRead', groupId: group.id, by: req.user.id });
+        }
+      }
+      res.json(thread);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET /api/messages/unread-count — total across every conversation, for the sidebar badge.
   app.get('/api/messages/unread-count', authenticate, async (req: any, res: any) => {
     try {
       const messages = await db.getAllMessages(req.user.companyId);
-      const count = messages.filter((m: any) => m.toUserId === req.user.id && !m.readAt).length;
-      res.json({ count });
+      const direct = messages.filter((m: any) => m.toUserId === req.user.id && !m.readAt).length;
+      // Les groupes comptent dans la même pastille : un badge qui ignore la
+      // moitié des conversations ne veut plus rien dire. Un message de groupe
+      // est lu quand mon id figure dans `readBy`.
+      const groups = (await db.getAllMessageGroups(req.user.companyId))
+        .filter((g: any) => isGroupMember(g, req.user.id))
+        .map((g: any) => String(g.id));
+      const grouped = groups.length === 0 ? 0 : messages.filter((m: any) =>
+        m.groupId && groups.includes(String(m.groupId))
+        && m.fromUserId !== req.user.id
+        && !(Array.isArray(m.readBy) ? m.readBy : []).includes(req.user.id)).length;
+      res.json({ count: direct + grouped });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -4862,6 +5077,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
       const messages = await db.getAllMessages(req.user.companyId);
       const thread = messages
+        .filter((m: any) => !m.groupId)
         .filter((m: any) =>
           (m.fromUserId === req.user.id && m.toUserId === otherId) ||
           (m.fromUserId === otherId && m.toUserId === req.user.id)
@@ -4884,14 +5100,75 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
-  // POST /api/messages — send a DM.
+  // POST /api/messages — un message direct, ou un message de groupe si le
+  // corps porte `groupId`. Une seule route pour les deux : la validation de la
+  // taille, la diffusion en direct et la notification poussée sont les mêmes,
+  // et les dédoubler aurait fait deux endroits à corriger.
   app.post('/api/messages', authenticate, async (req: any, res: any) => {
     try {
+      const groupId = req.body?.groupId ? String(req.body.groupId) : '';
       const toUserId = parseInt(req.body?.toUserId, 10);
       const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
-      if (!Number.isFinite(toUserId)) return res.status(400).json({ error: 'toUserId is required' });
       if (!body) return res.status(400).json({ error: 'Message body is required' });
       if (body.length > 4000) return res.status(400).json({ error: 'Message too long' });
+
+      if (groupId) {
+        const group = await db.getMessageGroupById(req.user.companyId, groupId);
+        if (!group) return res.status(404).json({ error: 'Groupe introuvable' });
+        if (!isGroupMember(group, req.user.id)) {
+          return res.status(403).json({ error: 'Vous ne faites pas partie de ce groupe.' });
+        }
+
+        const message = await db.createMessage(req.user.companyId, {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          fromUserId: req.user.id,
+          toUserId: null,
+          groupId,
+          body,
+          // Les groupes sont réservés aux comptes du cabinet, donc un message
+          // de groupe est interne par construction — et le drapeau compte
+          // vraiment ici : dans un fil à plusieurs, l'appartenance au fil ne
+          // suffit plus à tenir la note hors de portée d'un client.
+          isInternal: true,
+          createdAt: new Date().toISOString(),
+          readAt: null,
+          // L'auteur a lu son propre message : sans ça il se compterait dans
+          // ses propres non-lus au premier rechargement.
+          readBy: [req.user.id],
+        });
+
+        res.status(201).json(message);
+        for (const id of group.memberIds || []) {
+          sendToUser(req.user.companyId, id, { type: 'message', message });
+        }
+
+        if (pushEnabled()) {
+          (async () => {
+            const targets = (group.memberIds || []).filter((id: number) => id !== req.user.id);
+            if (!targets.length) return;
+            const subs = (await db.getAllPushSubscriptionsForCompany(req.user.companyId))
+              .filter((sub: any) => targets.includes(sub.userId));
+            if (!subs.length) return;
+            const sender = await db.getUserById(req.user.companyId, req.user.id);
+            const senderName = sender?.fullName || sender?.username || 'Collaborateur';
+            const payload = {
+              title: `${group.name} — ${senderName}`,
+              body: body.length > 120 ? body.slice(0, 117) + '…' : body,
+              nav: 'Messages',
+              // Une étiquette par groupe, comme `msg-<id>` pour un fil direct :
+              // les messages d'un même groupe se remplacent au lieu de s'empiler.
+              tag: `grp-${groupId}`,
+            };
+            for (const sub of subs) {
+              const { expired } = await sendPush(sub, payload);
+              if (expired) await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+            }
+          })().catch((error) => console.error('[push] group fan-out failed:', error));
+        }
+        return;
+      }
+
+      if (!Number.isFinite(toUserId)) return res.status(400).json({ error: 'toUserId is required' });
 
       const recipient = await db.getUserById(req.user.companyId, toUserId);
       if (!recipient) return res.status(404).json({ error: 'Recipient not found' });

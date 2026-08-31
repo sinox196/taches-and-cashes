@@ -108,6 +108,19 @@ export interface Database {
   getAllMessages(companyId: string): Promise<any[]>;
   createMessage(companyId: string, message: any): Promise<any>;
   markMessagesRead(companyId: string, readerId: number, fromUserId: number): Promise<number>;
+  /**
+   * Un message de groupe n'a pas un lecteur mais N : sa lecture se note dans
+   * `readBy`, un tableau d'ids, là où un message direct porte un `readAt`
+   * unique. Retourne le nombre de lignes réellement modifiées.
+   */
+  markGroupMessagesRead(companyId: string, groupId: string, readerId: number): Promise<number>;
+
+  /** Conversations de groupe — `{ id, name, memberIds, createdBy, createdAt }`. */
+  getAllMessageGroups(companyId: string): Promise<any[]>;
+  getMessageGroupById(companyId: string, id: string): Promise<any | undefined>;
+  createMessageGroup(companyId: string, group: any): Promise<any>;
+  updateMessageGroup(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteMessageGroup(companyId: string, id: string): Promise<boolean>;
 
   /** A mission + type de tâche an admin hands to a collaborator to work on. */
   getAllTaskAssignments(companyId: string): Promise<any[]>;
@@ -275,6 +288,8 @@ export const emptyDb = () => ({
   attendanceRecords: [],
   // Parrainage : une ligne par filleul inscrit, portée par le parrain.
   referrals: [],
+  // Conversations de groupe de la messagerie.
+  messageGroups: [],
   leaveBalances: [],
   timeEntries: [],
   // Direct messages between two users (chat).

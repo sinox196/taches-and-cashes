@@ -420,6 +420,14 @@ paramètre : il n'y a aucun `?clientId=` à falsifier.
 - `/api/portal/deliverables` — les modèles affectés au dossier, leur
   avancement et leurs items, jamais qui y a passé du temps.
 
+**Les conversations de groupe** ([GroupModal.tsx](src/components/chat/GroupModal.tsx), routes `/api/messages/groups*` et `/api/messages/group/:id`) vivent dans le même module que les messages directs : un groupe est un nom plus une liste de membres, et un message de groupe porte `groupId` au lieu de `toUserId`. Une seule route d'envoi pour les deux — la validation, la diffusion SSE et la notification poussée sont identiques, et les dédoubler aurait fait deux endroits à corriger.
+
+**La lecture d'un message de groupe se note dans `readBy`** (un tableau d'ids), pas dans `readAt` : un message direct a un lecteur, un message de groupe en a N, et les compresser dans un seul horodatage aurait fait passer le fil pour lu dès que le premier membre l'ouvre. Sous Postgres l'ajout se fait en JSONB (`|| to_jsonb(...)`) plutôt qu'en lisant puis réécrivant la ligne, pour que deux membres qui ouvrent le fil au même instant ne s'effacent pas l'un l'autre. L'auteur naît dans `readBy` de son propre message, sinon il se compterait dans ses propres non-lus. La double coche n'apparaît **que** sur un fil direct : dans un groupe « lu » n'a pas de réponse unique.
+
+**Les groupes sont internes au cabinet** : un compte `CLIENT` n'en crée pas, n'en voit aucun, ne peut ni lire ni écrire dans un fil de groupe, et est écarté de la liste des membres même si son id est envoyé. C'est le cas que `isInternal` annonçait depuis le début — dans un fil à plusieurs, l'appartenance au fil ne suffit plus à tenir une note interne hors de portée. Refusé côté serveur, pas seulement absent de l'écran. N'importe quel membre peut renommer le groupe et changer ses membres (c'est une conversation d'équipe, pas la propriété de qui l'a ouverte) ; **supprimer** — qui efface la conversation pour tout le monde — reste au créateur ou à un administrateur, et emporte les messages dans une transaction.
+
+Les fils directs filtrent `!m.groupId` : un message de groupe porte bien un `fromUserId` mais pas de destinataire unique, et sans ce filtre il remontait dans le fil direct de son auteur. Le badge de la barre latérale additionne les deux — un total qui ignore la moitié des conversations ne veut plus rien dire.
+
 **Messagerie : le module existant, pas un second.** Le fil est déjà filtré par
 participant. Deux ajouts : la liste de contacts d'un client est réduite aux
 comptes du cabinet — sans quoi elle lui rendait **tous** les utilisateurs, les

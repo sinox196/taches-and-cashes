@@ -67,6 +67,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   referrals: { desc: true },
   time_entries: { desc: true },
   messages: { desc: false },
+  message_groups: { desc: false },
   task_assignments: { desc: true },
   notifications: { desc: true },
   push_subscriptions: { desc: false },
@@ -102,6 +103,7 @@ const TABLE_FOR: Record<string, string> = {
   referrals: 'referrals',
   timeEntries: 'time_entries',
   messages: 'messages',
+  messageGroups: 'message_groups',
   taskAssignments: 'task_assignments',
   notifications: 'notifications',
   pushSubscriptions: 'push_subscriptions',
@@ -346,6 +348,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const referrals = tenantCollection('referrals');
   const timeEntries = tenantCollection('time_entries');
   const messages = tenantCollection('messages');
+  const messageGroups = tenantCollection('message_groups');
   const taskAssignments = tenantCollection('task_assignments');
   const notifications = tenantCollection('notifications');
   const pushSubscriptions = tenantCollection('push_subscriptions');
@@ -556,6 +559,54 @@ export async function initPostgres(connectionString: string): Promise<Database> 
         [companyId, String(readerId), String(fromUserId), new Date().toISOString()],
       );
       return res.rowCount ?? 0;
+    },
+
+    /**
+     * `readBy` est un tableau d'ids : l'ajout se fait en JSONB côté serveur
+     * (`|| to_jsonb(...)`) plutôt qu'en lisant puis réécrivant la ligne, pour
+     * que deux membres qui ouvrent le fil au même instant ne s'effacent pas
+     * l'un l'autre. `coalesce` couvre les messages écrits avant ce champ.
+     */
+    markGroupMessagesRead: async (companyId: string, groupId: string, readerId: number) => {
+      const res = await pool.query(
+        `UPDATE messages
+            SET data = jsonb_set(
+                  data, '{readBy}',
+                  coalesce(data->'readBy', '[]'::jsonb) || to_jsonb($3::int), true)
+          WHERE data->>'companyId'  = $1
+            AND data->>'groupId'    = $2
+            AND data->>'fromUserId' <> $3::text
+            AND NOT (coalesce(data->'readBy', '[]'::jsonb) @> to_jsonb($3::int))`,
+        [companyId, String(groupId), readerId],
+      );
+      return res.rowCount ?? 0;
+    },
+
+    getAllMessageGroups: messageGroups.all,
+    getMessageGroupById: messageGroups.byId,
+    createMessageGroup: messageGroups.create,
+    updateMessageGroup: messageGroups.update,
+    /** Le groupe et ses messages partent ensemble, dans une transaction. */
+    deleteMessageGroup: async (companyId: string, id: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `DELETE FROM messages WHERE data->>'companyId' = $1 AND data->>'groupId' = $2`,
+          [companyId, String(id)],
+        );
+        const res = await client.query(
+          `DELETE FROM message_groups WHERE id = $1 AND data->>'companyId' = $2`,
+          [String(id), companyId],
+        );
+        await client.query('COMMIT');
+        return (res.rowCount ?? 0) > 0;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
     getAllTaskAssignments: taskAssignments.all,
