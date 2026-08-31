@@ -2849,11 +2849,17 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       try {
         const catalogue = SECTOR_MISSIONS[company.secteur || 'CABINET'] || [];
         if (catalogue.length === 0) return;
-        await applyMissionCatalogue(company.id, normalizeMissionCatalogue(catalogue));
+        const applied = await applyMissionCatalogue(company.id, normalizeMissionCatalogue(catalogue));
         // Posé **après** coup : une pose interrompue doit pouvoir se rejouer à
         // la requête suivante, et `applyMissionCatalogue` étant additif, la
         // rejouer ne duplique rien.
         await db.updateCompany(company.id, { sectorMissionsSeededAt: new Date().toISOString() });
+        // Une ligne dans le journal du serveur : c'est ce qui permet de
+        // répondre à « pourquoi mon catalogue n'est pas arrivé » sans avoir à
+        // deviner. Une seule fois par entreprise, le drapeau court-circuite
+        // ensuite.
+        console.log(`[missions] catalogue ${company.secteur || 'CABINET'} posé pour ${company.name || company.id} :`
+          + ` ${applied.missionsCreated} mission(s), ${applied.typesCreated} type(s)`);
       } catch (e) {
         console.error('sector missions seeding failed', e);
       } finally {

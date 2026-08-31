@@ -24,18 +24,37 @@ export const MissionsManagement: React.FC = () => {
   const canManage = hasPermission('MANAGE_SERVICES');
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
+  /**
+   * Une réponse qui n'est pas une liste est une **erreur**, pas une liste
+   * vide. L'ancienne version testait `Array.isArray` et, sur un 401/403/500,
+   * laissait simplement l'état à `[]` : l'écran affichait « Aucune mission
+   * pour le moment » alors que la requête avait échoué, ce qui envoie
+   * chercher un catalogue manquant quand le vrai problème est ailleurs. On
+   * remonte donc le message du serveur.
+   */
+  const fetchList = async (url: string): Promise<any[]> => {
+    const res = await fetch(url, { headers: authHeaders });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.error || `${url} — erreur ${res.status}`);
+    if (!Array.isArray(body)) throw new Error(`${url} — réponse inattendue du serveur`);
+    return body;
+  };
+
   const load = async () => {
     try {
       const [m, t, c] = await Promise.all([
-        fetch('/api/services', { headers: authHeaders }).then(r => r.json()),
-        fetch('/api/task-types', { headers: authHeaders }).then(r => r.json()),
-        fetch('/api/clients', { headers: authHeaders }).then(r => r.json()).catch(() => []),
+        fetchList('/api/services'),
+        fetchList('/api/task-types'),
+        // Les clients ne servent qu'à nommer la portée d'une mission : leur
+        // absence ne doit pas masquer le catalogue.
+        fetchList('/api/clients').catch(() => []),
       ]);
-      if (Array.isArray(m)) setMissions(m);
-      if (Array.isArray(t)) setTaskTypes(t);
-      if (Array.isArray(c)) setClients(c);
-    } catch {
-      setError('Impossible de charger les missions.');
+      setMissions(m);
+      setTaskTypes(t);
+      setClients(c);
+      setError('');
+    } catch (e: any) {
+      setError(e?.message || 'Impossible de charger les missions.');
     } finally {
       setIsLoading(false);
     }
@@ -95,7 +114,7 @@ export const MissionsManagement: React.FC = () => {
 
       {isLoading ? (
         <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
-      ) : missions.length === 0 ? (
+      ) : missions.length === 0 && !error ? (
         <div className="bg-white border border-gray-200 rounded-xl p-10 text-center shadow-sm">
           <Layers className="w-8 h-8 text-gray-300 mx-auto mb-3" />
           <p className="text-[13px] text-gray-500">Aucune mission pour le moment.</p>
