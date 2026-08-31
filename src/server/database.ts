@@ -98,6 +98,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.echeanceStatuses) db.echeanceStatuses = [];
     if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
     if (!db.orders) db.orders = [];
+    if (!db.sectorMissions) db.sectorMissions = [];
     if (!db.platformSettings) db.platformSettings = defaultPlatformSettings();
 
     // Legacy single-row settings -> one row per company, keyed like every
@@ -786,6 +787,26 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.echeanceStatusOptions, companyId, id);
       if (index === -1) return false;
       db.echeanceStatusOptions.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    // Une copie, jamais le tableau vivant : l'appelant qui supprime en
+    // parcourant ce qu'il vient de lire sauterait une ligne sur deux — et
+    // c'est exactement ce que fait le remplacement du catalogue d'un secteur.
+    // Le moteur Postgres rend déjà des copies ; rendre ici la référence
+    // interne était précisément la divergence que l'interface commune existe
+    // pour empêcher.
+    getAllSectorMissions: async () => [...db.sectorMissions],
+    createSectorMission: async (mission: any) => {
+      db.sectorMissions.push(mission);
+      await saveDb();
+      return mission;
+    },
+    deleteSectorMission: async (id: string) => {
+      const index = db.sectorMissions.findIndex((m: any) => String(m.id) === String(id));
+      if (index === -1) return false;
+      db.sectorMissions.splice(index, 1);
       await saveDb();
       return true;
     },

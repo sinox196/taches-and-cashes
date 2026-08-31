@@ -206,6 +206,16 @@ export interface Database {
   getAllOrders(): Promise<any[]>;
   createOrder(order: any): Promise<any>;
 
+  /**
+   * Le catalogue de missions par défaut d'un secteur — **global**, pas
+   * rattaché à une entreprise : c'est le modèle dont chaque nouvelle
+   * entreprise du secteur reçoit une copie. Une ligne par mission,
+   * `{ id, secteur, name, taskTypes: string[], sortOrder }`.
+   */
+  getAllSectorMissions(): Promise<any[]>;
+  createSectorMission(mission: any): Promise<any>;
+  deleteSectorMission(id: string): Promise<boolean>;
+
   getSettings(companyId: string): Promise<any>;
   updateSettings(companyId: string, updates: any): Promise<any>;
 
@@ -274,6 +284,8 @@ export const emptyDb = () => ({
   attendanceRecords: [],
   // Parrainage : une ligne par filleul inscrit, portée par le parrain.
   referrals: [],
+  // Catalogue de missions par défaut d'un secteur — global, voir Database.
+  sectorMissions: [],
   leaveBalances: [],
   timeEntries: [],
   // Direct messages between two users (chat).

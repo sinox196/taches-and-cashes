@@ -397,6 +397,12 @@ async function startServer() {
 
       const companyId = user.companyId || LEGACY_COMPANY_ID;
       const company = await expireTrialIfDue(await db.getCompanyById(companyId));
+      // Le catalogue de missions du secteur est copié ici plutôt qu'à la seule
+      // inscription : les entreprises déjà en base au moment où l'exploitant
+      // l'importe doivent le recevoir elles aussi, et la connexion est le seul
+      // moment où l'on tient déjà la fiche entreprise en main. Idempotent, et
+      // court-circuité par un drapeau dès la première fois.
+      await seedSectorMissions(company);
       // Suspendu et essai terminé bloquent tous les deux la connexion, mais ne
       // veulent pas dire la même chose : dans les deux cas les données restent
       // intactes, seul l'accès est fermé.
@@ -2603,6 +2609,60 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   // Services API Routes
   // ---------------------------------------------------------
 
+  /**
+   * Clé de comparaison d'un nom de mission ou de type de tâche.
+   *
+   * Casse, espaces multiples et accents repliés : « Comptabilité »,
+   * « comptabilite » et « Comptabilité  » sont la même mission pour un
+   * cabinet, et ce sont exactement les trois façons dont le même intitulé
+   * revient d'un tableur à l'autre. C'est la seule définition de « doublon »
+   * dans ce module — la création, la modification, l'import et la copie du
+   * catalogue de secteur l'utilisent toutes, sans quoi l'un accepterait ce
+   * qu'un autre refuse.
+   */
+  const MAX_MISSION_IMPORT_ROWS = 500;
+  /** Un intitulé de mission ou de type ne dépasse pas ça — un tableur mal lu peut envoyer une page entière dans une cellule. */
+  const MAX_MISSION_NAME = 160;
+  const MAX_TYPES_PER_MISSION = 100;
+
+  /**
+   * Met un catalogue reçu (import, ou lignes du modèle de secteur) sous sa
+   * forme canonique : intitulés coupés, vides écartés, **et les doublons
+   * fusionnés plutôt que dupliqués** — deux lignes « Comptabilité » dans le
+   * même fichier sont une seule mission portant l'union de leurs types, pas
+   * deux missions homonymes. C'est la règle demandée, appliquée avant que
+   * quoi que ce soit ne touche la base.
+   */
+  const normalizeMissionCatalogue = (rows: any[]): { name: string; taskTypes: string[] }[] => {
+    const out: { name: string; taskTypes: string[] }[] = [];
+    const index = new Map<string, { name: string; taskTypes: string[] }>();
+    for (const raw of rows) {
+      const name = String(raw?.name ?? '').trim().slice(0, MAX_MISSION_NAME);
+      if (!name) continue;
+      const key = missionKey(name);
+      let entry = index.get(key);
+      if (!entry) {
+        entry = { name, taskTypes: [] };
+        index.set(key, entry);
+        out.push(entry);
+      }
+      const seen = new Set(entry.taskTypes.map(missionKey));
+      for (const t of Array.isArray(raw?.taskTypes) ? raw.taskTypes : []) {
+        const label = String(t ?? '').trim().slice(0, MAX_MISSION_NAME);
+        const tKey = missionKey(label);
+        if (!label || seen.has(tKey) || entry.taskTypes.length >= MAX_TYPES_PER_MISSION) continue;
+        seen.add(tKey);
+        entry.taskTypes.push(label);
+      }
+    }
+    return out;
+  };
+
+  const missionKey = (v: any) =>
+    String(v ?? '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .trim().toLowerCase().replace(/\s+/g, ' ');
+
   // GET /api/services
   app.get('/api/services', authenticate, async (req: any, res: any) => {
     try {
@@ -2619,6 +2679,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const { name, clientId } = req.body;
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Service name is required' });
+      }
+
+      const services = await db.getAllServices(req.user.companyId);
+      if (services.some((s: any) => missionKey(s.name) === missionKey(name))) {
+        return res.status(409).json({ error: `La mission « ${name.trim()} » existe déjà.` });
       }
 
       const newService = await db.createService(req.user.companyId, {
@@ -2642,6 +2707,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Service name is required' });
+      }
+
+      // La mission elle-même est exclue : réenregistrer une fiche sans
+      // toucher au nom ne doit pas se refuser comme son propre doublon.
+      const services = await db.getAllServices(req.user.companyId);
+      if (services.some((s: any) => s.id !== id && missionKey(s.name) === missionKey(name))) {
+        return res.status(409).json({ error: `La mission « ${name.trim()} » existe déjà.` });
       }
 
       const updates = {
@@ -2674,6 +2746,180 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  /**
+   * Applique un catalogue de missions à une entreprise, sans jamais créer de
+   * doublon. Un seul point d'entrée pour les deux chemins qui en ont besoin —
+   * l'import d'un tableur et la copie du catalogue de secteur dans une
+   * nouvelle entreprise — donc « ce fichier a-t-il déjà été importé » et
+   * « cette entreprise a-t-elle déjà ce modèle » se répondent de la même façon.
+   *
+   * Une mission déjà présente n'est **pas** recréée ; ses types de tâches
+   * manquants lui sont en revanche ajoutés. C'est strictement additif : rien
+   * n'est renommé ni supprimé, et rejouer le même fichier ne change rien.
+   */
+  const applyMissionCatalogue = async (
+    companyId: string,
+    catalogue: { name: string; taskTypes: string[] }[],
+  ) => {
+    const services = await db.getAllServices(companyId);
+    const allTypes = await db.getAllTaskTypes(companyId);
+    const byKey = new Map<string, any>(services.map((s: any) => [missionKey(s.name), s]));
+
+    // Une base d'id plus grande que Date.now() : une boucle rapide fait tenir
+    // plusieurs créations dans la même milliseconde, ce qu'une création unitaire
+    // ne rencontre jamais mais qu'un import rencontre toujours.
+    let nextId = Date.now() * 1000;
+    const now = new Date().toISOString();
+
+    let missionsCreated = 0;
+    let missionsSkipped = 0;
+    let typesCreated = 0;
+
+    for (const entry of catalogue) {
+      const key = missionKey(entry.name);
+      if (!key) continue;
+
+      let service = byKey.get(key);
+      if (service) {
+        missionsSkipped++;
+      } else {
+        service = await db.createService(companyId, {
+          id: nextId++, name: entry.name.trim(), clientId: null, createdAt: now,
+        });
+        byKey.set(key, service);
+        missionsCreated++;
+      }
+
+      const existingTypeKeys = new Set(
+        allTypes.filter((t: any) => t.serviceId === service.id).map((t: any) => missionKey(t.name)),
+      );
+      for (const rawType of entry.taskTypes) {
+        const typeKey = missionKey(rawType);
+        if (!typeKey || existingTypeKeys.has(typeKey)) continue;
+        existingTypeKeys.add(typeKey);
+        await db.createTaskType(companyId, {
+          id: nextId++, name: String(rawType).trim(), serviceId: service.id, createdAt: now,
+        });
+        typesCreated++;
+      }
+    }
+
+    return { missionsCreated, missionsSkipped, typesCreated };
+  };
+
+  /**
+   * Copie le catalogue de missions du secteur dans une entreprise, une fois.
+   *
+   * C'est ce qui fait qu'« une entreprise du secteur Comptabilité trouve ses
+   * missions déjà là » : le catalogue est importé une fois par l'exploitant,
+   * et chaque entreprise du secteur en reçoit **une copie à elle** — pas une
+   * référence. La copie est figée, exactement comme un modèle de ressource
+   * affecté à un client : renommer ou supprimer une mission chez soi ne touche
+   * pas le modèle, et corriger le modèle ne réécrit pas ce qu'une entreprise a
+   * déjà adapté.
+   *
+   * `sectorMissionsSeededAt` garantit que ça n'arrive qu'une fois : sans lui,
+   * une entreprise qui a délibérément supprimé une mission du catalogue la
+   * verrait revenir à chaque connexion. Le drapeau n'est **pas** posé tant que
+   * le catalogue est vide, sinon les entreprises déjà en base au moment du
+   * premier import ne le recevraient jamais.
+   *
+   * Déclarée en `function` et non en `const` : elle est appelée par la route
+   * de connexion, enregistrée bien plus haut dans `startServer()`, et une
+   * déclaration est hissée sur tout le corps de la fonction.
+   *
+   * Ne lève jamais : un catalogue par défaut manquant ne doit pas empêcher
+   * quelqu'un de se connecter.
+   */
+  async function seedSectorMissions(company: any) {
+    try {
+      if (!company?.id || company.sectorMissionsSeededAt) return;
+      const catalogue = (await db.getAllSectorMissions())
+        .filter((m: any) => m.secteur === (company.secteur || 'CABINET'))
+        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+      if (catalogue.length === 0) return;
+
+      await applyMissionCatalogue(company.id, normalizeMissionCatalogue(catalogue));
+      await db.updateCompany(company.id, { sectorMissionsSeededAt: new Date().toISOString() });
+    } catch (e) {
+      console.error('sector missions seeding failed', e);
+    }
+  }
+
+  /**
+   * POST /api/services/import — création en masse depuis un tableur.
+   *
+   * Le fichier est lu **dans le navigateur** (SheetJS), comme pour l'import
+   * des clients : le serveur ne reçoit qu'un tableau déjà mis en forme, ce qui
+   * lui évite un middleware d'upload et garantit que la correspondance
+   * confirmée à l'écran n'est pas réinterprétée ici.
+   *
+   * Gardé par MANAGE_SERVICES, la même permission qu'une création unitaire :
+   * importer reste créer, pas une capacité distincte.
+   */
+  app.post('/api/services/import', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
+    try {
+      const rows = Array.isArray(req.body?.missions) ? req.body.missions : null;
+      if (!rows) return res.status(400).json({ error: 'missions doit être un tableau.' });
+      if (rows.length === 0) return res.status(400).json({ error: 'Aucune mission à importer.' });
+      if (rows.length > MAX_MISSION_IMPORT_ROWS) {
+        return res.status(400).json({ error: `Trop de missions (${rows.length}). Maximum ${MAX_MISSION_IMPORT_ROWS} par import.` });
+      }
+
+      const catalogue = normalizeMissionCatalogue(rows);
+      if (catalogue.length === 0) return res.status(400).json({ error: 'Aucune mission valide dans ce fichier.' });
+
+      const result = await applyMissionCatalogue(req.user.companyId, catalogue);
+
+      // Poser le catalogue en modèle du secteur est une décision qui engage
+      // **toutes** les entreprises de ce secteur, pas seulement celle qui
+      // importe : réservé à l'exploitant de la plateforme, comme tout ce qui
+      // traverse les tenants.
+      let sectorSaved = false;
+      if (req.body?.setAsSectorDefault && req.user.isPlatformAdmin) {
+        const secteur = SECTEURS.some(x => x.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
+        for (const row of await db.getAllSectorMissions()) {
+          if (row.secteur === secteur) await db.deleteSectorMission(row.id);
+        }
+        let i = 0;
+        for (const entry of catalogue) {
+          await db.createSectorMission({
+            id: genId('secmis'),
+            secteur,
+            name: entry.name,
+            taskTypes: entry.taskTypes,
+            sortOrder: i++,
+            createdAt: new Date().toISOString(),
+          });
+        }
+        sectorSaved = true;
+      }
+
+      res.status(201).json({ ...result, sectorSaved });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Le catalogue de missions par défaut d'un secteur, tel qu'il est stocké.
+   * Lisible par qui gère les missions — c'est ce que son entreprise a reçu, ou
+   * recevra — et écrit uniquement par l'import ci-dessus.
+   */
+  app.get('/api/sector-missions', authenticate, requirePermission('MANAGE_SERVICES'), async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.user.companyId);
+      const secteur = String(req.query.secteur || company?.secteur || 'CABINET');
+      const rows = (await db.getAllSectorMissions())
+        .filter((m: any) => m.secteur === secteur)
+        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+      res.json({ secteur, missions: rows.map((m: any) => ({ name: m.name, taskTypes: m.taskTypes || [] })) });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // ---------------------------------------------------------
   // Types de tâches — each belongs to a mission (service)
   // ---------------------------------------------------------
@@ -2702,6 +2948,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       if (!Number.isFinite(sid) || !(await db.getServiceById(req.user.companyId, sid))) {
         return res.status(400).json({ error: 'A valid mission is required' });
       }
+      // Le doublon se juge **dans la mission**, pas dans tout le catalogue :
+      // deux missions peuvent légitimement avoir un type « Saisie ».
+      const siblings = (await db.getAllTaskTypes(req.user.companyId)).filter((t: any) => t.serviceId === sid);
+      if (siblings.some((t: any) => missionKey(t.name) === missionKey(name))) {
+        return res.status(409).json({ error: `Le type de tâche « ${name.trim()} » existe déjà dans cette mission.` });
+      }
       const created = await db.createTaskType(req.user.companyId, {
         id: Date.now(),
         name: name.trim(),
@@ -2723,12 +2975,20 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         return res.status(400).json({ error: 'Task type name is required' });
       }
       const updates: any = { name: name.trim(), updatedAt: new Date().toISOString() };
+      const allTypes = await db.getAllTaskTypes(req.user.companyId);
+      const current = allTypes.find((t: any) => t.id === id);
       if (serviceId !== undefined) {
         const sid = parseInt(serviceId, 10);
         if (!Number.isFinite(sid) || !(await db.getServiceById(req.user.companyId, sid))) {
           return res.status(400).json({ error: 'A valid mission is required' });
         }
         updates.serviceId = sid;
+      }
+      // Contre les types de la mission d'arrivée — celle du corps si elle
+      // change, sinon celle d'origine — et jamais contre soi-même.
+      const targetService = updates.serviceId ?? current?.serviceId;
+      if (allTypes.some((t: any) => t.id !== id && t.serviceId === targetService && missionKey(t.name) === missionKey(name))) {
+        return res.status(409).json({ error: `Le type de tâche « ${name.trim()} » existe déjà dans cette mission.` });
       }
       const updated = await db.updateTaskType(req.user.companyId, id, updates);
       if (!updated) return res.status(404).json({ error: 'Task type not found' });
@@ -6280,6 +6540,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
           console.error('referral record failed', e);
         }
       }
+
+      // Les missions par défaut du secteur, tout de suite : la première
+      // connexion se fait avec le jeton renvoyé ici, sans repasser par
+      // /api/login, donc attendre la connexion suivante laisserait la première
+      // séance devant un catalogue vide.
+      await seedSectorMissions(company);
 
       const hashed = await bcrypt.hash(password, 10);
       const user = await db.createUser(company.id, {
