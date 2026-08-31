@@ -143,3 +143,26 @@ export const SECTOR_MISSIONS: Record<string, SectorMissionSeed[]> = {
     },
   ],
 };
+
+/**
+ * Le catalogue servi à une entreprise. Le secteur choisit la liste, mais
+ * **aucun secteur ne repart les mains vides** : à défaut d'une liste à lui, il
+ * reçoit celle du cabinet. C'était l'inverse au départ — seul `CABINET` était
+ * servi — et une entreprise inscrite sous « Autres professions de services »
+ * se retrouvait donc devant un écran Missions vide, sans que rien ne le lui
+ * dise. Un catalogue qu'on n'utilise pas se supprime en trois clics ; un
+ * écran vide sans explication ne se répare pas tout seul.
+ */
+export const missionsForSecteur = (secteur: string | null | undefined): SectorMissionSeed[] =>
+  SECTOR_MISSIONS[secteur || 'CABINET'] || SECTOR_MISSIONS.CABINET;
+
+/**
+ * Signature du contenu, pas un numéro tenu à la main : elle change d'elle-même
+ * dès qu'on touche au catalogue. C'est ce que porte la fiche entreprise à la
+ * place d'un simple « déjà posé », pour deux raisons — un drapeau posé à tort
+ * (par une version antérieure, ou une pose partielle) se répare tout seul à la
+ * requête suivante, et une correction du catalogue atteint les entreprises
+ * déjà servies. La pose restant additive, la rejouer ne duplique rien.
+ */
+export const catalogueVersion = (list: SectorMissionSeed[]): string =>
+  `${list.length}m-${list.reduce((n, m) => n + m.taskTypes.length, 0)}t`;

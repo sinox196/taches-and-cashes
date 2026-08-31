@@ -20,6 +20,8 @@ export const MissionsManagement: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [editor, setEditor] = useState<false | { mission: Mission | null }>(false);
+  /** Pourquoi l'écran est vide — voir GET /api/services/catalogue-status. */
+  const [status, setStatus] = useState<any>(null);
 
   const canManage = hasPermission('MANAGE_SERVICES');
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
@@ -53,6 +55,12 @@ export const MissionsManagement: React.FC = () => {
       setTaskTypes(t);
       setClients(c);
       setError('');
+      // Chargé seulement quand il n'y a rien à montrer : c'est le seul cas où
+      // la question « pourquoi ? » se pose.
+      if (m.length === 0) {
+        const res = await fetch('/api/services/catalogue-status', { headers: authHeaders });
+        setStatus(res.ok ? await res.json().catch(() => null) : null);
+      }
     } catch (e: any) {
       setError(e?.message || 'Impossible de charger les missions.');
     } finally {
@@ -118,6 +126,23 @@ export const MissionsManagement: React.FC = () => {
         <div className="bg-white border border-gray-200 rounded-xl p-10 text-center shadow-sm">
           <Layers className="w-8 h-8 text-gray-300 mx-auto mb-3" />
           <p className="text-[13px] text-gray-500">Aucune mission pour le moment.</p>
+          {/* L'état vide s'explique : sans ça, « aucune mission » ne dit pas
+              si le catalogue livré d'office n'est jamais arrivé ou s'il a été
+              vidé, et il n'y a aucun moyen de le savoir depuis l'écran. */}
+          {status && (
+            <p className="text-[11.5px] text-gray-400 mt-2 max-w-md mx-auto leading-relaxed">
+              {status.seededVersion === status.expectedVersion
+                ? <>Le catalogue de votre secteur ({status.catalogueMissions} missions) a été livré
+                    {status.seededAt ? ` le ${new Date(status.seededAt).toLocaleDateString('fr-FR')}` : ''} :
+                    ces missions ont donc été supprimées. Créez les vôtres ci-dessous.</>
+                : <>Le catalogue de votre secteur ({status.catalogueMissions} missions) n'a pas encore été
+                    livré à cette entreprise. Rechargez la page ; s'il n'arrive toujours pas, le serveur
+                    n'exécute probablement pas la dernière version.</>}
+              <span className="block mt-1 text-gray-300">
+                secteur {status.secteur} · attendu {status.expectedVersion} · posé {status.seededVersion || '—'}
+              </span>
+            </p>
+          )}
           <button
             onClick={() => setEditor({ mission: null })}
             className="mt-3 text-[13px] font-medium text-blue-600 hover:text-blue-800"

@@ -15,7 +15,7 @@ import {
 } from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
-import { SECTOR_MISSIONS } from './src/constants/sectorMissions.js';
+import { missionsForSecteur, catalogueVersion } from './src/constants/sectorMissions.js';
 import { toPaymentMode, isCashMode } from './src/constants/paymentModes.js';
 import {
   normalizeDisbursementLines, sumDisbursements, DISBURSEMENT_LINES_MAX,
@@ -2667,6 +2667,31 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .trim().toLowerCase().replace(/\s+/g, ' ');
 
+  /**
+   * Pourquoi l'écran Missions est vide.
+   *
+   * « Aucune mission pour le moment » ne dit pas si le catalogue livré
+   * d'office n'est jamais arrivé, s'il est arrivé et a été vidé, ou si la
+   * requête a échoué. Cette route rend l'état réel — secteur, signature du
+   * catalogue attendue, signature posée, date — pour que l'écran vide
+   * l'explique au lieu de le laisser deviner.
+   */
+  app.get('/api/services/catalogue-status', authenticate, async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.user.companyId);
+      const catalogue = missionsForSecteur(company?.secteur);
+      res.json({
+        secteur: company?.secteur || 'CABINET',
+        expectedVersion: catalogueVersion(catalogue),
+        seededVersion: company?.sectorMissionsCatalogueVersion || null,
+        seededAt: company?.sectorMissionsSeededAt || null,
+        catalogueMissions: catalogue.length,
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET /api/services
   app.get('/api/services', authenticate, async (req: any, res: any) => {
     try {
@@ -2835,33 +2860,42 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   const sectorSeedInFlight = new Map<string, Promise<void>>();
 
   async function seedSectorMissions(company: any): Promise<void> {
-    if (!company?.id || company.sectorMissionsSeededAt) return;
+    if (!company?.id) return;
+
+    const catalogue = missionsForSecteur(company.secteur);
+    const version = catalogueVersion(catalogue);
+    // La **signature du catalogue** plutôt qu'un simple « déjà posé » : un
+    // drapeau posé à tort par une version antérieure, ou une pose partielle,
+    // se répare de lui-même à la requête suivante au lieu de laisser une
+    // entreprise devant un écran vide pour toujours.
+    if (company.sectorMissionsCatalogueVersion === version) return;
 
     // Une seule pose en vol par entreprise. `authenticate` s'exécute sur
     // *chaque* requête, et l'application en tire plusieurs de front au
-    // chargement d'une page : sans ça, toutes verraient le drapeau encore
-    // absent, liraient un catalogue vide et créeraient chacune les 8 missions.
-    // Le drapeau seul ne suffit pas — il n'est posé qu'à la fin.
+    // chargement d'une page : sans ça, toutes verraient la signature encore
+    // absente et créeraient chacune les 8 missions. La signature seule ne
+    // suffit pas — elle n'est écrite qu'à la fin.
     const inFlight = sectorSeedInFlight.get(company.id);
     if (inFlight) return inFlight;
 
     const run = (async () => {
       try {
-        const catalogue = SECTOR_MISSIONS[company.secteur || 'CABINET'] || [];
         if (catalogue.length === 0) return;
         const applied = await applyMissionCatalogue(company.id, normalizeMissionCatalogue(catalogue));
-        // Posé **après** coup : une pose interrompue doit pouvoir se rejouer à
-        // la requête suivante, et `applyMissionCatalogue` étant additif, la
+        // Écrite **après** coup : une pose interrompue doit pouvoir se rejouer
+        // à la requête suivante, et `applyMissionCatalogue` étant additif, la
         // rejouer ne duplique rien.
-        await db.updateCompany(company.id, { sectorMissionsSeededAt: new Date().toISOString() });
-        // Une ligne dans le journal du serveur : c'est ce qui permet de
-        // répondre à « pourquoi mon catalogue n'est pas arrivé » sans avoir à
-        // deviner. Une seule fois par entreprise, le drapeau court-circuite
-        // ensuite.
-        console.log(`[missions] catalogue ${company.secteur || 'CABINET'} posé pour ${company.name || company.id} :`
-          + ` ${applied.missionsCreated} mission(s), ${applied.typesCreated} type(s)`);
+        await db.updateCompany(company.id, {
+          sectorMissionsCatalogueVersion: version,
+          sectorMissionsSeededAt: new Date().toISOString(),
+        });
+        // Une ligne dans le journal : c'est ce qui permet de répondre à
+        // « pourquoi mon catalogue n'est pas arrivé » sans deviner.
+        console.log(`[missions] catalogue ${version} (secteur ${company.secteur || 'CABINET'}) posé pour`
+          + ` ${company.name || company.id} : ${applied.missionsCreated} mission(s),`
+          + ` ${applied.typesCreated} type(s), ${applied.missionsSkipped} déjà présente(s)`);
       } catch (e) {
-        console.error('sector missions seeding failed', e);
+        console.error('[missions] pose du catalogue échouée', e);
       } finally {
         sectorSeedInFlight.delete(company.id);
       }
