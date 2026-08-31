@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Check, ChevronDown } from 'lucide-react';
 
 /**
@@ -41,6 +42,17 @@ interface Props {
  * Le champ reste un vrai bouton refermable au clic extérieur et à Échap —
  * ouvert dans une modale qui se ferme elle-même sur Échap, il doit consommer
  * la touche avant elle, sans quoi choisir un type fermerait le formulaire.
+ *
+ * **Le panneau est rendu dans un portail sur `document.body`**, en position
+ * fixe calculée depuis le rectangle du bouton — le même procédé que le menu
+ * flottant de la grille des échéances. Ce n'est pas un raffinement : la carte
+ * « Démarrer une nouvelle tâche » vit dans une colonne `lg:sticky`, et
+ * `position: sticky` crée un contexte d'empilement. Tout `z-index` posé à
+ * l'intérieur y reste donc enfermé, et la liste ouverte passait sous les
+ * filtres du tableau « Suivi des tâches de l'équipe » quel que soit le chiffre
+ * choisi. Monter la colonne elle-même l'aurait fait passer par-dessus la barre
+ * du haut ; sortir le panneau du contexte est la seule correction qui ne
+ * déplace pas le problème ailleurs.
  */
 export const SearchableSelect: React.FC<Props> = ({
   value, onChange, options, placeholder, searchPlaceholder = 'Rechercher…',
@@ -49,11 +61,52 @@ export const SearchableSelect: React.FC<Props> = ({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const boxRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
+
+  /**
+   * Position du panneau, en coordonnées écran. Recalculée à l'ouverture puis à
+   * chaque défilement ou redimensionnement : en `position: fixed`, un panneau
+   * qui ne suit pas son champ se décroche dès que la page bouge.
+   */
+  const place = () => {
+    const r = boxRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.max(r.width, 240);
+    const PANEL_MAX = 320;
+    // Bascule vers le haut quand le bas de la fenêtre est trop proche, plutôt
+    // que de déborder hors de l'écran.
+    const openUp = r.bottom + PANEL_MAX > window.innerHeight && r.top > PANEL_MAX;
+    setPos({
+      left: Math.min(Math.max(8, r.left), window.innerWidth - width - 8),
+      top: openUp ? r.top - 4 - PANEL_MAX : r.bottom + 4,
+      width,
+    });
+  };
+
+  useLayoutEffect(() => { if (open) place(); }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMove = () => place();
+    // `true` : capter aussi le défilement des conteneurs internes, pas
+    // seulement celui de la fenêtre — la page de pointage défile dans <main>.
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setOpen(false); setQuery(''); }
+      const t = e.target as Node;
+      // Le panneau n'est plus un descendant du champ : il faut le tester à part.
+      if (boxRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+      setQuery('');
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -91,8 +144,11 @@ export const SearchableSelect: React.FC<Props> = ({
         <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
       </button>
 
-      {open && !disabled && (
-        <div className="absolute z-40 mt-1 w-full min-w-[240px] bg-white border border-gray-200 rounded-lg shadow-lg">
+      {open && !disabled && pos && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 9999 }}
+          className="bg-white border border-gray-200 rounded-lg shadow-lg">
           <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-100">
             <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
             <input
@@ -131,7 +187,8 @@ export const SearchableSelect: React.FC<Props> = ({
               {matches.length} sur {options.length}
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

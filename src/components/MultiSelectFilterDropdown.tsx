@@ -62,7 +62,9 @@ export const MultiSelectFilterDropdown: React.FC<MultiSelectFilterDropdownProps>
         : `${selected.length} sélectionnés`;
 
   return (
-    <div className={`relative ${widthClass}`} ref={boxRef}>
+    // Même règle que SearchableSelect : le filtre ouvert passe au-dessus du
+    // reste de la page, sinon c'est lui qui disparaîtrait sous ce qui le suit.
+    <div className={`relative ${widthClass} ${open ? 'z-50' : ''}`} ref={boxRef}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
