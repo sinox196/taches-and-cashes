@@ -55,7 +55,17 @@ interface StatusOption {
  * calendrier" (pick one client, see their year laid out as one card per
  * month instead of scrolling a single very wide row).
  */
-export const EcheancesGrid: React.FC = () => {
+interface EcheancesGridProps {
+  /**
+   * Peut modifier la grille. Sans lui, elle se consulte : aucun menu de
+   * cellule, aucun éditeur de colonne, aucun bouton d'ajout. Le serveur
+   * refuse de toute façon les écritures — ceci évite d'offrir un geste qui
+   * finirait en 403.
+   */
+  canManage: boolean;
+}
+
+export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
@@ -82,6 +92,7 @@ export const EcheancesGrid: React.FC = () => {
   const [editingStatusColor, setEditingStatusColor] = useState(DEFAULT_COLOR);
 
   const openMenu = (clientId: number, columnId: string, rect: DOMRect) => {
+    if (!canManage) return;
     setMenu({ clientId, columnId, x: rect.left, y: rect.bottom });
     setAddingStatus(false);
     setEditingStatusId(null);
@@ -198,6 +209,7 @@ export const EcheancesGrid: React.FC = () => {
 
   const openEditColumn = (column: Column, e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (!canManage) return;
     setEditingColumn(column);
     setEditMonth(column.month);
     setEditLabel(column.label);
@@ -404,13 +416,19 @@ export const EcheancesGrid: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setAddingColumn(true)}
-            className="bg-navy hover:bg-navy-hover text-white px-4 py-2 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Ajouter une échéance
-          </button>
+          {canManage ? (
+            <button
+              onClick={() => setAddingColumn(true)}
+              className="bg-navy hover:bg-navy-hover text-white px-4 py-2 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Ajouter une échéance
+            </button>
+          ) : (
+            // Dire pourquoi rien ne réagit vaut mieux qu'une grille qui semble
+            // cliquable et ne l'est pas.
+            <span className="text-[11.5px] text-gray-400">Consultation — la grille se modifie par un administrateur.</span>
+          )}
         </div>
       </div>
 

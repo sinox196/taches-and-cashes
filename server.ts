@@ -381,15 +381,23 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
     'https://tej.finances.gov.tn/home', { icon: '/logos/tej.jpg' },
   );
 
-  // The 28 échéance columns of the cabinet's own 2025 suivi mensuel sheet —
-  // real column headers (month + précis label), not placeholder ones. Cell
-  // values are left for the cabinet to fill in from the grid itself.
+  // Les 28 colonnes du suivi mensuel du cabinet — de vrais en-têtes (mois +
+  // libellé précis), pas du remplissage — déclinées sur chaque exercice livré.
+  // Les cellules, elles, restent vides : c'est au cabinet de les remplir.
   const existingColumns = await db.getAllEcheanceColumns(companyId);
   const seedColumn = async (id: string, year: number, month: number, label: string, sortOrder: number) => {
     if (existingColumns.some((c: any) => c.id === id)) return;
     await db.createEcheanceColumn(companyId, { id, year, month, label, sortOrder });
   };
-  const E2025: [number, string][] = [
+  /**
+   * La grille d'un exercice, telle que le cabinet la tient : mois + libellé
+   * précis, dans l'ordre où ils tombent. Écrite une fois pour 2025, l'année du
+   * tableau d'origine ; les autres exercices s'en déduisent en remplaçant
+   * l'année dans les libellés qui la portent (« IS 2025 », « RNE Bilan 2025 »,
+   * les IRPP…). Ce sont les mêmes échéances d'une année sur l'autre — les
+   * recopier à la main serait quatre listes à corriger au lieu d'une.
+   */
+  const ECHEANCE_TEMPLATE: [number, string][] = [
     [1, 'DM 12/2025'], [1, 'D SUSP TVA TR04'], [1, 'CNSS TR04'],
     [2, 'DM 1'],
     [3, 'DM 2'], [3, 'IS 2025'],
@@ -403,9 +411,21 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
     [11, 'DM 10'],
     [12, 'DM 11'], [12, 'Acompte 3'],
   ];
-  for (let i = 0; i < E2025.length; i++) {
-    const [month, label] = E2025[i];
-    await seedColumn(`ec-seed-2025-${i}`, 2025, month, label, i);
+  /**
+   * Les exercices livrés d'office. Ajouter une année, c'est ajouter un nombre
+   * ici : la pose est idempotente par id, donc les colonnes déjà présentes —
+   * et surtout les cellules que le cabinet a remplies — ne bougent pas.
+   */
+  const ECHEANCE_YEARS = [2025, 2026, 2027, 2028];
+
+  for (const year of ECHEANCE_YEARS) {
+    for (let i = 0; i < ECHEANCE_TEMPLATE.length; i++) {
+      const [month, template] = ECHEANCE_TEMPLATE[i];
+      const label = template.replace(/2025/g, String(year));
+      // L'ordre est propre à l'année : un bloc par exercice, pour que deux
+      // années ne s'entrelacent pas si un écran les affiche ensemble.
+      await seedColumn(`ec-seed-${year}-${i}`, year, month, label, (year - 2025) * 100 + i);
+    }
   }
 
   // The status vocabulary a cell can be set to — admin-editable from here on,
@@ -592,6 +612,9 @@ async function startServer() {
       // La fiche entreprise est déjà en main, et le drapeau court-circuite en
       // une comparaison dès la deuxième fois.
       await seedSectorMissions(company);
+      // Même raison, même endroit : la fiche entreprise est déjà en main, et
+      // la signature court-circuite dès la deuxième requête.
+      await seedResourceLibraryFor(company);
       next();
     } catch (e) {
       res.status(401).json({ error: 'Invalid token' });
@@ -2964,6 +2987,51 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * Ne lève jamais : un catalogue par défaut manquant ne doit pas empêcher
    * quelqu'un de se connecter.
    */
+  /**
+   * Pose la bibliothèque Ressources métier (modèles de documents, liens
+   * utiles, colonnes d'échéances) pour une entreprise, une seule fois.
+   *
+   * Elle n'était semée que pour l'entreprise historique, au démarrage : une
+   * entreprise inscrite par le formulaire public n'avait donc **aucune**
+   * échéance, alors que le compte de démonstration en montrait vingt-huit.
+   * Même mécanique que le catalogue de missions — signature de contenu plutôt
+   * qu'un simple « déjà posé », pose en vol dédupliquée, drapeau écrit à la
+   * fin pour qu'une pose interrompue se rejoue.
+   *
+   * Réservée aux secteurs qui voient le module : le gating existant le cache
+   * aux « autres professions de services », et lui écrire des lignes qu'aucun
+   * écran n'affiche serait du travail pour rien.
+   */
+  const resourceSeedInFlight = new Map<string, Promise<void>>();
+  const RESOURCE_LIBRARY_VERSION = '6t-3l-4y';
+
+  async function seedResourceLibraryFor(company: any): Promise<void> {
+    if (!company?.id) return;
+    if (!companyHasResourcesModule(company.secteur)) return;
+    if (company.resourceLibraryVersion === RESOURCE_LIBRARY_VERSION) return;
+
+    const inFlight = resourceSeedInFlight.get(company.id);
+    if (inFlight) return inFlight;
+
+    const run = (async () => {
+      try {
+        await seedResourceLibrary(db, company.id);
+        await db.updateCompany(company.id, {
+          resourceLibraryVersion: RESOURCE_LIBRARY_VERSION,
+          resourceLibrarySeededAt: new Date().toISOString(),
+        });
+        console.log(`[ressources] bibliothèque ${RESOURCE_LIBRARY_VERSION} posée pour ${company.name || company.id}`);
+      } catch (e) {
+        console.error('[ressources] pose de la bibliothèque échouée', e);
+      } finally {
+        resourceSeedInFlight.delete(company.id);
+      }
+    })();
+
+    resourceSeedInFlight.set(company.id, run);
+    return run;
+  }
+
   const sectorSeedInFlight = new Map<string, Promise<void>>();
 
   async function seedSectorMissions(company: any): Promise<void> {
@@ -6413,7 +6481,16 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   // (client, column). No recurrence engine, no generated instances — every
   // cell is set directly, the same shape as the cabinet's own spreadsheet.
 
-  app.get('/api/echeance-columns', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+  // ---- Échéances ---------------------------------------------------------
+  //
+  // **Lire la grille est ouvert à `VIEW_RESOURCES`, l'écrire reste
+  // `MANAGE_RESOURCES`.** Le suivi mensuel dit qui doit quoi et quand : c'est
+  // exactement ce qu'un collaborateur a besoin de consulter pour savoir où il
+  // en est, et le lui refuser l'obligeait à demander à l'administrateur. Poser
+  // une valeur dans une cellule, ajouter ou supprimer une colonne, renommer un
+  // statut — tout ce qui change la grille — n'a pas bougé.
+
+  app.get('/api/echeance-columns', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
       let columns = await db.getAllEcheanceColumns(req.user.companyId);
       if (req.query.year) columns = columns.filter((c: any) => c.year === Number(req.query.year));
@@ -6470,7 +6547,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
-  app.get('/api/echeance-statuses', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+  app.get('/api/echeance-statuses', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
       let statuses = await db.getAllEcheanceStatuses(req.user.companyId);
       if (req.query.year) {
@@ -6517,7 +6594,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   // the whole point of those tokens is that no screen invents its own color.
   const ECHEANCE_STATUS_COLORS = ['done', 'late', 'run', 'pause', 'admin', 'collab', 'gray'];
 
-  app.get('/api/echeance-status-options', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+  app.get('/api/echeance-status-options', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
       const options = await db.getAllEcheanceStatusOptions(req.user.companyId);
       res.json(options.sort((a: any, b: any) => a.sortOrder - b.sortOrder));
@@ -6935,6 +7012,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // /api/login, donc attendre la connexion suivante laisserait la première
       // séance devant un catalogue vide.
       await seedSectorMissions(company);
+      await seedResourceLibraryFor(company);
 
       const hashed = await bcrypt.hash(password, 10);
       const user = await db.createUser(company.id, {

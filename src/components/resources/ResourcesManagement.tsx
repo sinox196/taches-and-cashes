@@ -90,8 +90,13 @@ export const ResourcesManagement: React.FC = () => {
     ...(canManage ? [
       { id: 'documents' as Tab, label: 'Documents des modèles', icon: FileCheck2 },
       { id: 'links' as Tab, label: 'Liens utiles', icon: Link2 },
-      { id: 'deadlines' as Tab, label: 'Échéances', icon: CalendarClock },
     ] : []),
+    // Les échéances se **consultent** avec VIEW_RESOURCES : le suivi mensuel
+    // dit qui doit quoi et quand, c'est ce qu'un collaborateur a besoin de
+    // voir pour savoir où il en est. Les modifier reste réservé — la grille
+    // reçoit `canManage` et n'ouvre aucun menu sans lui, et le serveur le
+    // revérifie sur chaque écriture.
+    { id: 'deadlines' as Tab, label: 'Échéances', icon: CalendarClock },
   ];
 
   return (
@@ -134,7 +139,7 @@ export const ResourcesManagement: React.FC = () => {
       {tab === 'work' ? (
         <MyResourcesWork />
       ) : tab === 'deadlines' ? (
-        <EcheancesGrid />
+        <EcheancesGrid canManage={canManage} />
       ) : isLoading ? (
         <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
       ) : tab === 'documents' ? (
