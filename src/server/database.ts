@@ -270,6 +270,34 @@ async function initJsonDb(): Promise<Database> {
       return true;
     },
 
+    renameClientCustomField: async (companyId: string, from: string, to: string) => {
+      let changed = 0;
+      for (const c of db.clients as any[]) {
+        if (c.companyId !== companyId) continue;
+        const fields = c.customFields;
+        if (!fields || !Object.prototype.hasOwnProperty.call(fields, from)) continue;
+        // Reconstruit dans l'ordre d'origine plutôt que « supprimer puis
+        // rajouter » : la clé renommée garderait sinon la dernière place.
+        const next: Record<string, any> = {};
+        for (const [k, v] of Object.entries(fields)) next[k === from ? to : k] = v;
+        c.customFields = next;
+        changed++;
+      }
+      if (changed) await saveDb();
+      return changed;
+    },
+    deleteClientCustomField: async (companyId: string, name: string) => {
+      let changed = 0;
+      for (const c of db.clients as any[]) {
+        if (c.companyId !== companyId) continue;
+        if (!c.customFields || !Object.prototype.hasOwnProperty.call(c.customFields, name)) continue;
+        delete c.customFields[name];
+        changed++;
+      }
+      if (changed) await saveDb();
+      return changed;
+    },
+
     getAllServices: async (companyId: string) => scoped(db.services, companyId),
     getServiceById: async (companyId: string, id: number) => findScoped(db.services, companyId, id),
     createService: async (companyId: string, service: any) => {

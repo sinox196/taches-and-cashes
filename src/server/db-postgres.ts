@@ -411,6 +411,38 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     updateClient: clients.update,
     deleteClient: clients.remove,
 
+    /**
+     * Une seule instruction plutôt qu'une lecture puis N écritures : la
+     * colonne n'existe qu'en clé sur chaque fiche, donc la renommer, c'est
+     * toucher toutes les fiches qui la portent d'un coup — et un renommage
+     * à moitié appliqué laisserait deux colonnes dans le tableau.
+     * `jsonb_exists(...)` plutôt que l'opérateur `?`, qui se lit comme un
+     * paramètre chez plus d'un pilote et d'un pooler.
+     */
+    renameClientCustomField: async (companyId: string, from: string, to: string) => {
+      const res = await pool.query(
+        `UPDATE clients
+            SET data = jsonb_set(
+                  data, '{customFields}',
+                  ((data->'customFields') - $2::text)
+                    || jsonb_build_object($3::text, data->'customFields'->$2::text))
+          WHERE data->>'companyId' = $1
+            AND jsonb_exists(data->'customFields', $2::text)`,
+        [companyId, from, to],
+      );
+      return res.rowCount ?? 0;
+    },
+    deleteClientCustomField: async (companyId: string, name: string) => {
+      const res = await pool.query(
+        `UPDATE clients
+            SET data = jsonb_set(data, '{customFields}', (data->'customFields') - $2::text)
+          WHERE data->>'companyId' = $1
+            AND jsonb_exists(data->'customFields', $2::text)`,
+        [companyId, name],
+      );
+      return res.rowCount ?? 0;
+    },
+
     getAllServices: services.all,
     getServiceById: services.byId,
     createService: services.create,

@@ -1447,6 +1447,89 @@ async function startServer() {
   });
 
   /**
+   * Les colonnes personnalisées se renomment et se suppriment **pour tous les
+   * clients à la fois**, depuis le sélecteur de colonnes. Une telle colonne
+   * n'existe nulle part ailleurs qu'en clé de `customFields` sur chaque
+   * fiche : la corriger fiche par fiche voudrait dire ouvrir chaque client,
+   * et laisserait deux colonnes dans le tableau tant que le tour n'est pas
+   * fini. C'est aussi pour ça que les deux opérations sont côté serveur et
+   * pas une boucle de PUT depuis le navigateur — un onglet fermé au milieu
+   * laisserait le cabinet avec « Tel » sur la moitié des fiches et
+   * « Téléphone » sur l'autre.
+   *
+   * Ne touche que les champs personnalisés : les colonnes natives (nom,
+   * email, matricule…) se masquent, elles ne se renomment pas.
+   */
+  const NATIVE_CLIENT_FIELDS = new Set([
+    'id', 'companyid', 'name', 'type', 'email', 'phone', 'taxid', 'address', 'city',
+    'country', 'status', 'notes', 'customfields', 'soldeanterieur', 'encaissements',
+    'nonfacturable', 'userid', 'createdat',
+  ]);
+
+  /** Même normalisation que l'import : un en-tête de tableur arrive avec des
+   *  espaces en trop, et « Tel  » ne doit pas devenir une deuxième colonne. */
+  const normalizeFieldName = (v: any) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
+
+  const clientCustomFieldKeys = async (companyId: string) => {
+    const clients = await db.getAllClients(companyId);
+    const keys = new Set<string>();
+    clients.forEach((c: any) => {
+      if (c.customFields) Object.keys(c.customFields).forEach(k => keys.add(k));
+    });
+    return keys;
+  };
+
+  // PUT /api/clients/fields  { from, to }
+  app.put('/api/clients/fields', authenticate, requirePermission('MANAGE_CLIENT_FIELDS'), async (req: any, res: any) => {
+    try {
+      const from = String(req.body?.from ?? '');
+      const to = normalizeFieldName(req.body?.to);
+      if (!from || !to) return res.status(400).json({ error: 'Nom de colonne requis.' });
+
+      const keys = await clientCustomFieldKeys(req.user.companyId);
+      if (!keys.has(from)) return res.status(404).json({ error: 'Cette colonne n\'existe pas.' });
+      if (to === from) return res.json({ from, to, updated: 0 });
+
+      // Refusé plutôt que fusionné : deux colonnes rabattues l'une sur
+      // l'autre perdraient une valeur par fiche, sans dire laquelle.
+      if ([...keys].some(k => k !== from && k.toLowerCase() === to.toLowerCase())) {
+        return res.status(409).json({ error: `La colonne « ${to} » existe déjà.` });
+      }
+      // Une colonne personnalisée qui porte le nom d'un champ natif est
+      // inatteignable : le filtre et le tri ne retombent sur customFields que
+      // lorsque la propriété de premier niveau est absente.
+      if (NATIVE_CLIENT_FIELDS.has(to.toLowerCase())) {
+        return res.status(409).json({ error: `« ${to} » est un champ natif de la fiche client.` });
+      }
+
+      const updated = await db.renameClientCustomField(req.user.companyId, from, to);
+      res.json({ from, to, updated });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // DELETE /api/clients/fields?name=...
+  app.delete('/api/clients/fields', authenticate, requirePermission('MANAGE_CLIENT_FIELDS'), async (req: any, res: any) => {
+    try {
+      // Le nom voyage en query et non dans le chemin : un en-tête de tableur
+      // contient volontiers « / » ou « . ».
+      const name = String(req.query?.name ?? '');
+      if (!name) return res.status(400).json({ error: 'Nom de colonne requis.' });
+
+      const keys = await clientCustomFieldKeys(req.user.companyId);
+      if (!keys.has(name)) return res.status(404).json({ error: 'Cette colonne n\'existe pas.' });
+
+      const updated = await db.deleteClientCustomField(req.user.companyId, name);
+      res.json({ name, updated });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * The distinct values a given field actually holds, so the Clients filter
    * can offer real choices instead of a blind free-text box. Works for a
    * native column or a customFields key — same lookup order the list

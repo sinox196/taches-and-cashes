@@ -149,6 +149,85 @@ export const ClientsManagement: React.FC = () => {
     });
   };
 
+  /**
+   * Renommer / supprimer une colonne personnalisée depuis le sélecteur de
+   * colonnes, pour **tous** les clients. Réservé aux colonnes personnalisées :
+   * une colonne native se masque, elle ne se renomme pas.
+   */
+  const [renamingField, setRenamingField] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [fieldBusy, setFieldBusy] = useState(false);
+  /** L'erreur porte la colonne concernée : le sélecteur défile, donc un
+   *  bandeau en haut du panneau se retrouve hors écran juste après la touche
+   *  Entrée — le même piège que l'éditeur de Cash, où les erreurs sont
+   *  passées à côté du bouton plutôt qu'en tête de formulaire. */
+  const [fieldError, setFieldError] = useState<{ key: string; message: string } | null>(null);
+
+  /** Le tri, les filtres et les colonnes visibles désignent la colonne par sa
+   *  clé — c'est-à-dire par son nom. Sans ça, un renommage vidait la liste
+   *  (tri sur une clé disparue) ou masquait la colonne qu'on venait de
+   *  renommer, et une suppression laissait un filtre actif introuvable. */
+  const applyColumnKeyChange = (from: string, to: string | null) => {
+    setVisibleColumns(prev => {
+      const next = to ? prev.map(c => (c === from ? to : c)) : prev.filter(c => c !== from);
+      localStorage.setItem('clientsVisibleColumns', JSON.stringify(next));
+      return next;
+    });
+    setSortField(f => (f === from ? (to ?? 'name') : f));
+    setFilterKey(f => (f === from ? (to ?? 'name') : f));
+    setActiveFilters(prev => {
+      if (!(from in prev)) return prev;
+      const next = { ...prev };
+      const value = next[from];
+      delete next[from];
+      if (to) next[to] = value;
+      return next;
+    });
+  };
+
+  const handleRenameField = async (from: string) => {
+    const to = renameValue.trim();
+    if (!to || to === from) { setRenamingField(null); setFieldError(null); return; }
+    setFieldBusy(true); setFieldError(null);
+    try {
+      const res = await fetch('/api/clients/fields', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ from, to }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setFieldError({ key: from, message: data.error || 'Renommage impossible.' }); return; }
+      applyColumnKeyChange(from, data.to || to);
+      setRenamingField(null);
+      await fetchAvailableFields();
+      await fetchClients();
+    } catch {
+      setFieldError({ key: from, message: 'Renommage impossible.' });
+    } finally {
+      setFieldBusy(false);
+    }
+  };
+
+  const handleDeleteField = async (name: string) => {
+    if (!confirm(`Supprimer la colonne « ${name} » de tous les clients ? Les valeurs qu'elle contient seront perdues.`)) return;
+    setFieldBusy(true); setFieldError(null);
+    try {
+      const res = await fetch(`/api/clients/fields?name=${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setFieldError({ key: name, message: data.error || 'Suppression impossible.' }); return; }
+      applyColumnKeyChange(name, null);
+      await fetchAvailableFields();
+      await fetchClients();
+    } catch {
+      setFieldError({ key: name, message: 'Suppression impossible.' });
+    } finally {
+      setFieldBusy(false);
+    }
+  };
+
   const [filterKey, setFilterKey] = useState<string>('name');
   const [filterValue, setFilterValue] = useState<string>('');
   /** The "Champ" picker is searchable rather than a plain <select> — there
@@ -641,23 +720,111 @@ export const ClientsManagement: React.FC = () => {
               </button>
 
               {isColumnsOpen && (
-                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-2 w-[min(16rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4 max-h-[300px] overflow-y-auto">
+                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-2 w-[min(22rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-xl shadow-xl z-50 p-4 max-h-[340px] overflow-y-auto">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-[13px] font-bold text-gray-900">Affichage des colonnes</h3>
-                    <button onClick={() => setIsColumnsOpen(false)} className="text-gray-400 hover:text-gray-600">
+                    <button onClick={() => { setIsColumnsOpen(false); setRenamingField(null); setFieldError(null); }} className="text-gray-400 hover:text-gray-600">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
                   <div className="space-y-2">
-                    {columnsPickerList.map(col => (
-                      <label key={col.key} className="flex items-center gap-3 cursor-pointer group" onClick={(e) => { e.preventDefault(); toggleColumn(col.key); }}>
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${visibleColumns.includes(col.key) ? 'bg-navy border-navy' : 'border-gray-300 bg-white group-hover:border-gray-400'}`}>
-                          {visibleColumns.includes(col.key) && <Check className="w-3 h-3 text-white" />}
+                    {columnsPickerList.map(col => {
+                      const isCustom = (col as any).isCustom === true;
+                      /* Renommer et supprimer ne valent que pour une colonne
+                         personnalisée : une colonne native (nom, email,
+                         matricule…) n'est pas une clé de customFields, elle se
+                         masque seulement. */
+                      const canEdit = isCustom && hasPermission('MANAGE_CLIENT_FIELDS');
+
+                      const rowError = fieldError && fieldError.key === col.key ? fieldError.message : null;
+
+                      if (renamingField === col.key) {
+                        return (
+                          <div key={col.key}>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              autoFocus
+                              type="text"
+                              value={renameValue}
+                              disabled={fieldBusy}
+                              onChange={e => setRenameValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); handleRenameField(col.key); }
+                                /* Échap ferme le champ, pas le sélecteur qui le contient. */
+                                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenamingField(null); setFieldError(null); }
+                              }}
+                              className="flex-1 min-w-0 px-2 py-1 border border-gray-300 rounded-md text-[12.5px] focus:ring-1 focus:ring-navy"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRenameField(col.key)}
+                              disabled={fieldBusy || !renameValue.trim()}
+                              className="p-1.5 text-white bg-navy hover:bg-navy-hover rounded-md disabled:opacity-50"
+                              title="Renommer pour tous les clients"
+                            >
+                              {fieldBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setRenamingField(null); setFieldError(null); }}
+                              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md"
+                              title="Annuler"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          {rowError && <p className="mt-1 text-[11.5px] text-red-600 leading-snug">{rowError}</p>}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={col.key}>
+                        <div className="flex items-center gap-2 group">
+                          <label className="flex items-center gap-3 cursor-pointer flex-1 min-w-0" onClick={(e) => { e.preventDefault(); toggleColumn(col.key); }}>
+                            <div className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${visibleColumns.includes(col.key) ? 'bg-navy border-navy' : 'border-gray-300 bg-white group-hover:border-gray-400'}`}>
+                              {visibleColumns.includes(col.key) && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                            <span className="text-[13px] text-gray-700 font-medium select-none truncate" title={col.label}>{col.label}</span>
+                          </label>
+                          {canEdit && (
+                            /* Toujours visibles, jamais révélées au survol : la
+                               grille des échéances a déjà retiré une poubelle
+                               qui n'apparaissait qu'au survol — sur une tablette
+                               elle est inatteignable, et une action qu'on ne
+                               voit pas n'existe pas. */
+                            <div className="shrink-0 flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                disabled={fieldBusy}
+                                onClick={() => { setRenamingField(col.key); setRenameValue(col.label); setFieldError(null); }}
+                                className="p-1 text-gray-400 hover:text-navy hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+                                title="Renommer pour tous les clients"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={fieldBusy}
+                                onClick={() => handleDeleteField(col.key)}
+                                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                                title="Supprimer pour tous les clients"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        <span className="text-[13px] text-gray-700 font-medium select-none">{col.label}</span>
-                      </label>
-                    ))}
+                        {rowError && <p className="mt-1 text-[11.5px] text-red-600 leading-snug">{rowError}</p>}
+                        </div>
+                      );
+                    })}
                   </div>
+                  {hasPermission('MANAGE_CLIENT_FIELDS') && availableFields.length > 0 && (
+                    <p className="mt-3 pt-3 border-t border-gray-100 text-[11.5px] text-gray-500 leading-snug">
+                      Renommer ou supprimer une colonne personnalisée s'applique à <strong>tous les clients</strong>.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

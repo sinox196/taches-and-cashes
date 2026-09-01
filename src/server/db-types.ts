@@ -41,6 +41,15 @@ export interface Database {
   createClient(companyId: string, client: any): Promise<any>;
   updateClient(companyId: string, id: number, updates: any): Promise<any | null>;
   deleteClient(companyId: string, id: number): Promise<boolean>;
+  /**
+   * Renomme / supprime une clé de `customFields` sur **tous** les clients de
+   * l'entreprise, et rend le nombre de fiches touchées. Une colonne
+   * personnalisée n'existe nulle part ailleurs qu'en clé sur chaque fiche :
+   * la renommer client par client depuis l'écran laisserait deux colonnes
+   * pendant l'opération et une seule au bout, selon qui a été traité.
+   */
+  renameClientCustomField(companyId: string, from: string, to: string): Promise<number>;
+  deleteClientCustomField(companyId: string, name: string): Promise<number>;
 
   getAllServices(companyId: string): Promise<any[]>;
   getServiceById(companyId: string, id: number): Promise<any | undefined>;
