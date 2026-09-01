@@ -277,20 +277,31 @@ const accruedSeconds = (t: any) => {
  */
 /**
  * La grille d'échéances d'un exercice, telle que le cabinet la tient : mois +
- * libellé précis, dans l'ordre où ils tombent. Écrite une fois pour 2025,
- * l'année du tableau d'origine ; les autres exercices s'en déduisent en
- * remplaçant l'année dans les libellés qui la portent (« IS 2025 »,
- * « RNE Bilan 2025 », les IRPP…). Ce sont les mêmes échéances d'une année sur
- * l'autre — les recopier à la main serait autant de listes à corriger.
+ * libellé précis, dans l'ordre où ils tombent. Écrite une fois, les autres
+ * exercices s'en déduisent — les recopier à la main serait autant de listes à
+ * corriger.
+ *
+ * `{PREV}` est **l'exercice déclaré, pas l'année de la colonne** : ce qu'on
+ * dépose pendant une année porte sur la précédente. La déclaration mensuelle
+ * de janvier couvre décembre d'avant, l'IS et les IRPP soldent l'exercice
+ * clos, la déclaration employeur porte sur les salaires de l'an passé et le
+ * bilan RNE sur les comptes de l'an passé. La grille 2028 s'écrit donc
+ * « DM 12/2027 », « IS 2027 », « IRPP 2027-COMMERCE »… Les libellés sans
+ * `{PREV}` (DM 1 à 11, CNSS TR, D SUSP TVA, Acompte) ne portent pas d'année
+ * du tout et sont identiques d'un exercice à l'autre.
+ *
+ * Un jeton plutôt qu'une année en dur qu'on remplacerait : avec « 2025 »
+ * écrit ici, le modèle était en fait celui de l'exercice 2026 et le décalage
+ * d'un an restait invisible — c'est comme ça qu'il s'est glissé.
  */
 const ECHEANCE_TEMPLATE: [number, string][] = [
-  [1, 'DM 12/2025'], [1, 'D SUSP TVA TR04'], [1, 'CNSS TR04'],
+  [1, 'DM 12/{PREV}'], [1, 'D SUSP TVA TR04'], [1, 'CNSS TR04'],
   [2, 'DM 1'],
-  [3, 'DM 2'], [3, 'IS 2025'],
-  [4, 'DM 3'], [4, 'D SUSP TVA TR01'], [4, 'CNSS TR01'], [4, 'IRPP 2025-COMMERCE'], [4, 'DEC EMPLOYEUR 2025'],
-  [5, 'DM 4'], [5, 'IRPP 2025-SERVICE + FONC LIBERALE + REV FONCIER'],
+  [3, 'DM 2'], [3, 'IS {PREV}'],
+  [4, 'DM 3'], [4, 'D SUSP TVA TR01'], [4, 'CNSS TR01'], [4, 'IRPP {PREV}-COMMERCE'], [4, 'DEC EMPLOYEUR {PREV}'],
+  [5, 'DM 4'], [5, 'IRPP {PREV}-SERVICE + FONC LIBERALE + REV FONCIER'],
   [6, 'DM 5'], [6, 'Acompte 1'],
-  [7, 'DM 6'], [7, 'D SUSP TVA TR02'], [7, 'CNSS TR02'], [7, 'RNE Bilan 2025'],
+  [7, 'DM 6'], [7, 'D SUSP TVA TR02'], [7, 'CNSS TR02'], [7, 'RNE Bilan {PREV}'],
   [8, 'DM 7'],
   [9, 'DM 8'], [9, 'Acompte 2'],
   [10, 'DM 9'], [10, 'D SUSP TVA TR03'], [10, 'CNSS TR03'],
@@ -335,7 +346,7 @@ const echeanceColumnsForYear = (year: number) =>
     id: `ec-seed-${year}-${i}`,
     year,
     month,
-    label: template.replace(/2025/g, String(year)),
+    label: template.replace(/\{PREV\}/g, String(year - 1)),
     // Un bloc d'ordre par exercice, pour que deux années ne s'entrelacent pas.
     sortOrder: (year - 2025) * 100 + i,
   }));
@@ -454,7 +465,19 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
   const existingColumns = await db.getAllEcheanceColumns(companyId);
   const seedColumn = async (base: string, year: number, month: number, label: string, sortOrder: number) => {
     const id = ownedSeedId(existingColumns, companyId, base);
-    if (existingColumns.some((c: any) => c.id === id)) return;
+    const existing = existingColumns.find((c: any) => c.id === id);
+    if (existing) {
+      // Une colonne déjà posée voit son libellé **corrigé**, pas seulement
+      // sauté : c'est le seul chemin par lequel une correction du modèle
+      // atteint une entreprise déjà servie, la signature de contenu ne
+      // faisant que rejouer une pose qui, sans ça, ne ferait rien. Les
+      // cellules ne bougent pas — elles désignent la colonne par son id, pas
+      // par son intitulé. En contrepartie un libellé renommé à la main sur
+      // une colonne semée est ramené au modèle : il n'y a rien sur la ligne
+      // qui distingue une correction d'un renommage délibéré.
+      if (existing.label !== label) await db.updateEcheanceColumn(companyId, id, { label });
+      return;
+    }
     await db.createEcheanceColumn(companyId, { id, year, month, label, sortOrder });
   };
   for (const year of ECHEANCE_YEARS) {
@@ -3039,7 +3062,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * écran n'affiche serait du travail pour rien.
    */
   const resourceSeedInFlight = new Map<string, Promise<void>>();
-  const RESOURCE_LIBRARY_VERSION = '6t-3l-4y';
+  const RESOURCE_LIBRARY_VERSION = '6t-3l-4y-prev';
 
   async function seedResourceLibraryFor(company: any): Promise<void> {
     if (!company?.id) return;
@@ -6553,17 +6576,28 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         return res.status(400).json({ error: 'Année invalide.' });
       }
       const existing = await db.getAllEcheanceColumns(req.user.companyId);
-      const known = new Set(existing.map((c: any) => String(c.id)));
       let created = 0;
+      let corrected = 0;
       for (const col of echeanceColumnsForYear(year)) {
         // Le même nommage que le semis livré d'office, faute de quoi un clic
         // ici reposerait des colonnes déjà présentes sous un autre id.
         const id = ownedSeedId(existing, req.user.companyId, col.id);
-        if (known.has(id)) continue;
+        const already = existing.find((c: any) => c.id === id);
+        if (already) {
+          // Réparer, pas seulement installer : un exercice posé par cette
+          // route avant une correction du modèle garderait sinon ses vieux
+          // libellés sans aucun moyen de les rattraper — le semis livré
+          // d'office ne couvre que les exercices de `ECHEANCE_YEARS`.
+          if (already.label !== col.label) {
+            await db.updateEcheanceColumn(req.user.companyId, id, { label: col.label });
+            corrected++;
+          }
+          continue;
+        }
         await db.createEcheanceColumn(req.user.companyId, { ...col, id });
         created++;
       }
-      res.status(201).json({ year, created, alreadyPresent: ECHEANCE_TEMPLATE.length - created });
+      res.status(201).json({ year, created, corrected, alreadyPresent: ECHEANCE_TEMPLATE.length - created });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });

@@ -493,7 +493,6 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
             fileName={`echeances-${year}`}
             rows={visibleClients}
             columns={[
-              { header: 'N°', value: (c: any) => c.customFields?.['Numéro'] ?? c.id },
               { header: 'Client', value: (c: any) => c.name || '' },
               ...yearColumns.map(col => ({
                 header: `${MONTH_NAMES[Number(col.month) - 1] ?? col.month} — ${col.label}`,
@@ -532,10 +531,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
           <table className="border-collapse text-[12px]">
             <thead>
               <tr>
-                <th rowSpan={2} className="sticky left-0 top-0 z-30 bg-gray-50 border border-gray-200 px-3 py-2 text-left text-[10.5px] font-bold text-gray-400 uppercase tracking-wider min-w-[70px]">
-                  N°
-                </th>
-                <th rowSpan={2} className="sticky left-[70px] top-0 z-30 bg-gray-50 border border-gray-200 px-3 py-2 text-left text-[10.5px] font-bold text-gray-400 uppercase tracking-wider min-w-[180px]">
+                <th rowSpan={2} className="sticky left-0 top-0 z-30 bg-gray-50 border border-gray-200 px-3 py-2 text-left text-[10.5px] font-bold text-gray-400 uppercase tracking-wider min-w-[180px]">
                   Nom
                 </th>
                 {monthGroups.map(g => (
@@ -564,10 +560,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
             <tbody>
               {visibleClients.map(client => (
                 <tr key={client.id} className="hover:bg-gray-50/60">
-                  <td className="sticky left-0 z-10 bg-white border border-gray-200 px-3 py-1.5 text-gray-500 whitespace-nowrap">
-                    {client.customFields?.['Numéro'] ?? client.id}
-                  </td>
-                  <td className="sticky left-[70px] z-10 bg-white border border-gray-200 px-3 py-1.5 font-medium text-gray-800 whitespace-nowrap max-w-[220px] truncate" title={client.name}>
+                  <td className="sticky left-0 z-10 bg-white border border-gray-200 px-3 py-1.5 font-medium text-gray-800 whitespace-nowrap max-w-[220px] truncate" title={client.name}>
                     {client.name}
                   </td>
                   {yearColumns.map(col => {
