@@ -305,7 +305,31 @@ const ECHEANCE_TEMPLATE: [number, string][] = [
  */
 const ECHEANCE_YEARS = [2025, 2026, 2027, 2028];
 
-/** Le modèle décliné sur un exercice : mêmes ids stables, donc rejouable. */
+/**
+ * `id` est la clé primaire de chaque table, **toutes entreprises confondues**.
+ * Un id de semis fixe comme `tpl-seed-patente` ne peut donc appartenir qu'à
+ * une seule entreprise : la première semée les prenait tous, et chacune des
+ * suivantes butait sur un doublon de clé dès son premier modèle. Comme la
+ * pose s'arrête là — avant la moindre colonne d'échéance — et que le drapeau
+ * de version ne s'écrit qu'au succès, l'entreprise restait sans échéances,
+ * sans modèles et sans liens, en rejouant la même erreur à chaque requête.
+ *
+ * Les ids de semis sont donc portés par l'entreprise. La forme non suffixée
+ * reste celle de qui la détient déjà : ces lignes sont désignées par leur id
+ * ailleurs — une cellule pointe sa colonne, un item son modèle — donc les
+ * renommer orphelinerait le travail déjà saisi par le cabinet.
+ */
+const seedIdFor = (companyId: string, base: string) => `${base}--c${companyId}`;
+
+const ownedSeedId = (existing: any[], companyId: string, base: string) =>
+  existing.some((r: any) => r.id === base) ? base : seedIdFor(companyId, base);
+
+/**
+ * Le modèle décliné sur un exercice. `id` est ici l'id **de base** : c'est à
+ * l'appelant de le porter sur son entreprise via `ownedSeedId`, pour que la
+ * route « installer la grille type » et le semis livré d'office nomment
+ * exactement les mêmes colonnes.
+ */
 const echeanceColumnsForYear = (year: number) =>
   ECHEANCE_TEMPLATE.map(([month, template], i) => ({
     id: `ec-seed-${year}-${i}`,
@@ -320,7 +344,8 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
   const SECTOR_COMPTA = 'Expertise comptable';
 
   const existingTemplates = await db.getAllResourceTemplates(companyId);
-  const seedChecklist = async (id: string, name: string, sector: string, items: string[]) => {
+  const seedChecklist = async (base: string, name: string, sector: string, items: string[]) => {
+    const id = ownedSeedId(existingTemplates, companyId, base);
     if (existingTemplates.some((t: any) => t.id === id)) return;
     const template = await db.createResourceTemplate(companyId, {
       id, type: 'document_checklist', name, sector,
@@ -398,9 +423,10 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
 
   const existingLinks = await db.getAllUsefulLinks(companyId);
   const seedLink = async (
-    id: string, category: string, label: string, url: string,
+    base: string, category: string, label: string, url: string,
     opts: { description?: string; icon?: string } = {},
   ) => {
+    const id = ownedSeedId(existingLinks, companyId, base);
     if (existingLinks.some((l: any) => l.id === id)) return;
     await db.createUsefulLink(companyId, {
       id, category, label, url,
@@ -426,7 +452,8 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
   // libellé précis), pas du remplissage — déclinées sur chaque exercice livré.
   // Les cellules, elles, restent vides : c'est au cabinet de les remplir.
   const existingColumns = await db.getAllEcheanceColumns(companyId);
-  const seedColumn = async (id: string, year: number, month: number, label: string, sortOrder: number) => {
+  const seedColumn = async (base: string, year: number, month: number, label: string, sortOrder: number) => {
+    const id = ownedSeedId(existingColumns, companyId, base);
     if (existingColumns.some((c: any) => c.id === id)) return;
     await db.createEcheanceColumn(companyId, { id, year, month, label, sortOrder });
   };
@@ -439,7 +466,8 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
   // The status vocabulary a cell can be set to — admin-editable from here on,
   // this only seeds the starting set (and its colors) on first boot.
   const existingStatusOptions = await db.getAllEcheanceStatusOptions(companyId);
-  const seedStatusOption = async (id: string, label: string, sortOrder: number, color: string) => {
+  const seedStatusOption = async (base: string, label: string, sortOrder: number, color: string) => {
+    const id = ownedSeedId(existingStatusOptions, companyId, base);
     if (existingStatusOptions.some((o: any) => o.id === id)) return;
     await db.createEcheanceStatusOption(companyId, { id, label, sortOrder, color });
   };
@@ -6528,8 +6556,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const known = new Set(existing.map((c: any) => String(c.id)));
       let created = 0;
       for (const col of echeanceColumnsForYear(year)) {
-        if (known.has(col.id)) continue;
-        await db.createEcheanceColumn(req.user.companyId, col);
+        // Le même nommage que le semis livré d'office, faute de quoi un clic
+        // ici reposerait des colonnes déjà présentes sous un autre id.
+        const id = ownedSeedId(existing, req.user.companyId, col.id);
+        if (known.has(id)) continue;
+        await db.createEcheanceColumn(req.user.companyId, { ...col, id });
         created++;
       }
       res.status(201).json({ year, created, alreadyPresent: ECHEANCE_TEMPLATE.length - created });
