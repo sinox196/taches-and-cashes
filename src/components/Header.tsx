@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
 import { NotificationBell } from './NotificationBell';
+import { SubscriptionBadge } from './SubscriptionBadge';
 
 interface HeaderProps {
   onToggleSidebar?: () => void;
@@ -41,6 +42,11 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right section utilities */}
       <div className="flex items-center gap-4">
+        {/* L'abonnement d'abord, et à l'écart du groupe présence/avatar : les
+            deux disent « actif » de deux choses différentes, et les coller
+            l'un à l'autre est ce qui les faisait lire comme une seule. */}
+        <SubscriptionBadge />
+
         {/* Company Account Identifier */}
         <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
           {user?.role || userCode}

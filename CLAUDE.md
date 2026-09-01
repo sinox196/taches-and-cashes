@@ -362,6 +362,17 @@ lignes écrites avant cette règle, et reste là pour elles — comme se lit
 `status` absent, qui vaut `CONFIRMED` : un parrainage déjà acquis ne doit pas
 repasser « en attente » à l'écran.
 
+**« Actif » veut dire deux choses à l'écran, et les confondre a fait passer le
+parrainage pour cassé.** Le bandeau du haut affiche le badge de *présence*
+(actif / absent / inactif — la souris et le clavier), tandis qu'une entreprise
+en essai n'affichait nulle part qu'elle était en essai : un filleul tout juste
+inscrit se lisait donc comme déjà abonné, et le parrain comme déjà crédité.
+[SubscriptionBadge.tsx](src/components/SubscriptionBadge.tsx) montre désormais
+« Essai · N j » (ambre) à côté, et **rien du tout** pour un abonnement payé —
+même règle que le badge de téléphone : il n'apparaît que lorsqu'il y a quelque
+chose à dire. Le comportement du serveur, lui, était et reste celui décrit
+ci-dessus.
+
 Le `referralCode` est créé **à la première consultation** de la page, pas à
 l'inscription : les entreprises déjà en base n'en ont pas, et une migration
 pour un champ que personne n'a regardé serait du travail pour rien. Alphabet
