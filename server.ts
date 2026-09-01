@@ -275,6 +275,47 @@ const accruedSeconds = (t: any) => {
  * none for it); it is attached as an informational, non-blocking item on the
  * Patente checklist rather than inventing a new structure for one table.
  */
+/**
+ * La grille d'échéances d'un exercice, telle que le cabinet la tient : mois +
+ * libellé précis, dans l'ordre où ils tombent. Écrite une fois pour 2025,
+ * l'année du tableau d'origine ; les autres exercices s'en déduisent en
+ * remplaçant l'année dans les libellés qui la portent (« IS 2025 »,
+ * « RNE Bilan 2025 », les IRPP…). Ce sont les mêmes échéances d'une année sur
+ * l'autre — les recopier à la main serait autant de listes à corriger.
+ */
+const ECHEANCE_TEMPLATE: [number, string][] = [
+  [1, 'DM 12/2025'], [1, 'D SUSP TVA TR04'], [1, 'CNSS TR04'],
+  [2, 'DM 1'],
+  [3, 'DM 2'], [3, 'IS 2025'],
+  [4, 'DM 3'], [4, 'D SUSP TVA TR01'], [4, 'CNSS TR01'], [4, 'IRPP 2025-COMMERCE'], [4, 'DEC EMPLOYEUR 2025'],
+  [5, 'DM 4'], [5, 'IRPP 2025-SERVICE + FONC LIBERALE + REV FONCIER'],
+  [6, 'DM 5'], [6, 'Acompte 1'],
+  [7, 'DM 6'], [7, 'D SUSP TVA TR02'], [7, 'CNSS TR02'], [7, 'RNE Bilan 2025'],
+  [8, 'DM 7'],
+  [9, 'DM 8'], [9, 'Acompte 2'],
+  [10, 'DM 9'], [10, 'D SUSP TVA TR03'], [10, 'CNSS TR03'],
+  [11, 'DM 10'],
+  [12, 'DM 11'], [12, 'Acompte 3'],
+];
+
+/**
+ * Les exercices livrés d'office. Ajouter une année, c'est ajouter un nombre :
+ * la pose est idempotente par id, donc les colonnes déjà présentes — et
+ * surtout les cellules que le cabinet a remplies — ne bougent pas.
+ */
+const ECHEANCE_YEARS = [2025, 2026, 2027, 2028];
+
+/** Le modèle décliné sur un exercice : mêmes ids stables, donc rejouable. */
+const echeanceColumnsForYear = (year: number) =>
+  ECHEANCE_TEMPLATE.map(([month, template], i) => ({
+    id: `ec-seed-${year}-${i}`,
+    year,
+    month,
+    label: template.replace(/2025/g, String(year)),
+    // Un bloc d'ordre par exercice, pour que deux années ne s'entrelacent pas.
+    sortOrder: (year - 2025) * 100 + i,
+  }));
+
 async function seedResourceLibrary(db: import('./src/server/db-types.js').Database, companyId: string) {
   const SECTOR_COMPTA = 'Expertise comptable';
 
@@ -389,42 +430,9 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
     if (existingColumns.some((c: any) => c.id === id)) return;
     await db.createEcheanceColumn(companyId, { id, year, month, label, sortOrder });
   };
-  /**
-   * La grille d'un exercice, telle que le cabinet la tient : mois + libellé
-   * précis, dans l'ordre où ils tombent. Écrite une fois pour 2025, l'année du
-   * tableau d'origine ; les autres exercices s'en déduisent en remplaçant
-   * l'année dans les libellés qui la portent (« IS 2025 », « RNE Bilan 2025 »,
-   * les IRPP…). Ce sont les mêmes échéances d'une année sur l'autre — les
-   * recopier à la main serait quatre listes à corriger au lieu d'une.
-   */
-  const ECHEANCE_TEMPLATE: [number, string][] = [
-    [1, 'DM 12/2025'], [1, 'D SUSP TVA TR04'], [1, 'CNSS TR04'],
-    [2, 'DM 1'],
-    [3, 'DM 2'], [3, 'IS 2025'],
-    [4, 'DM 3'], [4, 'D SUSP TVA TR01'], [4, 'CNSS TR01'], [4, 'IRPP 2025-COMMERCE'], [4, 'DEC EMPLOYEUR 2025'],
-    [5, 'DM 4'], [5, 'IRPP 2025-SERVICE + FONC LIBERALE + REV FONCIER'],
-    [6, 'DM 5'], [6, 'Acompte 1'],
-    [7, 'DM 6'], [7, 'D SUSP TVA TR02'], [7, 'CNSS TR02'], [7, 'RNE Bilan 2025'],
-    [8, 'DM 7'],
-    [9, 'DM 8'], [9, 'Acompte 2'],
-    [10, 'DM 9'], [10, 'D SUSP TVA TR03'], [10, 'CNSS TR03'],
-    [11, 'DM 10'],
-    [12, 'DM 11'], [12, 'Acompte 3'],
-  ];
-  /**
-   * Les exercices livrés d'office. Ajouter une année, c'est ajouter un nombre
-   * ici : la pose est idempotente par id, donc les colonnes déjà présentes —
-   * et surtout les cellules que le cabinet a remplies — ne bougent pas.
-   */
-  const ECHEANCE_YEARS = [2025, 2026, 2027, 2028];
-
   for (const year of ECHEANCE_YEARS) {
-    for (let i = 0; i < ECHEANCE_TEMPLATE.length; i++) {
-      const [month, template] = ECHEANCE_TEMPLATE[i];
-      const label = template.replace(/2025/g, String(year));
-      // L'ordre est propre à l'année : un bloc par exercice, pour que deux
-      // années ne s'entrelacent pas si un écran les affiche ensemble.
-      await seedColumn(`ec-seed-${year}-${i}`, year, month, label, (year - 2025) * 100 + i);
+    for (const col of echeanceColumnsForYear(year)) {
+      await seedColumn(col.id, col.year, col.month, col.label, col.sortOrder);
     }
   }
 
@@ -6496,6 +6504,37 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       if (req.query.year) columns = columns.filter((c: any) => c.year === Number(req.query.year));
       res.json(columns.sort((a: any, b: any) => a.sortOrder - b.sortOrder));
     } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Installe la grille type d'un exercice.
+   *
+   * Le même modèle que celui livré d'office, mais à la demande : c'est ce qui
+   * permet de récupérer une année manquante — une entreprise dont la pose
+   * initiale date d'avant l'ajout des exercices suivants, ou simplement
+   * l'année prochaine quand elle arrivera — sans attendre une mise en service.
+   * Idempotent par id : les colonnes déjà là et les cellules déjà remplies ne
+   * bougent pas, et la réponse dit combien ont réellement été créées.
+   */
+  app.post('/api/echeance-columns/seed-year', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const year = parseInt(req.body?.year, 10);
+      if (!Number.isFinite(year) || year < 2000 || year > 2100) {
+        return res.status(400).json({ error: 'Année invalide.' });
+      }
+      const existing = await db.getAllEcheanceColumns(req.user.companyId);
+      const known = new Set(existing.map((c: any) => String(c.id)));
+      let created = 0;
+      for (const col of echeanceColumnsForYear(year)) {
+        if (known.has(col.id)) continue;
+        await db.createEcheanceColumn(req.user.companyId, col);
+        created++;
+      }
+      res.status(201).json({ year, created, alreadyPresent: ECHEANCE_TEMPLATE.length - created });
+    } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

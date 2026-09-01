@@ -192,6 +192,26 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
     ? sortedClients.filter(c => normalize(c.name || '').includes(calendarTerm)).slice(0, 8)
     : [];
 
+  const [seedingYear, setSeedingYear] = useState(false);
+
+  /** Pose la grille type de l'exercice affiché. Idempotent côté serveur. */
+  const seedYear = async () => {
+    if (!year || seedingYear) return;
+    setSeedingYear(true);
+    try {
+      const res = await fetch('/api/echeance-columns/seed-year', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ year }),
+      });
+      if (res.ok) await load();
+    } catch (e) {
+      console.error('seed year failed', e);
+    } finally {
+      setSeedingYear(false);
+    }
+  };
+
   const addColumn = async () => {
     if (!newLabel.trim() || !year) return;
     try {
@@ -487,6 +507,25 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
       {yearColumns.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-10 text-center shadow-sm">
           <p className="text-[13px] text-gray-500">Aucune échéance définie{year ? ` pour ${year}` : ''}{monthFilter ? ` en ${MONTH_NAMES[monthFilter - 1]}` : ''}.</p>
+          {/* Un exercice vide se répare depuis l'écran plutôt qu'en attendant
+              une mise en service : la grille type du cabinet est la même
+              chaque année, et la poser est idempotente — les colonnes déjà là
+              et les cellules remplies ne bougent pas. */}
+          {canManage && year && !monthFilter && (
+            <>
+              <button
+                onClick={seedYear}
+                disabled={seedingYear}
+                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover disabled:opacity-50"
+              >
+                {seedingYear ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                Installer la grille type pour {year}
+              </button>
+              <p className="text-[11.5px] text-gray-400 mt-2">
+                Les 28 échéances habituelles du cabinet, avec l'année à jour dans les libellés.
+              </p>
+            </>
+          )}
         </div>
       ) : view === 'grid' ? (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-auto max-h-[75vh]">
