@@ -11,7 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "db:import": "tsx scripts/db-import.ts",
-    "db:backup": "tsx scripts/db-backup.ts"
+    "db:backup": "tsx scripts/db-backup.ts",
+    "db:fix-timezone": "tsx scripts/fix-timezone-history.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

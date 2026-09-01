@@ -600,6 +600,8 @@ Deux distinctions à garder :
   civile — « quel jour, quelle heure murale » — qui a besoin du fuseau du
   cabinet, parce qu'elle sert de clé (`date` d'une entrée, jour du pointage) ou
   se compare à un horaire saisi en heure murale.
+**Rattraper l'historique** : `npm run db:fix-timezone -- --before "<instant ISO>"` ([scripts/fix-timezone-history.ts](scripts/fix-timezone-history.ts)), l'instant étant la mise en service du correctif. Sans `--apply` il ne fait que lister. Deux traitements, parce que les deux familles n'offrent pas la même matière : le **pointage de présence** porte `checkinAt`/`checkoutAt`, de vrais instants, donc le jour et le retard sont **recalculés** — idempotent par construction ; une **entrée de temps** ne porte aucun instant de création (`lastStartedAt` est réécrit à chaque reprise), donc elle est **décalée**, ce qui n'est pas idempotent — d'où la coupure obligatoire et une marque `tzFixedAt` par ligne, qu'une seconde exécution respecte. Le décalage est calculé pour la date de chaque ligne, jamais « +1 h » en dur. `dateGranted` d'un prêt ou d'une avance n'est délibérément pas touché : la valeur par défaut était fausse une heure par jour, mais elle peut aussi avoir été saisie à la main et rien ne distingue les deux.
+
 - `minutesFromShift()` compare des **heures murales**, pas des instants :
   `setHours()` posait la borne dans le fuseau du processus. Le filtre par
   période, lui, reste en UTC de bout en bout (`parseFrenchDateTs` et les bornes
