@@ -153,6 +153,10 @@ Presence is held in a **module-level `Map`, never in the JSON database**. Every 
 
 **The away delay is configurable; the inactive one is not.** It defaults to **30 minutes** and is set on the Users page ([PresenceSettingsCard](src/components/PresenceSettingsCard.tsx)) behind `MANAGE_PRESENCE_SETTINGS`, stored on settings as `awayAfterMinutes`, and served by `GET /api/presence/settings` (readable by anyone — the browser needs it for its own badge) / `PUT` (permission-gated, clamped to 1–480). The server caches it for 10 s rather than re-reading the database on every heartbeat from every user.
 
+**Le battement rapporte aussi le type de poste.** `deviceFromRequest()` — le même helper qui estampille les tâches — est relu à *chaque* battement et rangé dans l'entrée de présence : quelqu'un qui passe de son poste à son téléphone change d'icône, au lieu de garder celle de sa première connexion. Le poste retombe à `null` en même temps que `idleMs` dès l'état INACTIVE : « était sur son téléphone » n'apprend rien sur quelqu'un dont on ne sait plus rien, et se lirait comme une information à jour. Comme le badge du pointage, c'est auto-déclaré par le navigateur et falsifiable — ça se lit, ça ne décide de rien — et l'icône n'apparaît **que lorsqu'un téléphone est en jeu**, le poste fixe étant le cas ordinaire.
+
+Dans la **messagerie**, la présence (pastille + téléphone, et l'info-bulle qui détaille) est affichée sur l'avatar de chaque contact et dans l'en-tête d'un fil direct, **réservée à l'administrateur** — c'est une information d'encadrement, et un compte portail la verrait de toute façon fausse puisque `PresenceContext` neutralise son jeton.
+
 `OFFLINE_AFTER_MS` stays a constant and must remain comfortably above three heartbeats — tightening it makes users flicker offline on one dropped request. That is why only the *away* threshold is exposed: it is derived from missing heartbeats, not from reported idleness.
 
 ### Cash (facturation)

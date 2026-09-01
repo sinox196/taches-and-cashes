@@ -9,6 +9,12 @@ interface PresenceEntry {
   state: PresenceState;
   idleMs: number | null;
   lastSeenAt: string | null;
+  /**
+   * Le poste d'où bat le cœur, `null` dès que le contact est perdu — même
+   * règle que `idleMs`. Auto-déclaré par le navigateur, donc falsifiable :
+   * ça se lit, ça ne décide de rien (voir `EntryDeviceBadge`).
+   */
+  device: 'MOBILE' | 'DESKTOP' | null;
 }
 
 interface PresenceContextType {
@@ -23,7 +29,7 @@ interface PresenceContextType {
   refreshAwayAfter: () => void;
 }
 
-const OFFLINE: PresenceEntry = { state: 'INACTIVE', idleMs: null, lastSeenAt: null };
+const OFFLINE: PresenceEntry = { state: 'INACTIVE', idleMs: null, lastSeenAt: null, device: null };
 const PresenceContext = createContext<PresenceContextType | undefined>(undefined);
 
 /** Real user input — pointer, keyboard, wheel, touch. */
@@ -150,7 +156,16 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Trust the local view of ourselves — it reacts to input without waiting
     // for the next poll.
     if (user && userId === user.id) {
-      return { state: own, idleMs: Date.now() - lastActivityRef.current, lastSeenAt: null };
+      return {
+        state: own,
+        idleMs: Date.now() - lastActivityRef.current,
+        lastSeenAt: null,
+        // L'état vient du local (il réagit à la frappe sans attendre le
+        // sondage), mais le poste vient du serveur : c'est lui qui l'a lu sur
+        // le battement, et le refaire ici serait une deuxième détection à
+        // garder en phase avec `deviceFromRequest`.
+        device: byUser[String(userId)]?.device ?? null,
+      };
     }
     return byUser[String(userId)] ?? OFFLINE;
   }, [byUser, own, user]);

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { roleMeta } from '../../constants/roles';
+import { usePresence } from '../../context/PresenceContext';
+import { PresenceBadge } from '../PresenceBadge';
 import { Loader2, Send, MessageCircle, Check, CheckCheck, ArrowLeft, Users, Plus, Settings2 } from 'lucide-react';
 import { GroupModal, type ChatGroup } from './GroupModal';
 
@@ -68,6 +70,17 @@ const formatDay = (iso: string) => {
  */
 export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = ({ onUnreadChange }) => {
   const { token, user } = useAuth();
+  const { presenceOf } = usePresence();
+  /**
+   * « Qui est à son poste, et depuis quoi » est une information
+   * d'encadrement : elle est réservée à l'administrateur, comme demandé. Le
+   * reste de l'équipe voit la messagerie exactement comme avant.
+   *
+   * Un compte portail ne la verrait de toute façon pas : `PresenceContext`
+   * neutralise son jeton, donc tout le monde lui apparaîtrait « inactif » —
+   * une réponse fausse, pas une absence de réponse.
+   */
+  const canSeePresence = user?.role === 'ADMIN';
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [groups, setGroups] = useState<ChatGroup[]>([]);
@@ -399,8 +412,20 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
                     isActive ? 'bg-gray-100' : 'hover:bg-gray-50'
                   }`}
                 >
-                  <div className="w-9 h-9 rounded-full bg-slate-800 text-white text-[12px] font-bold flex items-center justify-center shrink-0">
-                    {initials(c.fullName)}
+                  <div className="relative shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-slate-800 text-white text-[12px] font-bold flex items-center justify-center">
+                      {initials(c.fullName)}
+                    </div>
+                    {canSeePresence && (
+                      // Sur l'avatar plutôt qu'en bout de ligne : la ligne
+                      // porte déjà l'heure et la pastille de non-lus, et un
+                      // troisième élément à droite les aurait mis en
+                      // concurrence.
+                      <span className="absolute -bottom-1 -right-1 bg-white rounded-full border border-gray-200 px-1 py-0.5 flex items-center shadow-sm">
+                        {(() => { const p = presenceOf(c.id);
+                          return <PresenceBadge state={p.state} idleMs={p.idleMs} device={p.device} variant="dot" />; })()}
+                      </span>
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
@@ -470,7 +495,11 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
                   </div>
                   <div className="min-w-0">
                     <div className="text-[13px] font-semibold text-gray-900 truncate">{selected.contact.fullName}</div>
-                    <div className="text-[11px] text-gray-400 truncate">{roleMeta(selected.contact.role).label}</div>
+                    <div className="text-[11px] text-gray-400 truncate flex items-center gap-1.5">
+                      {roleMeta(selected.contact.role).label}
+                      {canSeePresence && (() => { const p = presenceOf(selected.contact.id);
+                        return <PresenceBadge state={p.state} idleMs={p.idleMs} device={p.device} />; })()}
+                    </div>
                   </div>
                 </>
               )}

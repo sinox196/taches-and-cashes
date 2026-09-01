@@ -3009,7 +3009,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * independently per company, so two different companies' users can otherwise
    * collide on the same key and leak one company's presence into another's.
    */
-  const presence = new Map<string, { lastSeenAt: number; lastActivityAt: number }>();
+  const presence = new Map<string, { lastSeenAt: number; lastActivityAt: number; device: 'MOBILE' | 'DESKTOP' }>();
   const presenceKey = (companyId: string, userId: number) => `${companyId}:${userId}`;
 
   /**
@@ -3051,6 +3051,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // Idle time is meaningless once we've lost contact.
       idleMs: rec && state !== 'INACTIVE' ? Date.now() - rec.lastActivityAt : null,
       lastSeenAt: rec ? new Date(rec.lastSeenAt).toISOString() : null,
+      // Le poste depuis lequel bat le cœur, et `null` dès qu'on a perdu le
+      // contact — pour la même raison que `idleMs` : « était sur son
+      // téléphone » n'apprend rien sur quelqu'un dont on ne sait plus rien, et
+      // se lirait comme une information à jour. Auto-déclaré par le navigateur
+      // et falsifiable, comme le badge du pointage : ça se lit, ça ne décide
+      // de rien.
+      device: rec && state !== 'INACTIVE' ? rec.device : null,
     };
   };
 
@@ -3060,7 +3067,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     const awayMs = await awayAfterMs(req.user.companyId);
     const reported = Number(req.body?.idleMs);
     const idleMs = Number.isFinite(reported) && reported >= 0 ? Math.min(reported, awayMs * 6) : 0;
-    presence.set(presenceKey(req.user.companyId, req.user.id), { lastSeenAt: now, lastActivityAt: now - idleMs });
+    presence.set(presenceKey(req.user.companyId, req.user.id), {
+      lastSeenAt: now,
+      lastActivityAt: now - idleMs,
+      // Relu à chaque battement plutôt que mémorisé une fois : quelqu'un qui
+      // passe de son poste à son téléphone doit changer d'icône, pas garder
+      // celle de sa première connexion de la journée.
+      device: deviceFromRequest(req),
+    });
     res.json({ userId: req.user.id, ...presenceFor(req.user.companyId, req.user.id, awayMs) });
   });
 
