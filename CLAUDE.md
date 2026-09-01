@@ -577,6 +577,35 @@ Import ids are `Date.now() * 1000 + index` rather than bare `Date.now()` (what s
 
 Clients carry a free-form `customFields` object. `GET /api/clients/fields` derives the available column set from the union of all clients' `customFields` keys, and the list endpoint's filtering/sorting falls back to `customFields[key]` when a top-level property is missing ([server.ts:314-359](server.ts#L314-L359)). Pagination only kicks in when `?page=` is passed; otherwise a bare array is returned (backward compatibility).
 
+### Le serveur ne lit jamais l'heure de sa machine
+
+`getHours()` / `getDate()` rendent l'heure locale **du processus**. En
+production le conteneur tourne en UTC : une tâche démarrée à 08h42 à Tunis
+était donc enregistrée « 07:42 », et le pointage de présence comptait 13
+minutes d'avance là où il y avait 47 minutes de retard.
+
+Toute date ou heure **civile** que le serveur estampille passe par
+`civilParts()` et ses dérivés (`formatDateFR`, `formatTimeFR`, `formatDateISO`,
+`isoDaysAgo`, `minutesFromShift`), qui nomment le fuseau explicitement —
+`APP_TIMEZONE`, `Africa/Tunis` par défaut, surchargeable par l'environnement et
+validé au démarrage (un fuseau inconnu ferait lever `Intl` : on retombe sur
+Tunis en le disant). C'est la contrepartie de « le serveur possède `date`,
+`heureDebut` et `heureFin` » : posséder l'horloge, c'est aussi posséder le
+fuseau, et le `TZ` de la machine ne doit rien changer au résultat.
+
+Deux distinctions à garder :
+
+- Un **instant** (`createdAt`, `checkinAt`, `lastStartedAt`…) reste en ISO/UTC
+  et se rend dans le fuseau du lecteur par le navigateur. C'est une date
+  civile — « quel jour, quelle heure murale » — qui a besoin du fuseau du
+  cabinet, parce qu'elle sert de clé (`date` d'une entrée, jour du pointage) ou
+  se compare à un horaire saisi en heure murale.
+- `minutesFromShift()` compare des **heures murales**, pas des instants :
+  `setHours()` posait la borne dans le fuseau du processus. Le filtre par
+  période, lui, reste en UTC de bout en bout (`parseFrenchDateTs` et les bornes
+  du corps de requête mappent toutes deux une date civile sur minuit UTC), donc
+  le décalage s'y annule — ne pas « corriger » ce round-trip.
+
 ### Date formats are mixed
 
 Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use ISO `YYYY-MM-DD`. The KPI endpoint carries both `parseFrenchDate` and `parseIsoDate` for this reason ([server.ts:455](server.ts#L455)). Durations/costs are formatted with `fr-FR` locale helpers in [src/utils/formatters.ts](src/utils/formatters.ts).

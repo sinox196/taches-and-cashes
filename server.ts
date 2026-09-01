@@ -30,13 +30,81 @@ import { initPush, pushEnabled, publicKey as pushPublicKey, sendPush } from './s
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-local-dev';
 
+/**
+ * Le fuseau du cabinet.
+ *
+ * **Le serveur ne doit jamais lire l'heure du système d'exploitation.**
+ * `getHours()`/`getDate()` rendent l'heure locale *du processus* : en
+ * production le conteneur tourne en UTC, donc une tâche démarrée à 08h42 à
+ * Tunis était enregistrée « 07:42 ». Toutes les dates et heures civiles que le
+ * serveur estampille passent donc par les helpers ci-dessous, qui nomment le
+ * fuseau explicitement — le résultat ne dépend plus de la machine ni de son
+ * `TZ`. C'est la contrepartie de la règle « le serveur possède `date`,
+ * `heureDebut` et `heureFin` » : posséder l'horloge, c'est aussi posséder le
+ * fuseau.
+ *
+ * Surchargeable pour un cabinet ailleurs, mais jamais devinée : une valeur
+ * inconnue ferait lever `Intl`, et l'app ne démarrerait pas sans qu'on sache
+ * pourquoi — on retombe donc sur Tunis en le disant.
+ */
+const APP_TIMEZONE = (() => {
+  const wanted = process.env.APP_TIMEZONE || 'Africa/Tunis';
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: wanted });
+    return wanted;
+  } catch {
+    console.warn(`[time] fuseau « ${wanted} » inconnu — repli sur Africa/Tunis.`);
+    return 'Africa/Tunis';
+  }
+})();
+
+const civilFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: APP_TIMEZONE,
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+});
+
+/** L'heure murale du cabinet, décomposée — la seule lecture d'horloge du serveur. */
+const civilParts = (d: Date) => {
+  const parts: Record<string, string> = {};
+  for (const p of civilFormatter.formatToParts(d)) parts[p.type] = p.value;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    // `hour12: false` rend minuit « 24 » sur certains moteurs — 24:00 est le
+    // même instant que 00:00 du jour déjà donné par `day`.
+    hour: Number(parts.hour) % 24,
+    minute: Number(parts.minute),
+  };
+};
+
 /** DD/MM/YYYY — the format time entries are stored and grouped by. */
-const formatDateFR = (d: Date) =>
-  `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+const formatDateFR = (d: Date) => {
+  const c = civilParts(d);
+  return `${String(c.day).padStart(2, '0')}/${String(c.month).padStart(2, '0')}/${c.year}`;
+};
 
 /** HH:mm, 24h. */
-const formatTimeFR = (d: Date) =>
-  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+const formatTimeFR = (d: Date) => {
+  const c = civilParts(d);
+  return `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}`;
+};
+
+/** YYYY-MM-DD — la forme des dates RH et du pointage de présence. */
+const formatDateISO = (d: Date) => {
+  const c = civilParts(d);
+  return `${c.year}-${String(c.month).padStart(2, '0')}-${String(c.day).padStart(2, '0')}`;
+};
+
+/** Le jour civil du cabinet, décalé de `days` jours. */
+const isoDaysAgo = (days: number) => {
+  const c = civilParts(new Date());
+  // Arithmétique en UTC sur une date civile déjà résolue : pas de fuseau en
+  // jeu, donc pas de saut d'heure d'été à traverser.
+  const shifted = new Date(Date.UTC(c.year, c.month - 1, c.day) - days * 86400000);
+  return shifted.toISOString().slice(0, 10);
+};
 
 /** Users are stored with `permissions` JSON-stringified; the API always returns an array. */
 const publicUser = (u: any) => {
@@ -2229,9 +2297,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }).sort((a: any, b: any) => b.heures - a.heures);
 
     // ---- Opérationnel ------------------------------------------------------
-    const now = new Date();
+    // Le mois « courant » est celui du cabinet, pas celui du conteneur.
+    const nowCivil = civilParts(new Date());
     const monthCols = (echeanceCols || []).filter(
-      (c: any) => Number(c.year) === now.getFullYear() && Number(c.month) === now.getMonth() + 1
+      (c: any) => Number(c.year) === nowCivil.year && Number(c.month) === nowCivil.month
     );
     // Seuls les clients que le cabinet suit réellement dans la grille comptent :
     // multiplier par TOUS les clients produirait des milliers de « cellules
@@ -2316,10 +2385,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         detail: `${tachesSansTaux} tâche${tachesSansTaux > 1 ? 's' : ''} exclue${tachesSansTaux > 1 ? 's' : ''} du coût — toutes les marges affichées sont surévaluées.`,
         action: 'Compléter la fiche dans Utilisateurs.' });
     }
-    if (now.getDate() >= TH.echeanceJour && echeancesVides > 0) {
+    if (nowCivil.day >= TH.echeanceJour && echeancesVides > 0) {
       alerts.push({ key: 'A3', code: 'A3', level: 'CRITIQUE', entity: 'echeance', entityId: null,
         title: `${echeancesVides} échéance${echeancesVides > 1 ? 's' : ''} du mois non renseignée${echeancesVides > 1 ? 's' : ''}`,
-        detail: `Nous sommes le ${now.getDate()} du mois — risque de pénalité pour le client.`,
+        detail: `Nous sommes le ${nowCivil.day} du mois — risque de pénalité pour le client.`,
         action: 'Affecter immédiatement.' });
     }
     if (pausedLong > 0) {
@@ -4167,7 +4236,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         monthlyDeduction: Number(monthlyDeduction) || 0,
         amountRepaid: 0,
         reason: String(reason || ''),
-        dateGranted: dateGranted || new Date().toISOString().slice(0, 10),
+        dateGranted: dateGranted || formatDateISO(new Date()),
         status: 'PENDING',
         notes: '',
         createdAt: new Date().toISOString(),
@@ -4324,7 +4393,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         approverId: Number(approverId),
         amount: Number(amount),
         reason: String(reason || ''),
-        dateGranted: dateGranted || new Date().toISOString().slice(0, 10),
+        dateGranted: dateGranted || formatDateISO(new Date()),
         status: 'PENDING',
         notes: '',
         createdAt: new Date().toISOString(),
@@ -4449,15 +4518,23 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   // on, not whether the collaborator showed up. One row per (user, date).
 
   const PUNCTUALITY_TOLERANCE_MIN = 15;
-  const attendanceToday = () => new Date().toISOString().slice(0, 10);
+  const attendanceToday = () => formatDateISO(new Date());
   const isPhoneRequest = (req: any) => /Mobi|Android|iPhone|iPad/i.test(req.headers['user-agent'] || '');
 
-  /** Minutes between an admin-set "HH:MM" shift boundary (today) and `at` — positive means `at` is later. */
+  /**
+   * Minutes between an admin-set "HH:MM" shift boundary (today) and `at` —
+   * positive means `at` is later.
+   *
+   * Comparaison d'heures **murales**, pas d'instants : l'horaire est saisi
+   * comme « 08:00 » dans le fuseau du cabinet, et c'est à l'heure murale du
+   * cabinet qu'il doit se comparer. `setHours()` posait la borne dans le
+   * fuseau du processus — en UTC, « 08:00 » devenait 09h00 à Tunis et tout le
+   * monde arrivait une heure en avance.
+   */
   const minutesFromShift = (hhmm: string, at: Date) => {
     const [h, m] = hhmm.split(':').map(Number);
-    const scheduled = new Date(at);
-    scheduled.setHours(h, m, 0, 0);
-    return Math.round((at.getTime() - scheduled.getTime()) / 60000);
+    const c = civilParts(at);
+    return (c.hour * 60 + c.minute) - (h * 60 + m);
   };
 
   app.get('/api/attendance/today', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
@@ -4554,9 +4631,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       if (!canViewAll) records = records.filter((r: any) => r.userId === req.user.id);
 
       const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - days);
-      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const cutoffStr = isoDaysAgo(days);
       records = records.filter((r: any) => r.date >= cutoffStr);
 
       const users = await db.getAllUsers(req.user.companyId);
@@ -6492,7 +6567,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       }
 
       const existing = await db.getAllOrders();
-      const reference = `TC-${new Date().getFullYear()}-${String(existing.length + 1).padStart(4, '0')}`;
+      const reference = `TC-${civilParts(new Date()).year}-${String(existing.length + 1).padStart(4, '0')}`;
 
       await db.createOrder({
         id: genId('order'),
