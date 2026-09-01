@@ -502,6 +502,19 @@ Sized for **hundreds of clients and dozens of users**. The rules that keep it th
 
 La ligne d'une entreprise porte **Modifier** et **Supprimer** — le bouton « Utilisateurs » qui s'y trouvait a bougé *dans* la fiche de modification, il n'a pas disparu.
 
+La ligne porte aussi la **date d'inscription** (`createdAt`) et l'**échéance** :
+la fin d'essai tant que rien n'est payé, la fin de l'abonnement ensuite
+(`subscriptionEndsAt`, posée à la confirmation à un mois de là — les trois
+packs sont mensuels). Une échéance dépassée s'affiche en rouge et **c'est
+tout** : rien côté serveur ne la surveille, aucun accès ne se ferme quand elle
+passe. Couper l'accès reste une décision prise à la main, par la route dédiée —
+une coupure automatique le jour où un virement traîne coûterait un client, et
+l'app ne sait pas ce qui a été encaissé. L'échéance se repousse à chaque
+règlement depuis la fiche, et c'est là qu'on applique un mois offert gagné par
+parrainage. À ne pas confondre avec `trialEndsAt`, qui lui **bloque** la
+connexion à son terme (`expireTrialIfDue`) : un essai non payé n'a jamais donné
+de droits, un abonnement en cours de renouvellement si.
+
 `PUT /api/platform/companies/:id` travaille sur une **liste blanche** : nom, contact, email, téléphone, secteur, sièges, fin d'essai. `status` et `plan` en sont volontairement absents — ils se changent par la confirmation de paiement, qui porte ses propres effets de bord ; les accepter ici ouvrirait un second chemin capable d'activer un compte sans paiement.
 
 `DELETE /api/platform/companies/:id` supprime **le tenant entier** : `deleteCompany()` purge chaque collection portant un `companyId`, plus `settingsByCompany` (indexé par `id`, que le filtre générique n'attrape pas) et, sous Postgres, `leave_balances` et `settings` qui ont leur propre colonne `company_id` — le tout dans une transaction, une purge à moitié faite laisserait des utilisateurs sans entreprise. `orders` n'est jamais touché : une demande d'accès précède l'entreprise et ne porte pas de `companyId`.

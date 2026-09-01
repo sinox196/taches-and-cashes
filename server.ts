@@ -91,6 +91,24 @@ const formatTimeFR = (d: Date) => {
   return `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}`;
 };
 
+/**
+ * L'échéance d'un abonnement mensuel : la date de départ plus N mois.
+ *
+ * `setUTCMonth` fait le gros du travail, mais rend le 31 mars + 1 mois =
+ * 31 avril, c'est-à-dire le 1er mai — un jour d'abonnement offert par accident
+ * chaque fois que le mois d'arrivée est plus court. On retombe donc sur le
+ * dernier jour du mois visé, ce qu'un échéancier fait naturellement.
+ */
+const addMonthsISO = (from: Date, months: number) => {
+  const d = new Date(from);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const lastDayOfTarget = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDayOfTarget));
+  return d.toISOString();
+};
+
 /** YYYY-MM-DD — la forme des dates RH et du pointage de présence. */
 const formatDateISO = (d: Date) => {
   const c = civilParts(d);
@@ -7110,11 +7128,18 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         }
         updates.portalSeatLimit = Math.floor(portalSeats);
       }
-      // Prolonger ou raccourcir un essai — la seule date que la console a une
-      // raison de toucher.
+      // Prolonger ou raccourcir un essai.
       if (req.body?.trialEndsAt !== undefined) {
         const d = String(req.body.trialEndsAt || '').slice(0, 10);
         updates.trialEndsAt = d ? new Date(`${d}T23:59:59Z`).toISOString() : null;
+      }
+      // L'échéance de l'abonnement se repousse à la main à chaque règlement :
+      // la facturation vit hors de l'app, donc c'est l'humain qui encaisse qui
+      // sait jusqu'à quand le client est couvert. C'est aussi là qu'on applique
+      // un mois offert gagné par parrainage.
+      if (req.body?.subscriptionEndsAt !== undefined) {
+        const d = String(req.body.subscriptionEndsAt || '').slice(0, 10);
+        updates.subscriptionEndsAt = d ? new Date(`${d}T23:59:59Z`).toISOString() : null;
       }
 
       res.json(await db.updateCompany(id, updates));
@@ -7309,6 +7334,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         ...(meta && !meta.legacy ? { portalSeatLimit: meta.portalSeatLimit } : {}),
         trialEndsAt: null,
         confirmedAt: new Date().toISOString(),
+        // L'échéance de l'abonnement, dérivée de l'offre : les trois packs
+        // sont mensuels, donc un mois à compter d'aujourd'hui. Purement
+        // **indicative** — rien dans l'app ne la surveille et rien ne se
+        // ferme quand elle passe. Fermer un accès reste une décision prise à
+        // la main, par la route dédiée : une coupure automatique le jour où
+        // un virement traîne coûterait un client, et l'app ne sait pas ce qui
+        // a été encaissé.
+        subscriptionEndsAt: addMonthsISO(new Date(), 1),
         ...(price !== null ? { subscriptionPriceDT: price } : {}),
         ...(discount > 0 ? { referralDiscountUsedAt: new Date().toISOString() } : {}),
       });

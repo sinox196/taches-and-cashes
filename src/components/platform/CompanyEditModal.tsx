@@ -11,6 +11,7 @@ interface Company {
   seatLimit: number;
   portalSeatLimit?: number;
   trialEndsAt: string | null;
+  subscriptionEndsAt?: string | null;
   contactName?: string;
   contactEmail?: string;
   phone?: string;
@@ -47,6 +48,7 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
   const [seatLimit, setSeatLimit] = useState<string>(String(company.seatLimit ?? ''));
   const [portalSeatLimit, setPortalSeatLimit] = useState<string>(String(company.portalSeatLimit ?? ''));
   const [trialEndsAt, setTrialEndsAt] = useState((company.trialEndsAt || '').slice(0, 10));
+  const [subscriptionEndsAt, setSubscriptionEndsAt] = useState((company.subscriptionEndsAt || '').slice(0, 10));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -91,7 +93,7 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
       const res = await fetch(`/api/platform/companies/${company.id}`, {
         method: 'PUT',
         headers: authHeaders,
-        body: JSON.stringify({ name, contactName, contactEmail, phone, seatLimit, portalSeatLimit, trialEndsAt }),
+        body: JSON.stringify({ name, contactName, contactEmail, phone, seatLimit, portalSeatLimit, trialEndsAt, subscriptionEndsAt }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       onSaved();
@@ -210,6 +212,22 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
               />
               <p className="text-[10.5px] text-gray-400 mt-1">Vide = pas de date de fin.</p>
+            </div>
+            {/* Repoussée à la main à chaque règlement : la facturation vit hors
+                de l'app, donc c'est celui qui encaisse qui sait jusqu'à quand le
+                client est couvert. C'est aussi ici qu'on applique un mois offert
+                gagné par parrainage. */}
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Échéance de l'abonnement</label>
+              <input
+                type="date"
+                value={subscriptionEndsAt}
+                onChange={e => setSubscriptionEndsAt(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+              />
+              <p className="text-[10.5px] text-gray-400 mt-1">
+                Indicative : passée cette date, l'accès reste ouvert. La fermer se fait plus bas.
+              </p>
             </div>
           </div>
 

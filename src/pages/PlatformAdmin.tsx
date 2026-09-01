@@ -27,6 +27,8 @@ interface Company {
   referredByCompanyId?: string | null;
   /** Prix retenu à la confirmation, remise déduite — figé pour ne pas bouger avec le catalogue. */
   subscriptionPriceDT?: number;
+  /** Échéance de l'abonnement — indicative : rien ne se ferme quand elle passe. */
+  subscriptionEndsAt?: string | null;
   contactName?: string;
   contactEmail?: string;
   phone?: string;
@@ -51,6 +53,13 @@ const STATUS_LABELS: Record<string, string> = { TRIAL: 'Essai', ACTIVE: 'Actif',
  * l'app.
  */
 const PLATFORM_PAGE_SIZE = 10;
+
+/** JJ/MM/AAAA, ou « — » : une console se lit en diagonale, pas en anglais. */
+const fdate = (iso: string | null | undefined) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('fr-FR');
+};
 
 const daysLeft = (iso: string | null) => {
   if (!iso) return null;
@@ -189,7 +198,7 @@ export const PlatformAdmin: React.FC = () => {
   }
 
   return (
-    <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1200px] w-full mx-auto">
+    <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
       <div>
         <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">Plateforme — entreprises clientes</h1>
         <p className="text-[11.5px] text-gray-500 mt-0.5">
@@ -283,14 +292,20 @@ export const PlatformAdmin: React.FC = () => {
             <span className="text-[11.5px] text-gray-400 shrink-0">Inscrite&nbsp;:</span>
             <PeriodFilter page={pager} />
           </div>
-          <table className="w-full text-[12.5px]">
+          {/* Sept colonnes ne tiennent plus sur un portable : le tableau défile
+              dans son propre conteneur plutôt que de rogner les actions à
+              droite — la page, elle, ne défile jamais horizontalement. */}
+          <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px] min-w-[980px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-4 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Entreprise</th>
-                <th className="text-left px-4 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Contact</th>
-                <th className="text-left px-4 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Statut</th>
-                <th className="text-left px-4 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Offre</th>
-                <th className="text-right px-4 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Actions</th>
+                <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Entreprise</th>
+                <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Contact</th>
+                <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Statut</th>
+                <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Inscription</th>
+                <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Échéance</th>
+                <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Offre</th>
+                <th className="text-right px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -298,7 +313,7 @@ export const PlatformAdmin: React.FC = () => {
                 const remaining = daysLeft(c.trialEndsAt);
                 return (
                   <tr key={c.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="font-semibold text-gray-800">{c.name}</div>
                       {c.status === 'TRIAL' && remaining !== null && (
                         <div className="text-[11px] text-gray-400 mt-0.5">
@@ -315,19 +330,41 @@ export const PlatformAdmin: React.FC = () => {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="text-gray-700">{c.contactName}</div>
                       <div className="flex items-center gap-3 mt-0.5 text-[11px] text-gray-400">
                         {c.contactEmail && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{c.contactEmail}</span>}
                         {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone}</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${STATUS_STYLE[c.status] || 'bg-gray-100 text-gray-500'}`}>
                         {STATUS_LABELS[c.status] || c.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 whitespace-nowrap text-gray-700" title="Date de création du compte">
+                      {fdate(c.createdAt)}
+                    </td>
+                    {/* L'échéance : la fin d'essai tant que rien n'est payé,
+                        la fin de l'abonnement ensuite. Une date dépassée est
+                        signalée en rouge et **rien d'autre** — la fermeture
+                        d'un accès reste une décision prise à la main, par le
+                        bouton de la fiche. */}
+                    <td className="px-3 py-3 whitespace-nowrap">{(() => {
+                      const due = c.status === 'TRIAL' ? c.trialEndsAt : c.subscriptionEndsAt;
+                      const left = daysLeft(due || null);
+                      if (!due) return <span className="text-gray-300">—</span>;
+                      const over = left !== null && left < 0;
+                      return (
+                        <div title={c.status === 'TRIAL' ? "Fin de la période d'essai" : "Fin de l'abonnement en cours — à repousser à chaque règlement"}>
+                          <div className={over ? 'text-red-600 font-semibold' : 'text-gray-700'}>{fdate(due)}</div>
+                          <div className={`text-[11px] ${over ? 'text-red-500' : 'text-gray-400'}`}>
+                            {left === null ? '' : over ? `échue depuis ${-left} j` : `${left} j restant(s)`}
+                          </div>
+                        </div>
+                      );
+                    })()}</td>
+                    <td className="px-3 py-3">
                       <select
                         value={planFor(c)}
                         onChange={e => setPlanPick({ ...planPick, [c.id]: e.target.value })}
@@ -370,7 +407,7 @@ export const PlatformAdmin: React.FC = () => {
                         );
                       })()}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-2">
                         {/* Modifier ouvre la fiche complète — les utilisateurs
                             de l'entreprise s'y gèrent aussi, l'action n'a pas
@@ -419,13 +456,14 @@ export const PlatformAdmin: React.FC = () => {
               })}
               {pager.pageRows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-[13px] text-gray-500">
+                  <td colSpan={7} className="px-4 py-10 text-center text-[13px] text-gray-500">
                     Aucune entreprise ne correspond à ces filtres.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          </div>
           <div className="px-4 pb-4">
             <PaginationBar page={pager} unit="entreprises" />
           </div>
