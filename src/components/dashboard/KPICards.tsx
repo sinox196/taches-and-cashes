@@ -28,9 +28,25 @@ export const KPICards: React.FC<KPICardsProps> = ({ stats }) => {
       <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
         <div className="min-w-0">
           <div className="text-[12px] font-medium text-gray-500 mb-1 uppercase tracking-wider">Coût employeur</div>
-          <div className="text-2xl font-bold text-gray-900 truncate" title={stats.totalCostFormatted}>
-            {stats.totalCostFormatted}
-          </div>
+          {/* Aucune tâche chiffrée ne veut pas dire « zéro dinar » : ça veut
+              dire qu'on ne sait pas. Le chiffre le plus visible du tableau de
+              bord ne doit pas affirmer que le travail n'a rien coûté — c'est
+              la même règle que la colonne du tableau des collaborateurs, qui
+              affiche « Non configuré » depuis toujours. */}
+          {stats.pricedTasks === 0 && stats.tasksWithoutRate > 0 ? (
+            <div
+              // Un libellé, pas un montant : à la taille d'un chiffre il se
+              // faisait tronquer en « Non con… » dans la largeur de la carte.
+              className="text-lg font-bold text-gray-400 leading-8"
+              title="Aucune tâche chiffrée : renseignez le salaire brut et le régime horaire dans Utilisateurs. Le taux est figé à la création d'une tâche, donc les tâches déjà pointées restent non chiffrées."
+            >
+              Non configuré
+            </div>
+          ) : (
+            <div className="text-2xl font-bold text-gray-900 truncate" title={stats.totalCostFormatted}>
+              {stats.totalCostFormatted}
+            </div>
+          )}
           <div className="text-[11px] mt-1">
             {stats.tasksWithoutRate > 0 ? (
               <span

@@ -135,6 +135,21 @@ const publicUser = (u: any) => {
 // totalNetToPay into NaN, stored as null — a document with no amount at all.
 const num = (v: any, fallback: number) =>
   (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+/**
+ * Un coût en dinars, mis en forme.
+ *
+ * Même règle que `formatCostTND` côté client : au-dessus de 100 DT l'entier
+ * suffit, en dessous on garde les décimales. `Math.round()` seul — ce qu'il y
+ * avait — affichait « 0 TND » pour tout montant inférieur à un demi-dinar,
+ * donc pour toute tâche courte, et la carte du tableau de bord affirmait
+ * gratuitement du travail qui avait bien un coût.
+ */
+const formatCostTND = (cost: number): string => {
+  const val = cost || 0;
+  if (val % 1 === 0 || val >= 100) return `${Math.round(val).toLocaleString('fr-FR')} TND`;
+  return `${val.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} TND`;
+};
+
 /** Money is carried to the millime (3 decimals) at every step. */
 const round3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 
@@ -1693,8 +1708,13 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       totalDurationSeconds: globalDurationSeconds,
       totalDurationFormatted: `${gHours}h${String(gMins).padStart(2, '0')}`,
       totalCost: globalCost,
-      totalCostFormatted: `${Math.round(globalCost).toLocaleString('fr-FR')} TND`,
+      totalCostFormatted: formatCostTND(globalCost),
       tasksWithoutRate,
+      // Combien de tâches ont réellement un taux. Sans ce compte, l'écran ne
+      // peut pas distinguer « le coût est nul » de « on ne sait pas » : les
+      // deux valent 0, et afficher 0 dans le second cas affirme gratuitement
+      // que le travail n'a rien coûté.
+      pricedTasks: timeEntries.length - tasksWithoutRate,
       activeLeaves: leaveRequests.filter((l: any) => l.status === 'APPROVED').length,
       activeAuthorizations: authorizations.filter((a: any) => a.status === 'APPROVED').length,
     };
@@ -1723,7 +1743,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
       const eHours = Math.floor(totalDurationSeconds / 3600);
       const eMins = Math.floor((totalDurationSeconds % 3600) / 60);
       const totalDurationFormatted = `${eHours}h${String(eMins).padStart(2, '0')}`;
-      const totalCostFormatted = `${Math.round(totalCost).toLocaleString('fr-FR')} TND`;
+      const totalCostFormatted = formatCostTND(totalCost);
       
       const empClients = new Set();
       const clientTasksCount: any = {};
@@ -1946,7 +1966,7 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
         durationSeconds,
         durationFormatted: `${Math.floor(durationSeconds / 3600)}h${String(Math.floor((durationSeconds % 3600) / 60)).padStart(2, '0')}`,
         totalCost,
-        totalCostFormatted: `${Math.round(totalCost).toLocaleString('fr-FR')} TND`,
+        totalCostFormatted: formatCostTND(totalCost),
         unpricedTasks,
         contributors,
         // Billing for the same client over the same period.
@@ -2041,7 +2061,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     const iso = (ts: number) => new Date(ts).toISOString().slice(0, 10);
     const prevBody = { startDate: iso(prevStartTs), endDate: iso(prevEndTs), filterUserIds, filterClientIds };
 
-    const fmtTnd = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} TND`;
+    const fmtTnd = (n: number) => formatCostTND(n);
 
     const [allUsers, allEntriesRaw, allInvoices, allClients, allLeaves, allJournal, echeanceCols, echeanceStatuses] =
       await Promise.all([

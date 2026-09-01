@@ -22,6 +22,16 @@ interface ClientRow {
 const nf = (n: number, d = 0) =>
   n.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
 
+/**
+ * Un montant, à l'entier près — sauf s'il s'arrondirait à zéro sans l'être.
+ *
+ * Ce tableau est large et se lit en diagonale : sur des honoraires à quatre
+ * chiffres, les millimes sont du bruit. Mais afficher « 0 » pour un coût réel
+ * affirme que le travail n'a rien coûté, et c'est faux — un cabinet qui
+ * démarre, ou une période d'un jour, tombe exactement dans ce cas.
+ */
+const money = (n: number) => (n !== 0 && Math.abs(n) < 0.5 ? nf(n, 3) : nf(n));
+
 const hoursLabel = (h: number) => {
   const whole = Math.floor(h);
   return `${nf(whole)}h${String(Math.round((h - whole) * 60)).padStart(2, '0')}`;
@@ -177,10 +187,10 @@ export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient }) 
                     <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-[12px]">
                       <div className="font-bold text-gray-900 mb-1">{r.name}</div>
                       <div className="text-gray-600">Heures : <span className="font-mono">{hoursLabel(r.heures)}</span></div>
-                      <div className="text-gray-600">Honoraires : <span className="font-mono">{nf(r.honoraires)} TND</span></div>
-                      <div className="text-gray-600">Coût du temps : <span className="font-mono">{nf(r.cout)} TND</span></div>
+                      <div className="text-gray-600">Honoraires : <span className="font-mono">{money(r.honoraires)} TND</span></div>
+                      <div className="text-gray-600">Coût du temps : <span className="font-mono">{money(r.cout)} TND</span></div>
                       <div className="text-gray-900 font-semibold mt-1">
-                        Marge : <span className="font-mono">{nf(r.marge)} TND</span> ({r.y} %)
+                        Marge : <span className="font-mono">{money(r.marge)} TND</span> ({r.y} %)
                       </div>
                     </div>
                   );
@@ -251,12 +261,12 @@ export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient }) 
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono text-gray-600">{hoursLabel(r.heures)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-600">{nf(r.cout)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-gray-600">{money(r.cout)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-gray-900 font-semibold">
-                      {r.honoraires > 0 ? nf(r.honoraires) : <span className="text-gray-300">—</span>}
+                      {r.honoraires > 0 ? money(r.honoraires) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className={`px-3 py-2.5 text-right font-mono font-semibold ${r.marge < 0 ? 'text-late-fg' : 'text-gray-900'}`}>
-                      {nf(r.marge)}
+                      {money(r.marge)}
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       {/* Indéfini quand rien n'a été facturé : « n/a », jamais 0 % ni −100 %. */}
@@ -282,9 +292,9 @@ export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient }) 
               <tr className="bg-[#F9FAFB] border-t border-gray-200 text-[12px] font-bold text-gray-900">
                 <td className="px-4 py-2.5">Total ({rows.length})</td>
                 <td className="px-3 py-2.5 text-right font-mono">{hoursLabel(totals.heures)}</td>
-                <td className="px-3 py-2.5 text-right font-mono">{nf(totals.cout)}</td>
-                <td className="px-3 py-2.5 text-right font-mono">{nf(totals.honoraires)}</td>
-                <td className={`px-3 py-2.5 text-right font-mono ${totals.marge < 0 ? 'text-late-fg' : ''}`}>{nf(totals.marge)}</td>
+                <td className="px-3 py-2.5 text-right font-mono">{money(totals.cout)}</td>
+                <td className="px-3 py-2.5 text-right font-mono">{money(totals.honoraires)}</td>
+                <td className={`px-3 py-2.5 text-right font-mono ${totals.marge < 0 ? 'text-late-fg' : ''}`}>{money(totals.marge)}</td>
                 <td className="px-3 py-2.5 text-right">
                   {totals.honoraires > 0 ? `${Math.round((totals.marge / totals.honoraires) * 100)} %` : '—'}
                 </td>
