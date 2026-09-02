@@ -6138,7 +6138,18 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       }
 
       const updated = await db.updateTimeEntry(req.user.companyId, entryId, updates);
-      res.json(updated);
+      // GET /api/time-entries and the SSE broadcast both fold the live elapsed
+      // stretch into `dureeSeconds` before responding — this is the one PUT
+      // response that didn't. A write carrying only `overtimeAckCycle` (the 2h
+      // popup recording itself, task still RUNNING) returned the raw, un-folded
+      // DB value, and the client applies this response straight onto its
+      // ticking local state — silently rewinding the on-screen duration back
+      // to whatever it was at the last pause/resume, sometimes 0. `accruedSeconds`
+      // is a no-op here for a task that just left RUNNING (already folded) or
+      // just entered it (`lastStartedAt` is now ~`Date.now()`), so this only
+      // changes the value for a still-RUNNING task, which is exactly the case
+      // that was wrong.
+      res.json({ ...updated, dureeSeconds: accruedSeconds(updated) });
       broadcastTimeEntries(); // Broadcast update
     } catch (error) {
       console.error(error);
