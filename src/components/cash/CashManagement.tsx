@@ -71,6 +71,13 @@ export const CashManagement: React.FC = () => {
   const [editor, setEditor] = useState<false | { invoice: any | null }>(false);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [preview, setPreview] = useState<any | null>(null);
+  /**
+   * Le plafond mensuel de l'offre — `limit: null` pour une offre sans
+   * plafond, ce qui est le cas de tous les packs. Compté par le serveur, avec
+   * le même helper que les refus : un compteur qui annoncerait une place
+   * restante devant un refus serait pire que pas de compteur.
+   */
+  const [quota, setQuota] = useState<{ limit: number | null; used: number; remaining: number | null } | null>(null);
 
   const canManage = hasPermission('MANAGE_CASH');
 
@@ -96,6 +103,12 @@ export const CashManagement: React.FC = () => {
       setInvoices(body.data ?? []);
       setTotal(body.total ?? 0);
       setTotalsByCurrency(body.totalsByCurrency ?? {});
+      // Relu à chaque chargement : émettre un document consomme une place, et
+      // le compteur doit le refléter sans qu'on recharge la page.
+      fetch('/api/cash/document-quota', { headers: authHeaders })
+        .then(r => (r.ok ? r.json() : null))
+        .then(q => { if (q) setQuota(q); })
+        .catch(() => {});
     } catch (e: any) {
       setError(friendlyError(e));
     } finally {
@@ -177,6 +190,21 @@ export const CashManagement: React.FC = () => {
                 ? 'Ce que chaque client a réglé, et par quel moyen.'
                 : 'Mouvements de caisse — entrées et sorties, jour par jour.'}
           </p>
+          {/* N'apparaît que là où il y a quelque chose à dire : une offre
+              sans plafond n'affiche rien, comme le badge d'essai du bandeau. */}
+          {quota?.limit ? (
+            <p
+              title="Les brouillons ne comptent pas — préparez-en autant que nécessaire."
+              className={`inline-flex items-center gap-1.5 mt-2 px-2 py-0.5 rounded-full text-[11.5px] font-semibold ${
+                quota.remaining === 0 ? 'bg-late-bg text-late-fg' : 'bg-[#FFFAEB] text-[#B54708]'
+              }`}
+            >
+              <FileClock className="w-3.5 h-3.5 shrink-0" />
+              {quota.remaining === 0
+                ? `Plafond atteint — ${quota.limit} documents ce mois-ci`
+                : `Essai gratuit : ${quota.used} / ${quota.limit} documents ce mois-ci`}
+            </p>
+          ) : null}
         </div>
         <div className={`flex items-center gap-2 flex-wrap w-full sm:w-auto ${tab === 'documents' ? '' : 'hidden'}`}>
           <div className="relative flex-1 min-w-[160px] sm:flex-none">

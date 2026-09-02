@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Role } from '../constants/roles';
 import { RESOURCES_PERMISSIONS, companyHasResourcesModule } from '../constants/secteurs';
+import { planAllowsPermission } from '../constants/plans';
 import { unsubscribeFromPush } from '../utils/osNotifications';
 
 export interface User {
@@ -119,6 +120,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Ressources Métier is gated by the company's own secteur, ahead of the
     // ADMIN bypass below — mirrors requirePermission in server.ts.
     if (RESOURCES_PERMISSIONS.has(permission) && !companyHasResourcesModule(user.company?.secteur)) return false;
+    // Une offre restreinte ferme ce qu'elle ne vend pas, avant le
+    // court-circuit ADMIN comme côté serveur : c'est l'abonnement de
+    // l'entreprise qui décide, pas le rôle de la personne.
+    if (!planAllowsPermission(user.company?.plan, permission)) return false;
     if (user.role === 'ADMIN') return true;
     return user.permissions.includes(permission);
   };

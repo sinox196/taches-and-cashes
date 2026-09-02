@@ -37,8 +37,11 @@ const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
   tagline: p.tagline,
   price: formatDT(p.priceDT),
   period: '/mois',
-  seats: `${p.seatLimit} utilisateurs`,
-  portalSeats: `${p.portalSeatLimit} comptes portail client`,
+  seats: `${p.seatLimit} utilisateur${p.seatLimit > 1 ? 's' : ''}`,
+  // Une offre sans portail client ne porte pas la ligne du tout : « + 0
+  // comptes portail client » se lit comme une privation, alors que ce
+  // portail n'est simplement pas ce qu'elle vend.
+  portalSeats: p.portalSeatLimit > 0 ? `${p.portalSeatLimit} comptes portail client` : '',
   features: p.features,
   cta: 'Essai gratuit',
   highlighted: p.highlighted,
@@ -704,14 +707,15 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 Un prix simple, qui grandit avec votre équipe
               </h1>
               <p className="mt-[18px] text-[16.5px] text-[#5B6472] leading-[1.6]">
-                Toutes les offres donnent accès à l'intégralité des vues et fonctionnalités — tâches, temps, coûts, facturation et trésorerie.
+                Les packs donnent accès à l'intégralité des vues — tâches, temps, coûts, facturation et trésorerie.
+                L'offre Facturation, elle, n'ouvre que la facturation : c'est un outil de facturation, pas le cabinet complet.
               </p>
             </div>
           </section>
 
           {/* PRICING CARDS */}
           <section className="pt-6 px-6 sm:px-10 pb-[100px] bg-[#F2F4F7]">
-            <div className="max-w-[1080px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+            <div className="max-w-[1240px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
               {PLANS.map(plan => (
                 <div
                   key={plan.name}
@@ -737,7 +741,9 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   {/* Les comptes du portail client se comptent dans un panier
                       séparé des sièges de l'équipe — la carte le dit, faute de
                       quoi « 5 utilisateurs + 50 portail » se lit comme 55. */}
-                  <p className={`text-[13px] ${plan.highlighted ? 'text-turquoise' : 'text-[#00857C]'}`}>+ {plan.portalSeats}</p>
+                  {plan.portalSeats && (
+                    <p className={`text-[13px] ${plan.highlighted ? 'text-turquoise' : 'text-[#00857C]'}`}>+ {plan.portalSeats}</p>
+                  )}
 
                   <div className={`h-px my-6 ${plan.highlighted ? 'bg-white/[0.12]' : 'bg-[#EEF1F4]'}`} />
 

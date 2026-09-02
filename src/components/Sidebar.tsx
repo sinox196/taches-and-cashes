@@ -17,6 +17,7 @@ import {
   Gift
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { planAllowsModule, type PlanModule } from '../constants/plans';
 import { useLanguage } from '../context/LanguageContext';
 
 interface SidebarProps {
@@ -60,10 +61,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(hasPermission('MANAGE_USERS') ? [{ id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false }] : []),
   ];
 
+  /**
+   * Une offre restreinte ne dessine pas les entrées qu'elle ne vend pas.
+   *
+   * Les entrées gardées par une permission se ferment déjà d'elles-mêmes —
+   * `hasPermission` consulte l'offre. Ce filtre-ci est pour les deux cas
+   * qu'une permission ne couvre pas : **Tableau de bord, Tâches et Messages**,
+   * qui n'en portent aucune, et **Parrainage**, qui partage `MANAGE_USERS`
+   * avec Équipe alors que ce sont deux vues distinctes.
+   */
+  const navItems = mainNavItems.filter(item => planAllowsModule(user?.company?.plan, item.id as PlanModule));
+
   // Orthogonal to any company-scoped permission: runs the platform itself
   // (confirms other companies' payments), not this user's own company.
   if (user?.isPlatformAdmin) {
-    mainNavItems.push({ id: 'Plateforme', label: 'Plateforme', icon: Building2, hasChevron: false });
+    navItems.push({ id: 'Plateforme', label: 'Plateforme', icon: Building2, hasChevron: false });
   }
 
   return (
@@ -105,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Navigation List */}
         <nav className="flex flex-col gap-px px-2.5">
-          {mainNavItems.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeItem === item.id;
 

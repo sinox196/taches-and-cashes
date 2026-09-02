@@ -314,6 +314,71 @@ garde leur option dans le `<select>` que pour l'entreprise qui les porte. Même
 règle de récupération que `normalizeBalance()` : on lit la forme ancienne, on ne
 la réécrit pas.
 
+**Une offre peut n'ouvrir qu'une partie de l'application.** `PlanMeta.modules`
+porte les vues qu'elle vend, désignées par l'identifiant que porte déjà leur
+entrée de barre latérale (`Cash`, `Clients`, `HR`…) — **absent = toutes**, ce
+qui est le cas des trois packs et ce qui fait qu'ajouter une offre restreinte
+n'a touché à rien de ce qui existait. Le pack **Facturation** (30 DT, un siège,
+aucun compte portail) déclare `['Cash', 'Users']` : c'est un outil de
+facturation, pas le cabinet complet — **fichier clients compris**, qu'il
+n'ouvre pas. L'éditeur de document s'y adapte de lui-même en demandant
+`hasPermission('VIEW_CLIENTS')`, qui consulte déjà l'offre : sans fichier
+clients, la raison sociale devient un champ libre au lieu d'un type-ahead (une
+loupe qui ne cherche nulle part se lirait comme une panne), la validation porte
+sur ce qui est tapé plutôt que sur une fiche choisie, et le document part avec
+`clientId: null` — le serveur accepte depuis toujours l'un **ou** l'autre.
+Matricule fiscal et adresse, eux, étaient déjà des champs libres ; ils étaient
+seulement pré-remplis depuis la fiche.
+
+Le périmètre se ferme à **trois endroits, et les trois sont nécessaires** :
+
+- **`authenticate`**, par une table chemin → module (`PLAN_MODULE_ROUTES`),
+  exactement comme le périmètre du portail client juste au-dessus, et pour la
+  même raison : `requirePermission` ne suffit pas, parce qu'une bonne partie
+  des routes ne portent que `authenticate` (le catalogue des missions que lit
+  le formulaire de pointage, `/api/hr/balance`, les flux SSE…) et resteraient
+  ouvertes. **Liste blanche** : un chemin qui ne correspond à aucun préfixe est
+  refusé aux offres restreintes, donc une route ajoutée demain naît fermée pour
+  elles — la contrepartie est qu'une nouvelle route doit être classée dans
+  cette table. Seuls `PLAN_NEUTRAL_PREFIXES` (se connaître, la cloche, le push,
+  le battement de présence, la console plateforme) échappent au classement.
+- **`requirePermission`**, par `planAllowsPermission` et la table
+  `PERMISSION_MODULE` — **devant le court-circuit ADMIN**, comme le garde de
+  secteur : c'est l'abonnement de l'entreprise qui décide, pas le rôle de la
+  personne.
+- **`hasPermission` côté client** (même appel, même table) et un filtre de
+  module sur `mainNavItems`. Ce filtre-là couvre les deux cas qu'une permission
+  ne couvre pas : **Tableau de bord, Tâches et Messages**, qui n'en portent
+  aucune, et **Parrainage**, qui partage `MANAGE_USERS` avec Équipe alors que
+  ce sont deux vues distinctes.
+
+App.tsx dérive de tout ça la section réellement affichée (`activeNav`) : la
+section mémorisée peut être fermée par l'offre — et l'est par défaut, le repli
+du sélecteur étant « Time Tracking » —, auquel cas on retombe sur **la première
+vue déclarée par l'offre** (`Cash` pour le pack Facturation), pas sur la
+première entrée de `NAV_IDS` qui se trouve autorisée.
+
+**Le plafond de documents est ce que lève l'abonnement.**
+`PlanMeta.trialDocumentQuota` (10 pour le pack Facturation) plafonne les
+documents **émis** par mois tant que l'entreprise n'est pas `ACTIVE` ;
+`documentQuotaFor()` rend `null` dès qu'elle l'est — c'est précisément ce
+qu'on vend. Trois précisions qui décident du comportement :
+
+- **Un brouillon ne compte pas** (`countsAgainstQuota` : tout sauf `DRAFT`).
+  On en prépare autant qu'on veut ; c'est à l'**émission** que la place est
+  consommée, donc le plafond est vérifié à la création d'un document non
+  brouillon *et* dans `POST /api/invoices/:id/issue`. La règle est
+  volontairement plus large que `countsAsBilled` : un « autre document (non
+  facturable) » ne fait pas d'honoraires mais reste un document émis.
+- **Le mois est celui de l'émission** (`issuedAt || createdAt`, dans le fuseau
+  du cabinet), jamais `issueDate` : cette dernière se saisit à la main, donc un
+  plafond adossé à elle se contournerait en la reculant d'un mois.
+- **Un seul helper** (`documentQuotaState`) sert les deux refus *et*
+  `GET /api/cash/document-quota`, que Cash affiche en badge : un compteur qui
+  annoncerait une place restante devant un refus serait pire que pas de
+  compteur. Le refus est un **402**, et son message part tel quel dans
+  l'éditeur, qui affiche déjà `body.error`.
+
 **Les sièges se comptent en deux paniers séparés** : le back-office
 (`seatLimit`) et le portail client (`portalSeatLimit`), et `seatLimitError()`
 dans server.ts est leur unique arbitre. Un comptage unique — ce qu'il y avait —

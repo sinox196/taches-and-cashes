@@ -75,7 +75,7 @@ interface InvoiceEditorProps {
 export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, onClose, onSaved }) => {
   useEscapeToClose(onClose);
   const isEdit = !!invoice;
-  const { token } = useAuth();
+  const { token, hasPermission } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
   // --- selectors -----------------------------------------------------------
@@ -112,6 +112,16 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   }, [token]);
 
   // --- client --------------------------------------------------------------
+  /**
+   * Y a-t-il un fichier clients où puiser ?
+   *
+   * Non pour une offre qui ne vend que la facturation : `hasPermission`
+   * consulte déjà l'offre, donc il n'y a rien de plus à interroger ici. Sans
+   * fichier clients, la raison sociale se tape à la main comme le matricule
+   * fiscal et l'adresse — qui l'étaient déjà, ils étaient seulement
+   * pré-remplis depuis la fiche.
+   */
+  const hasClientDirectory = hasPermission('VIEW_CLIENTS');
   const [clientSearch, setClientSearch] = useState(invoice?.clientName ?? '');
   const [clientResults, setClientResults] = useState<any[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -204,7 +214,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
   // Client lookup is server-side and debounced — the list is never fully loaded.
   useEffect(() => {
     const term = clientSearch.trim();
-    if (term.length < 1 || client) { setClientResults([]); return; }
+    if (!hasClientDirectory || term.length < 1 || client) { setClientResults([]); return; }
     let cancelled = false;
     const h = setTimeout(async () => {
       try {
@@ -214,7 +224,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
       } catch { if (!cancelled) setClientResults([]); }
     }, 250);
     return () => { cancelled = true; clearTimeout(h); };
-  }, [clientSearch, client, token]);
+  }, [clientSearch, client, token, hasClientDirectory]);
 
   /** Matricule fiscal and adresse come from the client record automatically. */
   const selectClient = (c: any) => {
@@ -282,7 +292,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
    * le rendre modifiable en silence ouvrirait un trou dans la numérotation.
    */
   const handleSave = async (asDraft = false) => {
-    if (!client) { setError('La raison sociale du client est obligatoire.'); return; }
+    if (!clientSearch.trim()) { setError('La raison sociale du client est obligatoire.'); return; }
     if (!clientTaxId.trim()) { setError('Le matricule fiscal est obligatoire.'); return; }
     if (!clientAddress.trim()) { setError("L'adresse est obligatoire."); return; }
     if (!issueDate) { setError('La date de création est obligatoire.'); return; }
@@ -302,7 +312,9 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
         body: JSON.stringify({
           documentKind, billingMode, vatRegime, currency: currency.trim(), title,
           ...(freeNumber ? { number: number.trim() } : {}),
-          clientId: client.id, clientName: client.name,
+          // Le document porte le nom qui est à l'écran ; l'id n'existe que
+          // si une fiche a été choisie, et le serveur accepte l'un ou l'autre.
+          clientId: client?.id ?? null, clientName: client?.name ?? clientSearch.trim(),
           clientTaxId, clientAddress,
           customFields: Object.fromEntries(customFields.filter(f => f.label.trim()).map(f => [f.label.trim(), f.value])),
           issueDate, dueDate: showDueDate ? dueDate : '', showDueDate,
@@ -497,37 +509,49 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               <label className="block text-[12px] font-semibold text-gray-700 mb-1">
                 Raison sociale <span className="text-red-500">*</span>
               </label>
-              <div className="relative mb-3">
-                <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:border-gray-500">
-                  <Search className="w-3.5 h-3.5 text-gray-400 ml-2.5" />
-                  <input
-                    value={clientSearch}
-                    onChange={e => {
-                      setClientSearch(e.target.value);
-                      setDropdownOpen(true);
-                      if (client && e.target.value !== client.name) setClient(null);
-                    }}
-                    onFocus={() => setDropdownOpen(true)}
-                    placeholder="Rechercher un client…"
-                    className="w-full px-2 py-2 text-[13px] focus:outline-none bg-transparent rounded-lg"
-                  />
-                </div>
-                {dropdownOpen && !client && clientSearch.trim().length >= 1 && (
-                  <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {clientResults.length > 0 ? clientResults.map(c => (
-                      <div
-                        key={c.id}
-                        onClick={() => selectClient(c)}
-                        className="px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50 cursor-pointer"
-                      >
-                        {c.name}
-                      </div>
-                    )) : (
-                      <div className="px-3 py-2 text-[12px] text-gray-500 italic">Aucun client trouvé.</div>
-                    )}
+              {/* Sans fichier clients (offre Facturation), un champ simple :
+                  une loupe qui ne cherche nulle part et une liste
+                  systématiquement vide se liraient comme une panne. */}
+              {hasClientDirectory ? (
+                <div className="relative mb-3">
+                  <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:border-gray-500">
+                    <Search className="w-3.5 h-3.5 text-gray-400 ml-2.5" />
+                    <input
+                      value={clientSearch}
+                      onChange={e => {
+                        setClientSearch(e.target.value);
+                        setDropdownOpen(true);
+                        if (client && e.target.value !== client.name) setClient(null);
+                      }}
+                      onFocus={() => setDropdownOpen(true)}
+                      placeholder="Rechercher un client…"
+                      className="w-full px-2 py-2 text-[13px] focus:outline-none bg-transparent rounded-lg"
+                    />
                   </div>
-                )}
-              </div>
+                  {dropdownOpen && !client && clientSearch.trim().length >= 1 && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {clientResults.length > 0 ? clientResults.map(c => (
+                        <div
+                          key={c.id}
+                          onClick={() => selectClient(c)}
+                          className="px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50 cursor-pointer"
+                        >
+                          {c.name}
+                        </div>
+                      )) : (
+                        <div className="px-3 py-2 text-[12px] text-gray-500 italic">Aucun client trouvé.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <input
+                  value={clientSearch}
+                  onChange={e => setClientSearch(e.target.value)}
+                  placeholder="Nom du client"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] mb-3"
+                />
+              )}
 
               <label className="block text-[12px] font-semibold text-gray-700 mb-1">
                 Matricule fiscal <span className="text-red-500">*</span>
@@ -535,7 +559,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
               <input
                 value={clientTaxId}
                 onChange={e => setClientTaxId(e.target.value)}
-                placeholder="Repris de la fiche client"
+                placeholder={hasClientDirectory ? 'Repris de la fiche client' : 'Matricule fiscal du client'}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] mb-3"
               />
 
@@ -546,11 +570,13 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                 value={clientAddress}
                 onChange={e => setClientAddress(e.target.value)}
                 rows={2}
-                placeholder="Reprise de la fiche client"
+                placeholder={hasClientDirectory ? 'Reprise de la fiche client' : 'Adresse du client'}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] resize-none"
               />
               <p className="text-[10.5px] text-gray-400 mt-1">
-                Matricule fiscal et adresse sont renseignés automatiquement depuis la fiche client.
+                {hasClientDirectory
+                  ? 'Matricule fiscal et adresse sont renseignés automatiquement depuis la fiche client.'
+                  : 'Raison sociale, matricule fiscal et adresse se saisissent ici, sur le document.'}
               </p>
 
               {customFields.map((f, i) => (

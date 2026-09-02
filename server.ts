@@ -12,6 +12,7 @@ import { LEGACY_COMPANY_ID, TRIAL_DAYS, ADMIN_PERMISSIONS } from './src/server/d
 import {
   PLAN_SEAT_LIMITS, PLAN_PORTAL_SEAT_LIMITS, SELLABLE_PLANS, isSellablePlan, DEFAULT_PLAN_ID,
   planMeta, planLabel, formatDT, REFERRAL_DISCOUNT_PERCENT, discountedPriceDT,
+  planAllowsPermission, documentQuotaFor, planAllowsModule, planModules, type PlanModule,
 } from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
@@ -233,6 +234,49 @@ const countsAsBilled = (inv: any) =>
   inv.documentKind !== 'AUTRE_NON_FACTURABLE' && inv.status !== 'DRAFT';
 
 /**
+ * Le mois où un document a été **émis**, au format `YYYY-MM` et dans le
+ * fuseau du cabinet.
+ *
+ * `issuedAt` d'abord : un brouillon préparé en janvier et émis en février est
+ * un document de février — c'est à l'émission qu'il devient un document. Et
+ * jamais `issueDate`, la date *portée* par le document : elle se saisit à la
+ * main, donc un plafond mensuel adossé à elle se contournerait en la
+ * reculant d'un mois.
+ */
+const documentMonth = (inv: any): string =>
+  formatDateISO(new Date(inv.issuedAt || inv.createdAt)).slice(0, 7);
+
+/**
+ * Un document compte-t-il dans le plafond mensuel de l'offre ?
+ *
+ * Tout sauf un brouillon. C'est la règle telle qu'elle est vendue — on
+ * prépare autant de brouillons qu'on veut — et elle est volontairement plus
+ * large que `countsAsBilled` : un « autre document (non facturable) » ne fait
+ * pas d'honoraires mais reste un document qu'on a émis.
+ */
+const countsAgainstQuota = (inv: any) => inv.status !== 'DRAFT';
+
+/**
+ * Le plafond de l'offre est-il atteint ? Rend le message à afficher, ou
+ * `null` quand il reste de la place (ou qu'il n'y a pas de plafond).
+ *
+ * Une seule implémentation pour les trois appelants — la création, l'émission
+ * d'un brouillon, et le compteur affiché dans Cash : un compteur qui
+ * annoncerait « 3 restants » devant un refus serait pire que pas de compteur.
+ */
+const documentQuotaState = (company: any, allInvoices: any[]) => {
+  const limit = documentQuotaFor(company?.plan, company?.status);
+  if (!limit) return { limit: null as number | null, used: 0, remaining: null as number | null };
+  const month = formatDateISO(new Date()).slice(0, 7);
+  const used = allInvoices.filter(i => countsAgainstQuota(i) && documentMonth(i) === month).length;
+  return { limit, used, remaining: Math.max(0, limit - used) };
+};
+
+const QUOTA_REACHED_ERROR = (limit: number) =>
+  `Votre essai gratuit couvre ${limit} documents par mois — le plafond est atteint. `
+  + 'Les brouillons restent illimités ; passez à l\'abonnement pour émettre sans plafond.';
+
+/**
  * Les seuls chemins qu'un compte `CLIENT` peut atteindre.
  *
  * Liste blanche, jamais liste noire : ce qui n'y figure pas est refusé, donc
@@ -248,6 +292,84 @@ const CLIENT_ALLOWED_EXACT = new Set(['/api/me', '/api/logout']);
 const CLIENT_ALLOWED_PREFIXES = ['/api/portal/', '/api/notifications', '/api/messages'];
 const clientPathAllowed = (path: string) =>
   CLIENT_ALLOWED_EXACT.has(path) || CLIENT_ALLOWED_PREFIXES.some((p) => path === p || path.startsWith(p));
+
+/**
+ * À quelle vue appartient chaque route — pour les offres qui n'ouvrent pas
+ * toutes les vues (le pack Facturation).
+ *
+ * `requirePermission` ne suffit pas : une bonne partie des routes ne portent
+ * que `authenticate` (le catalogue des missions que lit le formulaire de
+ * pointage, le solde de congés, le flux SSE…) et resteraient donc ouvertes à
+ * une offre qui ne les vend pas — masquer l'entrée de menu ne ferme pas la
+ * route. Le périmètre se décide donc ici, en un seul endroit, exactement
+ * comme celui du portail client juste au-dessus.
+ *
+ * **Liste blanche, jamais liste noire** : une route qui ne correspond à
+ * aucun préfixe est refusée aux offres restreintes, donc une route ajoutée
+ * demain naît fermée pour elles plutôt que de s'ouvrir en silence. Le prix à
+ * payer est qu'une nouvelle route doit être classée ici — c'est voulu.
+ */
+const PLAN_MODULE_ROUTES: [string, PlanModule][] = [
+  ['/api/time-entries', 'Time Tracking'],
+  ['/api/task-assignments', 'Time Tracking'],
+  ['/api/kpi', 'Dashboard'],
+  ['/api/dashboard', 'Dashboard'],
+  ['/api/resources/portfolio', 'Dashboard'],
+
+  ['/api/hr', 'HR'],
+  ['/api/attendance', 'HR'],
+
+  ['/api/services', 'Missions'],
+  ['/api/task-types', 'Missions'],
+
+  ['/api/clients', 'Clients'],
+
+  ['/api/invoices', 'Cash'],
+  ['/api/cash', 'Cash'],
+  ['/api/cash-journal', 'Cash'],
+  ['/api/cash-categories', 'Cash'],
+
+  ['/api/resource-templates', 'Ressources'],
+  ['/api/resource-template-items', 'Ressources'],
+  ['/api/client-resources', 'Ressources'],
+  ['/api/client-resource-items', 'Ressources'],
+  ['/api/echeance-columns', 'Ressources'],
+  ['/api/echeance-statuses', 'Ressources'],
+  ['/api/echeance-status-options', 'Ressources'],
+  ['/api/useful-links', 'Ressources'],
+
+  ['/api/messages', 'Messages'],
+
+  ['/api/users', 'Users'],
+  ['/api/settings', 'Users'],
+
+  ['/api/referral', 'Parrainage'],
+];
+
+/**
+ * Ce qui ne relève d'aucune vue : se connaître, se déconnecter, la cloche,
+ * les notifications poussées, le battement de présence, la réinitialisation
+ * de mot de passe, et la console plateforme — qui appartient à
+ * l'administrateur de la plateforme, pas à l'abonnement de l'entreprise.
+ */
+const PLAN_NEUTRAL_PREFIXES = [
+  '/api/me', '/api/logout', '/api/notifications', '/api/push',
+  '/api/presence', '/api/auth/', '/api/platform',
+];
+
+/** Le module d'un chemin : le préfixe le plus long l'emporte (`/api/cash-journal` avant `/api/cash`). */
+const moduleForPath = (path: string): PlanModule | null => {
+  let best: PlanModule | null = null;
+  let bestLength = 0;
+  for (const [prefix, module] of PLAN_MODULE_ROUTES) {
+    if ((path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix + '?'))
+        && prefix.length > bestLength) {
+      best = module;
+      bestLength = prefix.length;
+    }
+  }
+  return best;
+};
 
 /** Bucket key used to group entries by client (falls back to the stored name). */
 const clientBucketKey = (t: any) =>
@@ -665,6 +787,19 @@ async function startServer() {
         res.status(403).json({ error: "Votre période d'essai est terminée. Contactez-nous pour activer un abonnement." });
         return;
       }
+      // Le périmètre de l'offre, même principe que celui du portail client
+      // ci-dessus : une offre qui n'ouvre pas toutes les vues (le pack
+      // Facturation) voit ses routes refusées ici, une fois pour toutes,
+      // plutôt que vue par vue. Une offre généraliste n'a pas de liste de
+      // modules et ne traverse donc rien de tout ceci.
+      if (planModules(company?.plan) && !PLAN_NEUTRAL_PREFIXES.some(p => req.path === p || req.path.startsWith(p))) {
+        const module = moduleForPath(req.path);
+        if (!module || !planAllowsModule(company?.plan, module)) {
+          res.status(403).json({ error: "Cette fonctionnalité n'est pas incluse dans votre offre." });
+          return;
+        }
+      }
+
       // Le catalogue de missions du secteur, ici et pas seulement à la
       // connexion : un jeton vit 24 h, donc quelqu'un déjà connecté ne
       // repasse pas par /api/login et ne verrait jamais arriver le catalogue.
@@ -726,16 +861,28 @@ async function startServer() {
           return res.status(403).json({ error: 'Forbidden: Missing permission ' + permission });
         }
 
+        // Une seule lecture de la fiche entreprise pour les deux gardes
+        // ci-dessous : le secteur et l'offre y sont côte à côte, et cette
+        // fonction tourne sur *chaque* requête.
+        const company = await db.getCompanyById(req.user.companyId);
+
         // Ressources Métier is gated by the company's own secteur, ahead of
         // the ADMIN bypass above: its seed content (SARL formation
         // checklists, CNSS échéances...) is specific to accounting/tax
         // cabinets, so a company outside that secteur never gets it, admin
         // included.
-        if (RESOURCES_PERMISSIONS.has(permission)) {
-          const company = await db.getCompanyById(req.user.companyId);
-          if (!companyHasResourcesModule(company?.secteur)) {
-            return res.status(403).json({ error: 'Module Ressources Métier non disponible pour ce secteur' });
-          }
+        if (RESOURCES_PERMISSIONS.has(permission) && !companyHasResourcesModule(company?.secteur)) {
+          return res.status(403).json({ error: 'Module Ressources Métier non disponible pour ce secteur' });
+        }
+
+        // Une offre restreinte (le pack Facturation) ferme les vues qu'elle
+        // ne vend pas — ici comme dans la barre latérale, et **devant** le
+        // court-circuit ADMIN ci-dessus : c'est l'abonnement de l'entreprise
+        // qui décide, pas le rôle de la personne. Sans ce garde, masquer
+        // l'entrée de menu laisserait les routes ouvertes à qui les appelle
+        // directement.
+        if (!planAllowsPermission(company?.plan, permission)) {
+          return res.status(403).json({ error: "Cette fonctionnalité n'est pas incluse dans votre offre." });
         }
 
         next();
@@ -3763,6 +3910,21 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  /**
+   * Ce qui reste du plafond mensuel, pour l'afficher **avant** d'y buter.
+   * Même helper que les deux refus ci-dessous : un compteur qui annoncerait
+   * une place restante devant un refus serait pire que pas de compteur.
+   */
+  app.get('/api/cash/document-quota', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+    try {
+      const company = await db.getCompanyById(req.user.companyId);
+      const all = await db.getAllInvoices(req.user.companyId);
+      res.json(documentQuotaState(company, all));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
       const all = await db.getAllInvoices(req.user.companyId);
@@ -3862,6 +4024,16 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
        * chiffre d'affaires de documents qui n'existent pas encore.
        */
       const isDraft = body.status === 'DRAFT';
+
+      // Le plafond de l'offre ne porte que sur les documents émis : un
+      // brouillon passe toujours, c'est ce qui est vendu.
+      if (!isDraft) {
+        const company = await db.getCompanyById(req.user.companyId);
+        const quota = documentQuotaState(company, all);
+        if (quota.limit && quota.remaining === 0) {
+          return res.status(402).json({ error: QUOTA_REACHED_ERROR(quota.limit) });
+        }
+      }
 
       // Only a legal invoice is bound to the sequence. Both "autre" kinds
       // carry a free reference (bon de livraison, reçu, note interne…), so
@@ -4038,6 +4210,15 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       }
 
       const all = await db.getAllInvoices(req.user.companyId);
+
+      // Émettre, c'est faire naître le document — donc c'est ici que le
+      // brouillon consomme sa place, et pas à sa préparation.
+      const company = await db.getCompanyById(req.user.companyId);
+      const quota = documentQuotaState(company, all);
+      if (quota.limit && quota.remaining === 0) {
+        return res.status(402).json({ error: QUOTA_REACHED_ERROR(quota.limit) });
+      }
+
       let number = existing.number;
 
       if (existing.documentKind === 'FACTURE_LEGALE') {

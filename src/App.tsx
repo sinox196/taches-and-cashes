@@ -17,6 +17,7 @@ import { ReferralPage } from './components/ReferralPage';
 import { ClientsManagement } from './components/clients/ClientsManagement';
 import { HRManagement } from './components/hr/HRManagement';
 import { TaskSubviews } from './components/TaskSubviews';
+import { planAllowsModule, planModules, type PlanModule } from './constants/plans';
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
 import { ResourcesManagement } from './components/resources/ResourcesManagement';
@@ -78,6 +79,35 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('active_nav', activeSidebarItem);
   }, [activeSidebarItem]);
+
+  /**
+   * La section réellement affichée.
+   *
+   * Une offre restreinte peut fermer celle qui est mémorisée — et c'est le
+   * cas par défaut : le repli du sélecteur ci-dessus est « Time Tracking »,
+   * que le pack Facturation ne vend pas. On retombe donc sur la première
+   * section que l'offre ouvre, plutôt que sur « section en cours de
+   * développement ». `Plateforme` échappe au filtre : elle appartient à
+   * l'administrateur de la plateforme, pas à l'abonnement de l'entreprise.
+   */
+  const activeNav = (() => {
+    if (activeSidebarItem === 'Plateforme' || planAllowsModule(user?.company?.plan, activeSidebarItem as PlanModule)) {
+      return activeSidebarItem;
+    }
+    // L'ordre de l'offre d'abord : le pack Facturation déclare `Cash` en
+    // tête, donc il ouvre sur Cash — pas sur la première entrée de NAV_IDS
+    // qui se trouve être autorisée, qui n'a aucune raison d'être la bonne.
+    return planModules(user?.company?.plan)?.[0]
+      || NAV_IDS.find(id => planAllowsModule(user?.company?.plan, id as PlanModule))
+      || activeSidebarItem;
+  })();
+
+  // Et on l'écrit dans l'état, pour que `localStorage` cesse de porter une
+  // section morte et que les effets calés sur la section active (le flux SSE
+  // du pointage) voient la même chose que l'écran.
+  useEffect(() => {
+    if (activeNav !== activeSidebarItem) setActiveSidebarItem(activeNav);
+  }, [activeNav, activeSidebarItem]);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [clientsList, setClientsList] = useState<any[]>([]);
   const [servicesList, setServicesList] = useState<any[]>([]);
@@ -181,7 +211,7 @@ export default function App() {
           if (Array.isArray(data)) setTaskTypesList(data);
         }).catch(console.error);
     }
-  }, [token, activeSidebarItem, isClientUser]);
+  }, [token, activeNav, isClientUser]);
 
   // Cost comes from the collaborator's employer hourly cost. When they have
   // none configured we show a dash rather than pricing the work at a guess.
@@ -210,7 +240,7 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || isClientUser || activeSidebarItem !== 'Time Tracking') return;
+    if (!token || isClientUser || activeNav !== 'Time Tracking') return;
 
     let closed = false;
     let source: EventSource | null = null;
@@ -275,7 +305,7 @@ export default function App() {
       if (retryTimer) clearTimeout(retryTimer);
       source?.close();
     };
-  }, [token, isClientUser, activeSidebarItem, fetchTimeEntries]);
+  }, [token, isClientUser, activeNav, fetchTimeEntries]);
 
   /**
    * Off Pointage there is no SSE stream (it pushes a whole page of every
@@ -287,7 +317,7 @@ export default function App() {
    * second-by-second refresh.
    */
   useEffect(() => {
-    if (!token || activeSidebarItem === 'Time Tracking') return;
+    if (!token || activeNav === 'Time Tracking') return;
 
     let cancelled = false;
     const syncActive = async () => {
@@ -321,7 +351,7 @@ export default function App() {
     syncActive();
     const interval = setInterval(syncActive, 30000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [token, activeSidebarItem, user?.id]);
+  }, [token, activeNav, user?.id]);
 
   /**
    * The task the user paused during this session — what keeps the floating
@@ -741,7 +771,7 @@ export default function App() {
     // pagination bar — sat behind the address bar until you scrolled.
     <div className="h-dvh bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
       <Sidebar
-        activeItem={activeSidebarItem}
+        activeItem={activeNav}
         onSelectItem={(item) => setActiveSidebarItem(item)}
         unreadMessages={unreadMessages}
         open={sidebarOpen}
@@ -757,30 +787,30 @@ export default function App() {
         />
         
         
-        {activeSidebarItem === 'Plateforme' && user?.isPlatformAdmin ? (
+        {activeNav === 'Plateforme' && user?.isPlatformAdmin ? (
           <PlatformAdmin />
-        ) : activeSidebarItem === 'Dashboard' ? (
+        ) : activeNav === 'Dashboard' ? (
           // ADMIN/SUPERVISEUR get the team-wide dashboard; everyone else
           // (COLLABORATOR, STAGIAIRE) gets their own personal KPIs.
           (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? <AdminDashboard /> : <MyDashboard />
-        ) : activeSidebarItem === 'Messages' ? (
+        ) : activeNav === 'Messages' ? (
           <ChatPage onUnreadChange={setUnreadMessages} />
-        ) : activeSidebarItem === 'Parrainage' && hasPermission('MANAGE_USERS') ? (
+        ) : activeNav === 'Parrainage' && hasPermission('MANAGE_USERS') ? (
           <ReferralPage />
-        ) : activeSidebarItem === 'Users' && hasPermission('MANAGE_USERS') ? (
+        ) : activeNav === 'Users' && hasPermission('MANAGE_USERS') ? (
 
           <UsersManagement />
-        ) : activeSidebarItem === 'Clients' ? (
+        ) : activeNav === 'Clients' ? (
           <ClientsManagement />
-        ) : activeSidebarItem === 'Missions' && hasPermission('MANAGE_SERVICES') ? (
+        ) : activeNav === 'Missions' && hasPermission('MANAGE_SERVICES') ? (
           <MissionsManagement />
-        ) : activeSidebarItem === 'Ressources' && hasPermission('VIEW_RESOURCES') ? (
+        ) : activeNav === 'Ressources' && hasPermission('VIEW_RESOURCES') ? (
           <ResourcesManagement />
-        ) : activeSidebarItem === 'Cash' && hasPermission('VIEW_CASH') ? (
+        ) : activeNav === 'Cash' && hasPermission('VIEW_CASH') ? (
           <CashManagement />
-        ) : activeSidebarItem === 'HR' && hasPermission('VIEW_HR') ? (
+        ) : activeNav === 'HR' && hasPermission('VIEW_HR') ? (
           <HRManagement />
-        ) : activeSidebarItem === 'Time Tracking' ? (
+        ) : activeNav === 'Time Tracking' ? (
           <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
             
             
@@ -885,7 +915,7 @@ export default function App() {
           </main>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">
-            Cette section ({activeSidebarItem}) est en cours de développement.
+            Cette section ({activeNav}) est en cours de développement.
           </div>
         )}
       </div>
@@ -895,7 +925,7 @@ export default function App() {
       {hasPermission('VIEW') && floatingEntry && (
         <FloatingTimer
           entry={floatingEntry}
-          raised={activeSidebarItem === 'Messages'}
+          raised={activeNav === 'Messages'}
           onResume={handleFloatingResume}
           onPause={handleFloatingPause}
           onStop={handleFloatingStop}

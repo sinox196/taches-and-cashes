@@ -29,11 +29,35 @@ export interface PlanMeta {
   portalSeatLimit: number;
   /** Ce que l'offre inclut, en plus du socle commun ci-dessous. */
   features: string[];
+  /**
+   * Les vues que l'offre ouvre. **Absent = toutes** — c'est le cas des packs
+   * généralistes, et c'est ce qui fait qu'ajouter une offre restreinte ne
+   * touche à rien de ce qui existait. Une liste ferme tout le reste : la
+   * barre latérale n'en dessine pas l'entrée, et le serveur refuse les
+   * permissions qui s'y rattachent (voir `planAllowsPermission`).
+   */
+  modules?: PlanModule[];
+  /**
+   * Documents **émis** par mois pendant l'essai gratuit (les brouillons ne
+   * comptent pas). Absent = pas de plafond. L'abonnement payé lève toujours
+   * le plafond, quel que soit ce nombre — c'est précisément ce qu'on vend.
+   */
+  trialDocumentQuota?: number;
   /** Mise en avant sur la page de tarifs. */
   highlighted?: boolean;
   /** Offre retirée du catalogue : encore portée par des entreprises, plus vendue. */
   legacy?: boolean;
 }
+
+/**
+ * Une vue de l'application, désignée par l'identifiant que porte déjà son
+ * entrée de barre latérale (`mainNavItems` dans Sidebar.tsx) et la chaîne de
+ * branches d'App.tsx. Le même mot des deux côtés : un troisième vocabulaire
+ * pour dire « la page Cash » finirait par ne plus désigner la même page.
+ */
+export type PlanModule =
+  | 'Dashboard' | 'Users' | 'Missions' | 'Clients' | 'Time Tracking'
+  | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage';
 
 /**
  * Le socle est identique dans les trois packs : ce qui change, c'est le
@@ -51,6 +75,19 @@ export const CORE_FEATURES: string[] = [
   'Tableau de bord Direction : marge, rentabilité, alertes',
   'Messagerie interne et notifications',
   'Export Excel/CSV sur tous les tableaux',
+];
+
+/**
+ * Le pack Facturation ne promet pas le socle ci-dessus — il n'en ouvre qu'une
+ * partie. Sa propre liste dit donc les deux chiffres qui le décident : ce que
+ * l'essai gratuit autorise, et ce que l'abonnement lève.
+ */
+export const FACTURATION_FEATURES: string[] = [
+  'Essai gratuit : 10 documents par mois (les brouillons ne comptent pas)',
+  'Abonné : documents illimités — factures, devis, bons de livraison…',
+  'Multidevises',
+  'Export des données',
+  'Signature intégrée',
 ];
 
 export const PLANS: PlanMeta[] = [
@@ -81,6 +118,28 @@ export const PLANS: PlanMeta[] = [
     seatLimit: 15,
     portalSeatLimit: 150,
     features: CORE_FEATURES,
+  },
+  /**
+   * L'offre facturation seule : un produit de facturation, pas le cabinet
+   * complet. Elle n'ouvre que Cash — pointage, RH, missions, ressources,
+   * tableau de bord *et fichier clients* restent fermés, entrée de menu
+   * comprise. Il n'y a donc pas de fiche client où puiser : raison sociale,
+   * matricule fiscal et adresse se saisissent à la main sur le document
+   * (voir InvoiceEditor).
+   *
+   * Son essai gratuit est plafonné à dix documents émis par mois : c'est le
+   * plafond, et non une durée, que l'abonnement lève.
+   */
+  {
+    id: 'FACTURATION',
+    label: 'Facturation',
+    tagline: 'Facturez, rien de plus',
+    priceDT: 30,
+    seatLimit: 1,
+    portalSeatLimit: 0,
+    modules: ['Cash', 'Users'],
+    trialDocumentQuota: 10,
+    features: FACTURATION_FEATURES,
   },
 
   // ---- Offres retirées du catalogue ----
@@ -140,6 +199,77 @@ export const PLAN_SEAT_LIMITS: Record<string, number> =
 
 export const PLAN_PORTAL_SEAT_LIMITS: Record<string, number> =
   Object.fromEntries(PLANS.map(p => [p.id, p.portalSeatLimit]));
+
+/**
+ * À quelle vue se rattache chaque permission.
+ *
+ * C'est ce qui permet à une offre restreinte de fermer une vue *et* les
+ * routes qui la servent, sans écrire la liste des permissions dans chaque
+ * offre. La table est exhaustive à dessein : une permission absente est
+ * **refusée** sur une offre restreinte (`planAllowsPermission`), donc une
+ * permission ajoutée demain naît fermée pour ces offres-là plutôt que de
+ * s'ouvrir en silence — la même règle de liste blanche que le portail client.
+ */
+export const PERMISSION_MODULE: Record<string, PlanModule> = {
+  VIEW: 'Time Tracking', EDIT: 'Time Tracking', MODIFY: 'Time Tracking',
+  DELETE: 'Time Tracking', ASSIGN_TASKS: 'Time Tracking',
+
+  MANAGE_USERS: 'Users', MANAGE_PRESENCE_SETTINGS: 'Users',
+
+  MANAGE_SERVICES: 'Missions',
+
+  VIEW_CLIENTS: 'Clients', CREATE_CLIENTS: 'Clients', EDIT_CLIENTS: 'Clients',
+  DELETE_CLIENTS: 'Clients', MANAGE_CLIENT_FIELDS: 'Clients',
+  VIEW_CLIENT_FINANCIALS: 'Clients',
+
+  VIEW_CASH: 'Cash', MANAGE_CASH: 'Cash',
+
+  VIEW_HR: 'HR', CREATE_LEAVE_REQUEST: 'HR', MANAGE_LEAVE_REQUESTS: 'HR',
+  CREATE_ABSENCE_AUTHORIZATION: 'HR', MANAGE_ABSENCE_AUTHORIZATIONS: 'HR',
+  CREATE_LOAN_REQUEST: 'HR', MANAGE_LOANS_ADVANCES: 'HR',
+
+  VIEW_RESOURCES: 'Ressources', MANAGE_RESOURCES: 'Ressources',
+};
+
+/** Les vues ouvertes par une offre — `null` quand elle les ouvre toutes. */
+export const planModules = (planId: string | null | undefined): PlanModule[] | null =>
+  planMeta(planId)?.modules ?? null;
+
+/**
+ * Une offre sans liste ouvre tout : c'est le cas des packs généralistes, et
+ * c'est aussi le repli d'une offre inconnue — mieux vaut une entreprise qui
+ * voit une vue de trop qu'une entreprise enfermée dehors par une fiche mal
+ * remplie.
+ */
+export const planAllowsModule = (planId: string | null | undefined, module: PlanModule): boolean => {
+  const modules = planModules(planId);
+  return !modules || modules.includes(module);
+};
+
+/**
+ * `ADMIN` n'est pas dans la table : ce n'est pas une vue mais le rôle
+ * lui-même, utilisé comme garde de quelques routes. Il n'est jamais fermé
+ * par une offre.
+ */
+export const planAllowsPermission = (planId: string | null | undefined, permission: string): boolean => {
+  if (!planModules(planId)) return true;
+  if (permission === 'ADMIN') return true;
+  const module = PERMISSION_MODULE[permission];
+  return !!module && planAllowsModule(planId, module);
+};
+
+/**
+ * Le plafond mensuel de documents d'une entreprise : le nombre pour une
+ * offre plafonnée encore en essai, `null` dès que l'abonnement est actif —
+ * lever ce plafond est ce que paie l'abonnement.
+ */
+export const documentQuotaFor = (
+  plan: string | null | undefined,
+  status: string | null | undefined,
+): number | null => {
+  if (status === 'ACTIVE') return null;
+  return planMeta(plan)?.trialDocumentQuota ?? null;
+};
 
 /** « 70 DT » — le prix seul, sans période, pour un tableau ou un e-mail. */
 export const formatDT = (amount: number): string =>
