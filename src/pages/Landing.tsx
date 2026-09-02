@@ -8,6 +8,7 @@ import { RequestAccessModal } from '../components/landing/RequestAccessModal';
 import { Reveal } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
 import { Testimonials } from '../components/landing/Testimonials';
+import { ClientLogos } from '../components/landing/ClientLogos';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
 import { SELLABLE_PLANS, formatDT } from '../constants/plans';
 
@@ -491,6 +492,8 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               ))}
             </div>
           </section>
+
+          <ClientLogos />
 
           {/* FLOW SECTION */}
           <section className="py-24 px-6 sm:px-10 bg-white">
