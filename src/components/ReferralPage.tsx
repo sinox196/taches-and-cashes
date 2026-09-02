@@ -162,13 +162,6 @@ export const ReferralPage: React.FC = () => {
               {copied ? <><Check className="w-4 h-4" /> Copié</> : <><Copy className="w-4 h-4" /> Copier le lien</>}
             </button>
           </div>
-
-          {/* L'argument à coller avec le lien. Il vit ici plutôt qu'en tête de
-              page parce que c'est au moment de partager qu'on en a besoin. */}
-          <p className="mt-3 text-[12.5px] font-medium text-[#00857C] bg-[#E3F7F5] rounded-lg px-3 py-2.5 leading-relaxed">
-            Parrainage : {data.discountPercent} % de remise pour votre confrère — 1 mois gratuit pour vous dès
-            qu&rsquo;il devient abonné !
-          </p>
         </div>
       )}
 

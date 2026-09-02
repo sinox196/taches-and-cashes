@@ -11,7 +11,7 @@ import { friendlyError } from '../../utils/errors';
 type Tab = 'work' | 'documents' | 'links' | 'deadlines';
 
 /**
- * Ressources Métier — référentiel cabinet (documents des modèles, liens
+ * Ressources Métier — référentiel cabinet (modèles des procédures, liens
  * utiles, échéances) plus the échéances suivi grid. Reuses the same
  * list/edit visual language MissionsManagement already validated, per the
  * cahier des charges' own §4.3 instruction: no new visual ecosystem.
@@ -21,7 +21,10 @@ export const ResourcesManagement: React.FC = () => {
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   const canManage = hasPermission('MANAGE_RESOURCES');
 
-  const [tab, setTab] = useState<Tab>('work');
+  // Le référentiel d'abord pour qui l'administre : « Modèles des procédures »
+  // est l'onglet où l'on prépare ce que les autres suivront, et c'est le
+  // premier de la barre. Un collaborateur, lui, n'a que le sien.
+  const [tab, setTab] = useState<Tab>(canManage ? 'documents' : 'work');
   const [templates, setTemplates] = useState<ResourceTemplate[]>([]);
   const [items, setItems] = useState<ResourceTemplateItem[]>([]);
   const [links, setLinks] = useState<any[]>([]);
@@ -50,7 +53,7 @@ export const ResourcesManagement: React.FC = () => {
   };
 
   // The référentiel tabs (and their data) are admin-only — a plain
-  // VIEW_RESOURCES user only ever sees "Mon travail", which fetches its own
+  // VIEW_RESOURCES user only ever sees "Mes procédures en cours", which fetches its own
   // data directly, so there is nothing to load here for them.
   useEffect(() => { if (canManage) load(); else setIsLoading(false); }, []);
 
@@ -86,9 +89,9 @@ export const ResourcesManagement: React.FC = () => {
   }
 
   const TABS: { id: Tab; label: string; icon: any }[] = [
-    { id: 'work', label: 'Mon travail', icon: Briefcase },
+    ...(canManage ? [{ id: 'documents' as Tab, label: 'Modèles des procédures', icon: FileCheck2 }] : []),
+    { id: 'work', label: 'Mes procédures en cours', icon: Briefcase },
     ...(canManage ? [
-      { id: 'documents' as Tab, label: 'Documents des modèles', icon: FileCheck2 },
       { id: 'links' as Tab, label: 'Liens utiles', icon: Link2 },
     ] : []),
     // Les échéances se **consultent** avec VIEW_RESOURCES : le suivi mensuel
@@ -108,14 +111,14 @@ export const ResourcesManagement: React.FC = () => {
         </h1>
         <p className="text-[12px] text-gray-500 mt-1">
           {canManage
-            ? "Documents des modèles, liens utiles et échéances réglementaires, pré-configurés et personnalisables."
+            ? "Modèles des procédures, liens utiles et échéances réglementaires, pré-configurés et personnalisables."
             : 'Choisissez un client, puis cochez les documents reçus.'}
         </p>
       </div>
 
       {TABS.length > 1 && (
         // Scrolls sideways on a narrow screen rather than wrapping — four
-        // labels ("Documents des modèles" among them) never fit a phone.
+        // labels ("Mes procédures en cours" among them) never fit a phone.
         <div className="flex gap-1 border-b border-gray-200 overflow-x-auto shrink-0">
           {TABS.map(t => (
             <button

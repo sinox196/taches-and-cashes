@@ -16,6 +16,7 @@ import { UsersManagement } from './components/UsersManagement';
 import { ReferralPage } from './components/ReferralPage';
 import { ClientsManagement } from './components/clients/ClientsManagement';
 import { HRManagement } from './components/hr/HRManagement';
+import { TaskSubviews } from './components/TaskSubviews';
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
 import { ResourcesManagement } from './components/resources/ResourcesManagement';
@@ -812,6 +813,14 @@ export default function App() {
               </div>
             </div>
 
+            {/* Trois sous-vues : le chrono, les tâches planifiées, les tâches
+                assignées. Les deux dernières vivaient dans une carte du
+                tableau de bord ; elles sont ici parce que c'est ici qu'on les
+                démarre. L'en-tête et ses deux boutons restent au-dessus de la
+                barre d'onglets : « Planifier une tâche » se clique aussi bien
+                depuis la liste des tâches planifiées. */}
+            <TaskSubviews onStarted={fetchTimeEntries}>
+            <div className="flex flex-col gap-4 sm:gap-6">
             {/* Two columns: the activity on the left, and on the right a panel
                 that always answers "what are you on right now" — the running
                 timer when there is one, the start form when there isn't. */}
@@ -871,6 +880,8 @@ export default function App() {
                 totalEntries={totalEntries ?? undefined}
               />
             )}
+            </div>
+            </TaskSubviews>
           </main>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">

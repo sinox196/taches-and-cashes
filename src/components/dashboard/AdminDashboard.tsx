@@ -8,7 +8,6 @@ import { EmployeeDetailsModal } from './EmployeeDetailsModal';
 import { EmployeeTasksModal } from './EmployeeTasksModal';
 import { ClientBreakdown } from './ClientBreakdown';
 import { MultiSelectAutocomplete } from './MultiSelectAutocomplete';
-import { AssignedTasksCard } from './AssignedTasksCard';
 import { ResourcesProgressCard } from './ResourcesProgressCard';
 import { ExecutiveBar } from './ExecutiveBar';
 import { AlertsPanel } from './AlertsPanel';
@@ -237,11 +236,6 @@ export const AdminDashboard: React.FC = () => {
             />
           </div>
         </div>
-
-        {/* An ADMIN/SUPERVISEUR can themselves be assigned a task by another
-            admin — this dashboard is their only one, so it needs the same
-            widget MyDashboard shows a collaborator. */}
-        <AssignedTasksCard />
 
         {/* Ressources métier — independent of the Pointage-driven stats below:
             no date range, no collaborateur/client filter, just current state. */}

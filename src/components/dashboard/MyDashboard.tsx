@@ -16,7 +16,6 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { AssignedTasksCard } from './AssignedTasksCard';
 
 /**
  * Personal KPI dashboard for roles that don't get the team-wide AdminDashboard
@@ -175,8 +174,6 @@ export const MyDashboard: React.FC = () => {
         {loading && (
           <div className="text-[12px] text-gray-400">Actualisation…</div>
         )}
-
-        <AssignedTasksCard />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">

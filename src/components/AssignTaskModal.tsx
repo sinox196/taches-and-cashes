@@ -7,7 +7,7 @@ import { friendlyError } from '../utils/errors';
 
 /**
  * An admin hands a mission + type de tâche to a staff member. It shows up
- * pending on that person's dashboard (AssignedTasksCard) until they start it,
+ * pending under Tâches → « Tâches assignées » until they start it,
  * at which point it becomes an ordinary running time entry — same client
  * picker and mission/type cascade as "Démarrer nouvelle tâche" (NewTaskCard),
  * with a collaborator field added.

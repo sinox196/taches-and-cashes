@@ -10,7 +10,7 @@ import { friendlyError } from '../utils/errors';
  * optional reminder, on top of the same client/mission/type-de-tâche cascade
  * "Démarrer nouvelle tâche" and "Assigner une tâche" already use. It lands as
  * a PENDING task_assignments row targeting yourself, so it shows up on your
- * own dashboard (AssignedTasksCard) exactly like an admin's assignment does —
+ * own Tâches → « Tâches planifiées » exactly like an admin's assignment does —
  * no separate storage or display path needed. Unlike AssignTaskModal, this is
  * never gated on ASSIGN_TASKS: planning your own work is not "assigning".
  */
