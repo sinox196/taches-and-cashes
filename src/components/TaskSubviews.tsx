@@ -61,7 +61,18 @@ export const TaskSubviews: React.FC<{
       .catch(() => {});
   }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  // Planifier/déléguer une tâche se fait depuis les boutons de l'en-tête,
+  // au-dessus de cette sous-vue mais hors d'elle (App.tsx monte les modales
+  // au niveau de la page, pas ici) — la création n'a donc aucun moyen
+  // d'appeler `load()` directement. Le même événement que
+  // `refresh-hr-balance` comble ça : PlanTaskModal/AssignTaskModal le
+  // déclenchent à la création, et cette liste se remet à jour sans attendre
+  // qu'on quitte puis revienne sur l'onglet — ou qu'on recharge la page.
+  useEffect(() => {
+    load();
+    window.addEventListener('refresh-task-assignments', load);
+    return () => window.removeEventListener('refresh-task-assignments', load);
+  }, [load]);
 
   const planned = items.filter(a => a.assignedByUserId === user?.id);
   const assigned = items.filter(a => a.assignedByUserId !== user?.id);

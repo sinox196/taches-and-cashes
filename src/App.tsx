@@ -915,7 +915,14 @@ export default function App() {
           services={servicesList}
           taskTypes={taskTypesList}
           onClose={() => setIsAssignTaskOpen(false)}
-          onAssigned={() => showToast('Tâche assignée.')}
+          onAssigned={() => {
+            showToast('Tâche assignée.');
+            // TaskSubviews vit sous la vue Tâches, hors de cette modale montée
+            // au niveau de la page — sans cet événement sa liste ne se
+            // remettait à jour qu'au prochain montage, donc au rechargement
+            // de la page.
+            window.dispatchEvent(new Event('refresh-task-assignments'));
+          }}
         />
       )}
 
@@ -924,7 +931,10 @@ export default function App() {
           services={servicesList}
           taskTypes={taskTypesList}
           onClose={() => setIsPlanTaskOpen(false)}
-          onPlanned={() => showToast('Tâche planifiée.')}
+          onPlanned={() => {
+            showToast('Tâche planifiée.');
+            window.dispatchEvent(new Event('refresh-task-assignments'));
+          }}
         />
       )}
 

@@ -152,7 +152,7 @@ export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskType
               <CalendarClock className="w-5 h-5" />
             </div>
             <p className="text-[13px] font-semibold text-gray-900">Tâche planifiée.</p>
-            <p className="text-[12px] text-gray-500 mt-1">Elle apparaît maintenant sur votre tableau de bord.</p>
+            <p className="text-[12px] text-gray-500 mt-1">Elle apparaît maintenant dans Tâches → « Mes tâches planifiées ».</p>
             <button
               onClick={onClose}
               className="mt-4 px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover"
