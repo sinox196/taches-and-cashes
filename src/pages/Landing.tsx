@@ -118,11 +118,6 @@ const HOME_FEATURES: {
   },
 ];
 
-/** Le ruban défilant sous le hero — les mêmes modules, en un coup d'œil. */
-const MODULE_RIBBON = [
-  'Tableau de bord', 'Pointage', 'Missions', 'Clients', 'Facturation', 'Trésorerie',
-  'Échéances', 'Ressources métier', 'RH', 'Messagerie', 'Portail client', 'Parrainage',
-];
 
 const FLOW_STEPS: { label: string; color: string; shadow: string; shape: React.ReactNode }[] = [
   { label: 'Tâches', color: '#0D1B2A', shadow: 'rgba(13,27,42,0.12)', shape: <div className="w-5 h-5 bg-navy rounded" /> },
@@ -470,26 +465,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   </div>
                 </div>
               </div>
-            </div>
-          </section>
-
-          {/* MODULE RIBBON — les douze modules qui défilent, en une bande.
-              La piste porte deux fois la liste et se translate de la moitié de
-              sa largeur : la boucle se referme sans saut, quelle que soit la
-              largeur de l'écran. `aria-hidden` sur la seconde copie, pour
-              qu'un lecteur d'écran n'énumère pas la liste en double. */}
-          <section className="bg-navy py-4 overflow-hidden">
-            <div className="flex w-max animate-[landingMarquee_38s_linear_infinite]">
-              {[0, 1].map(copy => (
-                <div key={copy} aria-hidden={copy === 1} className="flex shrink-0">
-                  {MODULE_RIBBON.map(m => (
-                    <span key={m} className="flex items-center gap-3 px-6 text-[13px] font-bold uppercase tracking-[0.08em] text-white/55 whitespace-nowrap">
-                      {m}
-                      <span className="w-1.5 h-1.5 rounded-full bg-turquoise/70" />
-                    </span>
-                  ))}
-                </div>
-              ))}
             </div>
           </section>
 
