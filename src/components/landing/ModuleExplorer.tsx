@@ -61,7 +61,11 @@ const DashboardMock = () => (
         disparaissait. */}
     <div className="mt-3 flex gap-[7px] h-[86px] px-1">
       {[42, 61, 35, 78, 54, 88, 47, 69, 96, 58, 74, 82].map((h, i) => (
-        <div key={i} className="flex-1 flex flex-col justify-end gap-[3px]">
+        <div
+          key={i}
+          className="flex-1 flex flex-col justify-end gap-[3px] origin-bottom animate-[landingBarGrow_620ms_cubic-bezier(0.16,1,0.3,1)_both]"
+          style={{ animationDelay: `${i * 45}ms` }}
+        >
           <div className="w-full rounded-t-[3px] bg-[#2a78d6]" style={{ height: `${h * 0.6}%` }} />
           <div className="w-full rounded-b-[3px] bg-[#eb6834]" style={{ height: `${h * 0.28}%` }} />
         </div>
@@ -348,10 +352,10 @@ export const ModuleExplorer: React.FC<{ onCta: () => void }> = ({ onCta }) => {
               key={t.id}
               onClick={() => setActive(t.id)}
               aria-pressed={on}
-              className={`snap-start shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13.5px] font-bold transition-colors border ${
+              className={`landing-shine snap-start shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13.5px] font-bold transition-all duration-300 border ${
                 on
-                  ? 'bg-navy text-white border-navy shadow-[0_8px_20px_rgba(13,27,42,0.18)]'
-                  : 'bg-white text-[#3D4655] border-[#E6E9EE] hover:border-navy hover:text-navy'
+                  ? 'bg-navy text-white border-navy shadow-[0_8px_20px_rgba(13,27,42,0.18)] -translate-y-0.5'
+                  : 'bg-white text-[#3D4655] border-[#E6E9EE] hover:border-navy hover:text-navy hover:-translate-y-0.5'
               }`}
             >
               {t.icon}
@@ -377,8 +381,12 @@ export const ModuleExplorer: React.FC<{ onCta: () => void }> = ({ onCta }) => {
           </h3>
           <p className="mt-4 text-[15px] leading-[1.65] text-[#5B6472] max-w-[470px]">{tab.description}</p>
           <div className="mt-6 flex flex-col gap-3">
-            {tab.points.map(p => (
-              <div key={p} className="flex items-start gap-3">
+            {tab.points.map((p, i) => (
+              <div
+                key={p}
+                className="flex items-start gap-3 animate-[landingItemIn_460ms_cubic-bezier(0.16,1,0.3,1)_both]"
+                style={{ animationDelay: `${180 + i * 90}ms` }}
+              >
                 <span className="mt-[3px] w-[18px] h-[18px] rounded-full bg-navy text-white text-[10px] font-extrabold flex items-center justify-center shrink-0">✓</span>
                 <span className="text-[14px] leading-[1.5] text-[#3D4655]">{p}</span>
               </div>
@@ -386,13 +394,13 @@ export const ModuleExplorer: React.FC<{ onCta: () => void }> = ({ onCta }) => {
           </div>
           <button
             onClick={onCta}
-            className="mt-7 px-6 py-3.5 rounded-xl text-[14.5px] font-bold text-white bg-navy hover:bg-turquoise transition-colors"
+            className="landing-shine mt-7 px-6 py-3.5 rounded-xl text-[14.5px] font-bold text-white bg-navy hover:bg-turquoise hover:-translate-y-0.5 transition-all"
           >
             Essayer gratuitement
           </button>
         </div>
 
-        <div className="relative">
+        <div className="relative animate-[landingPanelInRight_620ms_cubic-bezier(0.16,1,0.3,1)_both]">
           <div
             className="absolute -inset-6 rounded-[32px] -z-10"
             style={{ background: 'radial-gradient(circle at 60% 40%, rgba(0,179,166,0.16), rgba(0,179,166,0) 70%)' }}

@@ -96,9 +96,14 @@ a:hover { color: oklch(48% 0.14 250); }
   50%      { transform: translate3d(5%, -4%, 0) scale(1); }
 }
 
-/* Le panneau du sélecteur de modules, rejoué à chaque changement d'onglet. */
+/* Le panneau du sélecteur de modules, rejoué à chaque changement d'onglet :
+   le texte monte, la maquette arrive par la droite. */
 @keyframes landingPanelIn {
   from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes landingPanelInRight {
+  from { opacity: 0; transform: translateX(30px) scale(0.97); }
   to   { opacity: 1; transform: none; }
 }
 
@@ -122,15 +127,93 @@ a:hover { color: oklch(48% 0.14 250); }
   50%      { opacity: .9;  transform: scale(1.08); }
 }
 
+/* Le balayage lumineux qui traverse un bouton au survol. Sur un
+   pseudo-élément en `transform` : animer un dégradé de fond repeindrait le
+   bouton à chaque image. */
+@keyframes landingSheen {
+  from { transform: translateX(-140%) skewX(-18deg); }
+  to   { transform: translateX(260%)  skewX(-18deg); }
+}
+
+/* Le motion graphic du logo : l'anneau et son point tournent lentement, le
+   trait de validation se dessine, les barres de croissance montent. */
+@keyframes landingRingSpin { to { transform: rotate(360deg); } }
+@keyframes landingDraw     { from { stroke-dashoffset: var(--draw, 24); } to { stroke-dashoffset: 0; } }
+@keyframes landingBarRise  { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes landingDotBeat  { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: .75; } }
+
+/* Les deux rangées d'avis, qui défilent en sens inverse. */
+@keyframes landingMarqueeBack {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+/* L'entrée d'un point de la liste, rejouée à chaque changement d'onglet. */
+@keyframes landingItemIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Les barres du graphique de démonstration, qui poussent depuis le bas. */
+@keyframes landingBarGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+/* Une carte d'avis qui apparaît. */
+@keyframes landingStarPop {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-25deg); }
+  70%  { opacity: 1; transform: scale(1.18) rotate(4deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+/* Une piste de défilement s'arrête au survol : on lit l'avis qu'on vise. */
+.landing-marquee:hover .landing-marquee-track { animation-play-state: paused; }
+
+/* Le soulignement animé d'un lien de navigation. */
+.landing-navlink { position: relative; }
+.landing-navlink::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-turquoise);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.landing-navlink:hover::after,
+.landing-navlink[data-active='true']::after { transform: scaleX(1); }
+
+/* Un bouton qui prend un balayage au survol. `isolate` + `overflow-hidden`
+   sont portés par la classe : sans eux le reflet déborde du bouton. */
+.landing-shine {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.landing-shine::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.38), transparent);
+  transform: translateX(-140%) skewX(-18deg);
+  pointer-events: none;
+}
+.landing-shine:hover::before { animation: landingSheen 720ms ease-out; }
+.landing-shine:active { transform: translateY(1px) scale(0.985); }
+
 /* Tout le décor de la page d'accueil s'arrête ici. Les blocs qui entrent au
    défilement sont traités dans Reveal.tsx, côté JavaScript : ils doivent être
    rendus *visibles*, pas seulement figés — une animation d'apparition
    désactivée par `animation: none` laisserait le contenu à son état de
    départ, c'est-à-dire invisible. */
 @media (prefers-reduced-motion: reduce) {
-  [class*="animate-[landing"] {
+  [class*="animate-[landing"],
+  .landing-marquee-track,
+  .landing-shine::before {
     animation: none !important;
   }
+  .landing-navlink::after { transition: none; }
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }

@@ -703,6 +703,12 @@ Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use
 
 Deux pièges déjà rencontrés : des barres de graphique en hauteur `%` dans un conteneur `items-end` ne se résolvent contre rien (la colonne prend sa hauteur de contenu) — le graphique disparaît ; et la chaîne de valeur à cinq pastilles doit rétrécir sous `sm`, sinon les libellés se chevauchent sur un téléphone.
 
+**Les avis clients de [Testimonials.tsx](src/components/landing/Testimonials.tsx) sont des exemples de mise en page, pas de vrais avis.** Le tableau `TESTIMONIALS` et la note `RATING` portent l'avertissement en tête de fichier et les auteurs s'appellent « Exemple à remplacer » : publier un témoignage inventé sous le nom d'un cabinet qui ne l'a pas donné trompe le visiteur, et relève de la pratique commerciale déloyale à peu près partout. Ils se remplacent par des citations réellement recueillies, ou la section se retire.
+
+**[AnimatedLogo.tsx](src/components/landing/AnimatedLogo.tsx) reprend les coordonnées de [Logo.tsx](src/components/Logo.tsx) à l'identique** — c'est le même dessin animé, pas une seconde marque qui finirait par diverger de la charte. L'anneau et son point tournent dans **un seul groupe** : le point marque le trou de l'anneau, les séparer le détacherait du dessin. Sous `prefers-reduced-motion` la marque est **finie et immobile**, jamais figée à son état de départ — un anneau non dessiné n'est pas un logo.
+
+**Une piste défilante ne prend jamais le raccourci `animation` en style en ligne.** Le raccourci pose aussi `animation-play-state: running`, et un style en ligne l'emporte sur la feuille : la pause au survol (`.landing-marquee:hover`) ne s'appliquait jamais. Les propriétés se posent une par une (`animationName`, `animationDuration`…). Même piège pour tout ce qui veut suspendre une animation depuis une classe.
+
 ### Brand identity
 
 The palette and mark come from the official charte graphique, not the earlier Claude Design import — `--color-navy` (`#0D1B2A`, Bleu Profond), `--color-turquoise` (`#00B3A6`) and `--color-canvas`/`--color-gray-50` (`#F2F4F7`, Gris Clair) in [src/index.css](src/index.css) are the brand's exact hex values, not approximations — check against the sheet before nudging any of them. `--color-growth` (`#22C55E`) is declared but not retrofitted onto the existing status pills (run/done/pause/late): those were validated separately for contrast/CVD and swapping them to match the charte without re-running that validation would regress an already-checked property.

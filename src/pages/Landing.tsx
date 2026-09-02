@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   Mail, LayoutDashboard, Timer, ListChecks, Building2, FileText, Wallet,
-  CalendarCheck, FolderKanban, Users, MessageSquare, Globe, Gift, ShieldCheck,
+  CalendarCheck, FolderKanban, Users, MessageSquare, Globe, Gift, ArrowRight,
 } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
-import { Reveal, CountUp } from '../components/landing/Reveal';
+import { Reveal } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
+import { Testimonials } from '../components/landing/Testimonials';
+import { AnimatedLogo } from '../components/landing/AnimatedLogo';
 import { SELLABLE_PLANS, formatDT } from '../constants/plans';
 
 const CONTACT_EMAIL = 'contact@taches-and-cash.com';
@@ -153,6 +155,18 @@ interface LandingProps {
 
 export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
   const [view, setView] = useState<'home' | 'tarifs'>('home');
+  /** L'en-tête se resserre dès qu'on quitte le haut de la page : au repos il
+   *  respire, une fois qu'on lit il rend de la hauteur au contenu. `passive`
+   *  parce qu'un écouteur de défilement qui ne prévient jamais le navigateur
+   *  bloque le défilement fluide. */
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
   const [modalPlan, setModalPlan] = useState<string | null>(null);
 
@@ -188,10 +202,20 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
   return (
     <div className="min-h-screen bg-white font-sans antialiased text-gray-900">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/[0.88] backdrop-blur-[10px] border-b border-[#E6E9EE]">
-        <div className="max-w-[1280px] mx-auto px-4 sm:px-10 h-[72px] sm:h-[84px] flex items-center justify-between gap-3 sm:gap-6">
-          <button onClick={goHome} className="flex items-center gap-2 shrink-0">
-            <Logo size={28} variant="color" />
+      <header
+        className={`sticky top-0 z-50 backdrop-blur-[10px] border-b transition-[background-color,border-color,box-shadow] duration-300 ${
+          scrolled
+            ? 'bg-white/[0.96] border-[#E6E9EE] shadow-[0_6px_24px_rgba(13,27,42,0.07)]'
+            : 'bg-white/[0.88] border-transparent'
+        }`}
+      >
+        <div
+          className={`max-w-[1280px] mx-auto px-4 sm:px-10 flex items-center justify-between gap-3 sm:gap-6 transition-[height] duration-300 ${
+            scrolled ? 'h-[62px] sm:h-[70px]' : 'h-[72px] sm:h-[84px]'
+          }`}
+        >
+          <button onClick={goHome} className="group flex items-center gap-2 shrink-0">
+            <AnimatedLogo size={28} variant="color" replayOnHover />
             {/* The wordmark is dropped on the narrowest phones to buy back the
                 width the auth buttons need — the mark alone still identifies it. */}
             <span className="hidden min-[400px]:inline text-[15px] font-extrabold tracking-tight text-navy whitespace-nowrap">
@@ -200,11 +224,12 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           </button>
 
           <nav className="hidden min-[1041px]:flex items-center gap-7 min-w-0">
-            <button onClick={() => goToAnchor('fonctionnalites')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Fonctionnalités</button>
-            <button onClick={() => goToAnchor('modules')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Modules</button>
-            <button onClick={() => goToAnchor('dashboard')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Facturation</button>
-            <button onClick={goToTarifs} className={`text-[14px] whitespace-nowrap ${view === 'tarifs' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Tarifs</button>
-            <a href={`mailto:${CONTACT_EMAIL}`} className="text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
+            <button onClick={() => goToAnchor('fonctionnalites')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Fonctionnalités</button>
+            <button onClick={() => goToAnchor('modules')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Modules</button>
+            <button onClick={() => goToAnchor('avis')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Avis</button>
+            <button onClick={() => goToAnchor('dashboard')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Facturation</button>
+            <button onClick={goToTarifs} data-active={view === 'tarifs'} className={`landing-navlink text-[14px] whitespace-nowrap ${view === 'tarifs' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Tarifs</button>
+            <a href={`mailto:${CONTACT_EMAIL}`} className="landing-navlink text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
           </nav>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
@@ -221,13 +246,13 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 three that costs nothing to lose. */}
             <button
               onClick={() => setModalPlan(FEATURED_PLAN)}
-              className="hidden min-[561px]:inline-block px-4 py-2.5 rounded-[10px] text-[14px] font-bold text-navy bg-white border-[1.5px] border-[#E6E9EE] hover:border-navy transition-colors whitespace-nowrap"
+              className="landing-shine hidden min-[561px]:inline-block px-4 py-2.5 rounded-[10px] text-[14px] font-bold text-navy bg-white border-[1.5px] border-[#E6E9EE] hover:border-navy hover:-translate-y-0.5 transition-all whitespace-nowrap"
             >
               Créer un compte
             </button>
             <button
               onClick={() => setModalPlan(FEATURED_PLAN)}
-              className="px-3 sm:px-[18px] py-2.5 sm:py-[11px] rounded-[10px] text-[13px] sm:text-[14px] font-bold text-white bg-navy hover:bg-turquoise transition-colors whitespace-nowrap"
+              className="landing-shine px-3 sm:px-[18px] py-2.5 sm:py-[11px] rounded-[10px] text-[13px] sm:text-[14px] font-bold text-white bg-navy hover:bg-turquoise hover:-translate-y-0.5 transition-all whitespace-nowrap"
             >
               Essai gratuit
             </button>
@@ -292,33 +317,17 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <div className="mt-8 flex gap-3.5 flex-wrap">
                     <button
                       onClick={() => setModalPlan(FEATURED_PLAN)}
-                      className="bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] hover:-translate-y-0.5 transition-all"
+                      className="landing-shine group bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] hover:-translate-y-0.5 transition-all inline-flex items-center gap-2"
                     >
                       Essai gratuit 30 jours
+                      <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
                     </button>
                     <button
                       onClick={() => goToAnchor('modules')}
-                      className="bg-white text-navy px-[26px] py-4 rounded-xl text-[15px] font-semibold border-[1.5px] border-[#E6E9EE] hover:border-navy hover:-translate-y-0.5 transition-all"
+                      className="landing-shine bg-white text-navy px-[26px] py-4 rounded-xl text-[15px] font-semibold border-[1.5px] border-[#E6E9EE] hover:border-navy hover:-translate-y-0.5 transition-all"
                     >
                       Découvrir les modules
                     </button>
-                  </div>
-                </Reveal>
-                <Reveal delay={300}>
-                  <div className="mt-10 pt-7 border-t border-[#E1E5EB] grid grid-cols-2 sm:grid-cols-4 gap-5">
-                    {[
-                      { v: 12, suffix: '', k: 'modules inclus' },
-                      { v: 67, suffix: '', k: 'tâches livrées' },
-                      { v: 28, suffix: '', k: 'échéances par exercice' },
-                      { v: 30, suffix: ' j', k: "d'essai gratuit" },
-                    ].map(stat => (
-                      <div key={stat.k}>
-                        <div className="text-[26px] font-extrabold text-navy tabular-nums leading-none">
-                          <CountUp to={stat.v} suffix={stat.suffix} />
-                        </div>
-                        <div className="mt-1.5 text-[12px] font-semibold text-[#8A93A0] leading-snug">{stat.k}</div>
-                      </div>
-                    ))}
                   </div>
                 </Reveal>
               </div>
@@ -535,14 +544,20 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                      douze cartes : au-delà de la troisième, une cascade continue
                      fait attendre le bas de la grille bien après son arrivée. */
                   <Reveal key={f.title} delay={(i % 3) * 90} className="h-full">
-                    <div className="group h-full bg-white rounded-[18px] border border-[#E6E9EE] p-7 hover:-translate-y-1 hover:border-turquoise/40 hover:shadow-[0_16px_32px_rgba(13,27,42,0.08)] transition-all">
+                    <div className="landing-shine group relative h-full bg-white rounded-[18px] border border-[#E6E9EE] p-7 hover:-translate-y-1.5 hover:border-turquoise/45 hover:shadow-[0_18px_38px_rgba(13,27,42,0.10)] transition-all duration-300">
+                      {/* Le liseré turquoise se déploie depuis la gauche au
+                          survol — l'accusé de réception du pointage. */}
+                      <span
+                        aria-hidden
+                        className="absolute left-7 right-7 bottom-0 h-[3px] rounded-full bg-turquoise origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"
+                      />
                       <div
-                        className="w-[46px] h-[46px] rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
+                        className="w-[46px] h-[46px] rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6"
                         style={{ background: f.iconBg, color: f.iconColor }}
                       >
                         {f.icon}
                       </div>
-                      <div className="text-[16px] font-bold text-navy mt-4">{f.title}</div>
+                      <div className="text-[16px] font-bold text-navy mt-4 transition-transform duration-300 group-hover:translate-x-1">{f.title}</div>
                       <p className="text-[14px] leading-[1.55] text-[#5B6472] mt-2">{f.description}</p>
                     </div>
                   </Reveal>
@@ -616,7 +631,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </div>
                 <button
                   onClick={() => setModalPlan(FEATURED_PLAN)}
-                  className="inline-block mt-8 bg-navy text-white px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-turquoise transition-colors"
+                  className="landing-shine inline-block mt-8 bg-navy text-white px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-turquoise hover:-translate-y-0.5 transition-all"
                 >
                   Essayer le suivi du temps
                 </button>
@@ -639,7 +654,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </div>
                 <button
                   onClick={() => setModalPlan(FEATURED_PLAN)}
-                  className="inline-block mt-8 bg-turquoise text-navy px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-white transition-colors"
+                  className="landing-shine inline-block mt-8 bg-turquoise text-navy px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-white hover:-translate-y-0.5 transition-all"
                 >
                   Créer une facture
                 </button>
@@ -700,56 +715,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </Reveal>
           </section>
 
-          {/* PARRAINAGE */}
-          <section className="py-24 px-6 sm:px-10 bg-white">
-            <Reveal className="max-w-[1080px] mx-auto">
-              <div className="relative overflow-hidden rounded-[28px] bg-navy px-8 sm:px-14 py-14">
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute -top-[160px] -right-[80px] w-[440px] h-[440px] animate-[landingBreathe_11s_ease-in-out_infinite]"
-                  style={{ background: 'radial-gradient(circle, rgba(0,179,166,0.34), rgba(0,179,166,0) 70%)' }}
-                />
-                <div className="relative grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-12 items-center">
-                  <div>
-                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-white/[0.08] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#5FCBC0]">
-                      <Gift className="w-3.5 h-3.5" /> Parrainage
-                    </div>
-                    <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-white tracking-[-0.01em] leading-[1.2]">
-                      Recommandez Tâches &amp; Cash à un confrère, gagnez un mois
-                    </h2>
-                    <p className="mt-4 text-[15.5px] leading-[1.65] text-white/65 max-w-[480px]">
-                      Partagez votre lien. Le jour où votre filleul souscrit, il obtient 10 % sur son premier abonnement et vous recevez un mois offert. Tant qu'il n'a pas payé, personne ne gagne rien — c'est ce qui rend le dispositif sain.
-                    </p>
-                    <button
-                      onClick={() => setModalPlan(FEATURED_PLAN)}
-                      className="mt-8 px-[26px] py-[15px] rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white transition-colors"
-                    >
-                      Créer mon compte
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    {[
-                      { v: 10, suffix: ' %', k: 'de remise pour votre filleul', tone: 'text-turquoise' },
-                      { v: 1, suffix: ' mois', k: 'offert pour vous', tone: 'text-white' },
-                    ].map(c => (
-                      <div key={c.k} className="bg-white/[0.06] border border-white/10 rounded-2xl px-5 py-7 text-center">
-                        <div className={`text-[32px] font-extrabold tabular-nums leading-none ${c.tone}`}>
-                          <CountUp to={c.v} suffix={c.suffix} />
-                        </div>
-                        <div className="mt-2.5 text-[12.5px] font-semibold text-white/60 leading-snug">{c.k}</div>
-                      </div>
-                    ))}
-                    <div className="col-span-2 flex items-center gap-3 bg-white/[0.06] border border-white/10 rounded-2xl px-5 py-4">
-                      <ShieldCheck className="w-5 h-5 text-turquoise shrink-0" />
-                      <span className="text-[12.5px] text-white/70 leading-snug">
-                        Récompense versée à la souscription du filleul, jamais à la simple inscription.
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Reveal>
-          </section>
+          <Testimonials />
         </>
       ) : (
         <>
@@ -838,6 +804,10 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
         <div className="max-w-[920px] mx-auto bg-navy rounded-[28px] px-8 sm:px-12 py-16 text-center relative overflow-hidden">
           <div className="absolute w-[360px] h-[360px] rounded-full bg-[radial-gradient(circle,rgba(0,179,166,0.28),rgba(0,179,166,0)_70%)] -top-[140px] -right-20" />
           <div className="relative">
+            {/* Le motion graphic de la marque : l'anneau se dessine, le trait
+                de validation se trace, les barres montent, puis l'anneau et
+                son point tournent. */}
+            <AnimatedLogo size={72} variant="white" className="justify-center mb-6 w-full" />
             <h2 className="text-[26px] sm:text-[30px] font-extrabold text-white tracking-[-0.01em] max-w-[600px] mx-auto leading-[1.25]">
               Prêt à voir où va vraiment votre temps et votre argent ?
             </h2>
@@ -848,9 +818,10 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </p>
             <button
               onClick={() => setModalPlan(FEATURED_PLAN)}
-              className="mt-7 inline-block px-[30px] py-4 rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white transition-colors"
+              className="landing-shine mt-7 inline-flex items-center gap-2 px-[30px] py-4 rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white hover:-translate-y-0.5 transition-all group"
             >
               {view === 'home' ? 'Démarrer maintenant' : 'Créer un compte'}
+              <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
             </button>
           </div>
         </div>
@@ -876,6 +847,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               <div className="flex flex-col gap-2.5">
                 <button onClick={() => goToAnchor('fonctionnalites')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Fonctionnalités</button>
                 <button onClick={() => goToAnchor('modules')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Modules</button>
+                <button onClick={() => goToAnchor('avis')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Avis clients</button>
                 <button onClick={goToTarifs} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Tarifs</button>
               </div>
             </div>
