@@ -83,6 +83,56 @@ a:hover { color: oklch(48% 0.14 250); }
 @keyframes landingFloatE { 0%, 100% { transform: rotate(2deg) translateY(0); } 50% { transform: rotate(2deg) translateY(-8px); } }
 @keyframes landingPulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
+/* L'aurore du hero : deux nappes radiales qui dérivent lentement l'une par
+   rapport à l'autre. Uniquement `transform` — une animation de
+   `background-position` sur une zone de cette taille repeint tout le bloc à
+   chaque image. */
+@keyframes landingAurora {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(-4%, 3%, 0) scale(1.12); }
+}
+@keyframes landingAuroraAlt {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.08); }
+  50%      { transform: translate3d(5%, -4%, 0) scale(1); }
+}
+
+/* Le panneau du sélecteur de modules, rejoué à chaque changement d'onglet. */
+@keyframes landingPanelIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Le bandeau défilant des modules. La piste contient deux fois la même liste
+   et se translate de la moitié de sa largeur : la boucle se referme sans
+   saut, à n'importe quelle largeur d'écran. */
+@keyframes landingMarquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Le liseré qui court le long de la chaîne de valeur. */
+@keyframes landingTrace {
+  from { background-position: 0% 50%; }
+  to   { background-position: 200% 50%; }
+}
+
+/* Le halo qui respire derrière la maquette du hero. */
+@keyframes landingBreathe {
+  0%, 100% { opacity: .55; transform: scale(1); }
+  50%      { opacity: .9;  transform: scale(1.08); }
+}
+
+/* Tout le décor de la page d'accueil s'arrête ici. Les blocs qui entrent au
+   défilement sont traités dans Reveal.tsx, côté JavaScript : ils doivent être
+   rendus *visibles*, pas seulement figés — une animation d'apparition
+   désactivée par `animation: none` laisserait le contenu à son état de
+   départ, c'est-à-dire invisible. */
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[landing"] {
+    animation: none !important;
+  }
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: oklch(88% 0.005 260); border-radius: 8px; }
 

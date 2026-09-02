@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Mail } from 'lucide-react';
+import {
+  Mail, LayoutDashboard, Timer, ListChecks, Building2, FileText, Wallet,
+  CalendarCheck, FolderKanban, Users, MessageSquare, Globe, Gift, ShieldCheck,
+} from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
+import { Reveal, CountUp } from '../components/landing/Reveal';
+import { ModuleExplorer } from '../components/landing/ModuleExplorer';
 import { SELLABLE_PLANS, formatDT } from '../constants/plans';
 
 const CONTACT_EMAIL = 'contact@taches-and-cash.com';
@@ -39,48 +44,81 @@ const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
 /** L'offre mise en avant : celle que visent tous les boutons « Essai gratuit ». */
 const FEATURED_PLAN = (PLANS.find(p => p.highlighted) || PLANS[0]).name;
 
-const HOME_FEATURES: { title: string; description: string; iconBg: string; icon: React.ReactNode }[] = [
+/**
+ * Les douze modules de l'application, chacun dans sa carte. La liste couvre
+ * ce que le cabinet trouve réellement en se connectant — pas une sélection
+ * commerciale : une page qui ne montre que le pointage laisse croire que le
+ * reste n'existe pas.
+ */
+const HOME_FEATURES: {
+  title: string; description: string; iconBg: string; iconColor: string; icon: React.ReactNode;
+}[] = [
   {
-    title: 'Gestion des tâches',
-    description: 'Créez, assignez et suivez les tâches de vos équipes en temps réel.',
-    iconBg: '#E9ECFE',
-    icon: <div className="w-4 h-4 bg-navy rounded" />,
+    title: 'Tableau de bord Direction',
+    description: "Marge sur temps, rentabilité par client, concentration du portefeuille et créances échues.",
+    iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <LayoutDashboard className="w-[22px] h-[22px]" />,
   },
   {
-    title: 'Suivi du temps',
-    description: 'Chronométrez chaque mission facturable ou non, automatiquement.',
-    iconBg: '#E3F7F5',
-    icon: <div className="w-4 h-4 rounded-full border-[2.5px] border-turquoise" />,
+    title: 'Pointage & chronomètre',
+    description: 'Un chronomètre par collaborateur, accessible depuis toutes les pages, qui survit au rafraîchissement.',
+    iconBg: '#E3F7F5', iconColor: '#00857C', icon: <Timer className="w-[22px] h-[22px]" />,
   },
   {
-    title: "Performance d'équipe",
-    description: 'Visualisez la charge et la productivité de chaque collaborateur.',
-    iconBg: '#FDEBEF',
-    icon: (
-      <div className="flex gap-[3px]">
-        <div className="w-2 h-2 rounded-full bg-[#E8558B]" />
-        <div className="w-2 h-2 rounded-full bg-[#E8558B]/50" />
-      </div>
-    ),
+    title: 'Missions & types de tâches',
+    description: "Un catalogue de 8 missions et 67 tâches livré d'office, adapté au métier du cabinet.",
+    iconBg: '#EAFBF0', iconColor: '#15803D', icon: <ListChecks className="w-[22px] h-[22px]" />,
   },
   {
-    title: 'Coûts & rentabilité',
-    description: 'Calculez le coût réel de chaque tâche et sa marge en un coup d’œil.',
-    iconBg: '#EAFBF0',
-    icon: <div className="w-4 h-4 bg-[#22C55E] rotate-45" />,
+    title: 'Clients & colonnes sur mesure',
+    description: 'Import du tableur existant, colonnes personnalisées, solde et encaissements par dossier.',
+    iconBg: '#FFF3DE', iconColor: '#C98A1B', icon: <Building2 className="w-[22px] h-[22px]" />,
   },
   {
-    title: 'Trésorerie',
-    description: 'Suivez vos flux de trésorerie et anticipez vos besoins financiers.',
-    iconBg: '#E3F7F5',
-    icon: <span className="text-turquoise text-[18px] font-extrabold">↑</span>,
+    title: 'Facturation conforme',
+    description: 'TVA, retenue à la source, timbre fiscal, montant en toutes lettres et numérotation légale.',
+    iconBg: '#FDEBEF', iconColor: '#C2416B', icon: <FileText className="w-[22px] h-[22px]" />,
   },
   {
-    title: 'Facturation',
-    description: 'Transformez le temps facturable en factures en quelques clics.',
-    iconBg: '#FFF3DE',
-    icon: <div className="w-[14px] h-[18px] border-2 border-[#C98A1B] rounded-sm" />,
+    title: 'Trésorerie & brouillard de caisse',
+    description: 'Encaissements, décaissements, solde courant et règlements clients par mode de paiement.',
+    iconBg: '#E3F7F5', iconColor: '#00857C', icon: <Wallet className="w-[22px] h-[22px]" />,
   },
+  {
+    title: 'Suivi des échéances',
+    description: 'DM, IS, IRPP, CNSS, acomptes — les exercices 2025 à 2028 livrés avec les libellés à jour.',
+    iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <CalendarCheck className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'Ressources métier',
+    description: 'Listes de pièces par type de dossier, liens utiles, avancement coché client par client.',
+    iconBg: '#FFF3DE', iconColor: '#C98A1B', icon: <FolderKanban className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'Ressources humaines',
+    description: 'Congés, autorisations d\'absence, prêts et avances — demande, approbation, solde à jour.',
+    iconBg: '#EAFBF0', iconColor: '#15803D', icon: <Users className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'Messagerie & présence',
+    description: 'Fils directs, groupes de travail, accusés de lecture et présence en direct de l\'équipe.',
+    iconBg: '#FDEBEF', iconColor: '#C2416B', icon: <MessageSquare className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'Portail client',
+    description: 'Votre client consulte son relevé et l\'avancement de ses dossiers — sans voir vos coûts.',
+    iconBg: '#E3F7F5', iconColor: '#00857C', icon: <Globe className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'Parrainage',
+    description: 'Un confrère souscrit avec votre lien : 10 % pour lui, un mois offert pour vous.',
+    iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <Gift className="w-[22px] h-[22px]" />,
+  },
+];
+
+/** Le ruban défilant sous le hero — les mêmes modules, en un coup d'œil. */
+const MODULE_RIBBON = [
+  'Tableau de bord', 'Pointage', 'Missions', 'Clients', 'Facturation', 'Trésorerie',
+  'Échéances', 'Ressources métier', 'RH', 'Messagerie', 'Portail client', 'Parrainage',
 ];
 
 const FLOW_STEPS: { label: string; color: string; shadow: string; shape: React.ReactNode }[] = [
@@ -163,6 +201,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
           <nav className="hidden min-[1041px]:flex items-center gap-7 min-w-0">
             <button onClick={() => goToAnchor('fonctionnalites')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Fonctionnalités</button>
+            <button onClick={() => goToAnchor('modules')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Modules</button>
             <button onClick={() => goToAnchor('dashboard')} className="text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Facturation</button>
             <button onClick={goToTarifs} className={`text-[14px] whitespace-nowrap ${view === 'tarifs' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Tarifs</button>
             <a href={`mailto:${CONTACT_EMAIL}`} className="text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
@@ -200,37 +239,93 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
         <>
           {/* HERO */}
           <section
-            className="relative pt-[88px] px-6 sm:px-10 pb-10 overflow-hidden"
-            style={{ background: 'radial-gradient(720px 420px at 78% 20%, rgba(0,179,166,0.10), rgba(0,179,166,0) 70%), linear-gradient(180deg,#FBFCFD 0%, #F2F4F7 100%)' }}
+            className="relative pt-[76px] px-6 sm:px-10 pb-10 overflow-hidden"
+            style={{ background: 'linear-gradient(180deg,#FBFCFD 0%, #F2F4F7 100%)' }}
           >
-            <div className="max-w-[1280px] mx-auto flex gap-14 items-center flex-wrap">
+            {/* Décor : deux nappes turquoise qui dérivent, plus une trame de
+                lignes très pâle. `pointer-events-none` — rien ici ne doit
+                intercepter un clic destiné au bouton d'essai. */}
+            <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+              <div
+                className="absolute -top-[18%] right-[-10%] w-[760px] h-[760px] animate-[landingAurora_18s_ease-in-out_infinite]"
+                style={{ background: 'radial-gradient(circle, rgba(0,179,166,0.16), rgba(0,179,166,0) 68%)' }}
+              />
+              <div
+                className="absolute top-[24%] left-[-14%] w-[620px] h-[620px] animate-[landingAuroraAlt_22s_ease-in-out_infinite]"
+                style={{ background: 'radial-gradient(circle, rgba(59,82,196,0.10), rgba(59,82,196,0) 68%)' }}
+              />
+              <div
+                className="absolute inset-0 opacity-[0.35]"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(rgba(13,27,42,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(13,27,42,0.045) 1px, transparent 1px)',
+                  backgroundSize: '58px 58px',
+                  maskImage: 'radial-gradient(ellipse 80% 60% at 50% 35%, #000 40%, transparent 100%)',
+                  WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 35%, #000 40%, transparent 100%)',
+                }}
+              />
+            </div>
+
+            <div className="relative max-w-[1280px] mx-auto flex gap-14 items-center flex-wrap">
               {/* Hero copy */}
               <div style={{ flex: '1 1 440px', minWidth: 320, maxWidth: 560 }}>
-                <h1 className="mt-[22px] text-[34px] sm:text-[46px] leading-[1.14] font-extrabold text-navy tracking-[-0.02em]">
-                  Vos tâches, votre temps, vos coûts. Une seule vision claire de votre rentabilité.
-                </h1>
-                <p className="mt-[22px] text-[17px] leading-[1.65] text-[#5B6472]">
-                  Tâches &amp; Cash connecte le suivi du temps de votre équipe à vos coûts réels et à votre trésorerie — pour des décisions basées sur des chiffres, pas des estimations.
-                </p>
-                <div className="mt-8 flex gap-3.5 flex-wrap">
-                  <button
-                    onClick={() => setModalPlan(FEATURED_PLAN)}
-                    className="bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] transition-colors"
-                  >
-                    Essai gratuit
-                  </button>
-                  <button
-                    onClick={() => goToAnchor('dashboard')}
-                    className="bg-white text-navy px-[26px] py-4 rounded-xl text-[15px] font-semibold border-[1.5px] border-[#E6E9EE] hover:border-navy transition-colors"
-                  >
-                    Voir Démo
-                  </button>
-                </div>
+                <Reveal>
+                  <div className="inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full shadow-[0_2px_10px_rgba(13,27,42,0.05)]">
+                    <span className="px-2 py-[3px] rounded-full bg-turquoise text-white text-[10px] font-extrabold tracking-[0.04em] uppercase">Nouveau</span>
+                    <span className="text-[12.5px] font-semibold text-[#3D4655]">Portail client &amp; suivi des échéances 2025–2028</span>
+                  </div>
+                </Reveal>
+                <Reveal delay={80}>
+                  <h1 className="mt-[22px] text-[34px] sm:text-[46px] leading-[1.14] font-extrabold text-navy tracking-[-0.02em]">
+                    Tout votre cabinet, <span className="relative whitespace-nowrap">
+                      <span className="relative z-10">d'une seule vision.</span>
+                      <span aria-hidden className="absolute left-0 right-0 bottom-[6px] h-[10px] bg-turquoise/25 rounded-sm -z-0" />
+                    </span>
+                  </h1>
+                </Reveal>
+                <Reveal delay={150}>
+                  <p className="mt-[22px] text-[17px] leading-[1.65] text-[#5B6472]">
+                    Pointage, missions, échéances fiscales, facturation, trésorerie, RH, messagerie et portail client — réunis dans une plateforme qui relie chaque minute travaillée à votre rentabilité réelle.
+                  </p>
+                </Reveal>
+                <Reveal delay={220}>
+                  <div className="mt-8 flex gap-3.5 flex-wrap">
+                    <button
+                      onClick={() => setModalPlan(FEATURED_PLAN)}
+                      className="bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] hover:-translate-y-0.5 transition-all"
+                    >
+                      Essai gratuit 30 jours
+                    </button>
+                    <button
+                      onClick={() => goToAnchor('modules')}
+                      className="bg-white text-navy px-[26px] py-4 rounded-xl text-[15px] font-semibold border-[1.5px] border-[#E6E9EE] hover:border-navy hover:-translate-y-0.5 transition-all"
+                    >
+                      Découvrir les modules
+                    </button>
+                  </div>
+                </Reveal>
+                <Reveal delay={300}>
+                  <div className="mt-10 pt-7 border-t border-[#E1E5EB] grid grid-cols-2 sm:grid-cols-4 gap-5">
+                    {[
+                      { v: 12, suffix: '', k: 'modules inclus' },
+                      { v: 67, suffix: '', k: 'tâches livrées' },
+                      { v: 28, suffix: '', k: 'échéances par exercice' },
+                      { v: 30, suffix: ' j', k: "d'essai gratuit" },
+                    ].map(stat => (
+                      <div key={stat.k}>
+                        <div className="text-[26px] font-extrabold text-navy tabular-nums leading-none">
+                          <CountUp to={stat.v} suffix={stat.suffix} />
+                        </div>
+                        <div className="mt-1.5 text-[12px] font-semibold text-[#8A93A0] leading-snug">{stat.k}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Reveal>
               </div>
 
               {/* Hero dashboard mockup */}
               <div style={{ flex: '1 1 560px', minWidth: 320 }} className="relative h-[560px] flex items-center justify-center">
-                <div className="absolute w-[420px] h-[420px] rounded-full blur-[10px] top-10 right-5" style={{ background: 'radial-gradient(circle,rgba(0,179,166,0.22),rgba(0,179,166,0) 70%)' }} />
+                <div className="absolute w-[420px] h-[420px] rounded-full blur-[10px] top-10 right-5 animate-[landingBreathe_9s_ease-in-out_infinite]" style={{ background: 'radial-gradient(circle,rgba(0,179,166,0.22),rgba(0,179,166,0) 70%)' }} />
 
                 {/* Main dashboard card */}
                 <div
@@ -368,24 +463,56 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </div>
           </section>
 
+          {/* MODULE RIBBON — les douze modules qui défilent, en une bande.
+              La piste porte deux fois la liste et se translate de la moitié de
+              sa largeur : la boucle se referme sans saut, quelle que soit la
+              largeur de l'écran. `aria-hidden` sur la seconde copie, pour
+              qu'un lecteur d'écran n'énumère pas la liste en double. */}
+          <section className="bg-navy py-4 overflow-hidden">
+            <div className="flex w-max animate-[landingMarquee_38s_linear_infinite]">
+              {[0, 1].map(copy => (
+                <div key={copy} aria-hidden={copy === 1} className="flex shrink-0">
+                  {MODULE_RIBBON.map(m => (
+                    <span key={m} className="flex items-center gap-3 px-6 text-[13px] font-bold uppercase tracking-[0.08em] text-white/55 whitespace-nowrap">
+                      {m}
+                      <span className="w-1.5 h-1.5 rounded-full bg-turquoise/70" />
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </section>
+
           {/* FLOW SECTION */}
           <section className="py-24 px-6 sm:px-10 bg-white">
             <div className="max-w-[980px] mx-auto text-center">
-              <h2 className="text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Une chaîne de valeur, entièrement connectée</h2>
-              <p className="mt-4 max-w-[560px] mx-auto text-[15.5px] leading-[1.6] text-[#5B6472]">De la tâche à la trésorerie, chaque minute travaillée devient une donnée financière exploitable.</p>
+              <Reveal>
+                <h2 className="text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Une chaîne de valeur, entièrement connectée</h2>
+                <p className="mt-4 max-w-[560px] mx-auto text-[15.5px] leading-[1.6] text-[#5B6472]">De la tâche à la trésorerie, chaque minute travaillée devient une donnée financière exploitable.</p>
+              </Reveal>
 
               <div className="relative mt-16 flex justify-between items-start">
-                <div className="absolute top-[31px] left-10 right-10 h-0.5 z-0" style={{ background: 'linear-gradient(90deg,#0D1B2A,#00B3A6,#22C55E)' }} />
-                {FLOW_STEPS.map(step => (
-                  <div key={step.label} className="relative z-10 flex-1 flex flex-col items-center gap-3.5">
-                    <div
-                      className="w-16 h-16 rounded-full bg-white flex items-center justify-center"
-                      style={{ border: `2px solid ${step.color}`, boxShadow: `0 6px 16px ${step.shadow}` }}
-                    >
-                      {step.shape}
+                {/* Le liseré est deux fois plus large que son cadre et défile :
+                    le dégradé court le long de la chaîne au lieu de rester posé. */}
+                <div
+                  className="absolute top-[23px] sm:top-[31px] left-8 sm:left-10 right-8 sm:right-10 h-0.5 z-0 animate-[landingTrace_6s_linear_infinite]"
+                  style={{ background: 'linear-gradient(90deg,#0D1B2A,#00B3A6,#22C55E,#00B3A6,#0D1B2A)', backgroundSize: '200% 100%' }}
+                />
+                {FLOW_STEPS.map((step, i) => (
+                  <Reveal key={step.label} direction="scale" delay={i * 110} className="relative z-10 flex-1">
+                    <div className="flex flex-col items-center gap-3.5">
+                      {/* Plus petit sur téléphone : à cinq étapes sur 390 px,
+                          des pastilles de 64 px se touchent et « Rentabilité »
+                          chevauche ses voisines. */}
+                      <div
+                        className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white flex items-center justify-center transition-transform hover:scale-110"
+                        style={{ border: `2px solid ${step.color}`, boxShadow: `0 6px 16px ${step.shadow}` }}
+                      >
+                        {step.shape}
+                      </div>
+                      <span className="text-[11px] sm:text-[14px] font-bold leading-tight text-center px-0.5" style={{ color: step.color }}>{step.label}</span>
                     </div>
-                    <span className="text-[13px] sm:text-[14px] font-bold" style={{ color: step.color }}>{step.label}</span>
-                  </div>
+                  </Reveal>
                 ))}
               </div>
             </div>
@@ -394,18 +521,31 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           {/* FEATURES */}
           <section id="fonctionnalites" className="py-24 px-6 sm:px-10 bg-[#F2F4F7]">
             <div className="max-w-[1200px] mx-auto">
-              <div className="text-center max-w-[600px] mx-auto">
+              <Reveal className="text-center max-w-[640px] mx-auto">
                 <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Fonctionnalités</div>
-                <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Tout ce qu'il faut pour piloter votre activité</h2>
-              </div>
+                <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Douze modules, une seule application</h2>
+                <p className="mt-4 text-[15.5px] leading-[1.6] text-[#5B6472]">
+                  Pas de briques à acheter séparément : chaque offre donne accès à l'intégralité des vues, du pointage au portail client.
+                </p>
+              </Reveal>
 
               <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[22px]">
-                {HOME_FEATURES.map(f => (
-                  <div key={f.title} className="bg-white rounded-[18px] border border-[#E6E9EE] p-7 hover:-translate-y-1 hover:shadow-[0_16px_32px_rgba(13,27,42,0.08)] transition-all">
-                    <div className="w-[46px] h-[46px] rounded-xl flex items-center justify-center" style={{ background: f.iconBg }}>{f.icon}</div>
-                    <div className="text-[16px] font-bold text-navy mt-4">{f.title}</div>
-                    <p className="text-[14px] leading-[1.55] text-[#5B6472] mt-2">{f.description}</p>
-                  </div>
+                {HOME_FEATURES.map((f, i) => (
+                  /* Le décalage se répète par rangée plutôt que de croître sur
+                     douze cartes : au-delà de la troisième, une cascade continue
+                     fait attendre le bas de la grille bien après son arrivée. */
+                  <Reveal key={f.title} delay={(i % 3) * 90} className="h-full">
+                    <div className="group h-full bg-white rounded-[18px] border border-[#E6E9EE] p-7 hover:-translate-y-1 hover:border-turquoise/40 hover:shadow-[0_16px_32px_rgba(13,27,42,0.08)] transition-all">
+                      <div
+                        className="w-[46px] h-[46px] rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
+                        style={{ background: f.iconBg, color: f.iconColor }}
+                      >
+                        {f.icon}
+                      </div>
+                      <div className="text-[16px] font-bold text-navy mt-4">{f.title}</div>
+                      <p className="text-[14px] leading-[1.55] text-[#5B6472] mt-2">{f.description}</p>
+                    </div>
+                  </Reveal>
                 ))}
               </div>
             </div>
@@ -414,7 +554,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           {/* TIME TRACKING SHOWCASE */}
           <section className="py-24 sm:py-[104px] px-6 sm:px-10 bg-white">
             <div className="max-w-[1200px] mx-auto flex gap-16 items-center flex-wrap-reverse">
-              <div style={{ flex: '1 1 420px', minWidth: 300 }} className="bg-[#F2F4F7] rounded-[20px] p-[22px]" >
+              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 300 }} className="bg-[#F2F4F7] rounded-[20px] p-[22px]">
                 <div style={{ boxShadow: '0 30px 60px -20px rgba(13,27,42,0.18)' }} className="rounded-[20px]">
                   <div className="text-[11px] font-bold text-[#8A93A0] uppercase tracking-[0.05em] mb-2.5">Activités en pause</div>
                   <div className="bg-white border border-[#E6E9EE] rounded-xl overflow-hidden mb-3.5">
@@ -462,9 +602,9 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                     </div>
                   </div>
                 </div>
-              </div>
+              </Reveal>
 
-              <div style={{ flex: '1 1 420px', minWidth: 300 }}>
+              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 300 }}>
                 <div className="inline-flex px-3.5 py-1.5 bg-[#E3F7F5] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Suivi du temps</div>
                 <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold tracking-[-0.01em] leading-[1.2] text-navy">Le temps de votre équipe, suivi en direct, jusqu'à la dernière seconde</h2>
                 <p className="mt-[18px] text-[15.5px] leading-[1.65] text-[#5B6472] max-w-[460px]">Un chronomètre par collaborateur, une vue consolidée pour vous : démarrez, mettez en pause ou basculez de mission en un clic.</p>
@@ -480,14 +620,14 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 >
                   Essayer le suivi du temps
                 </button>
-              </div>
+              </Reveal>
             </div>
           </section>
 
           {/* FACTURATION SHOWCASE */}
           <section id="dashboard" className="py-24 sm:py-[104px] px-6 sm:px-10 bg-navy text-white">
             <div className="max-w-[1200px] mx-auto flex gap-16 items-center flex-wrap">
-              <div style={{ flex: '1 1 420px', minWidth: 300 }}>
+              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 300 }}>
                 <div className="inline-flex px-3.5 py-1.5 bg-white/[0.08] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#5FCBC0]">Facturation</div>
                 <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold tracking-[-0.01em] leading-[1.2]">Votre temps facturable transformé en factures, en quelques clics</h2>
                 <p className="mt-[18px] text-[15.5px] leading-[1.65] text-white/65 max-w-[460px]">Générez des factures conformes directement depuis le temps suivi et les missions clôturées — sans ressaisie.</p>
@@ -503,9 +643,9 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 >
                   Créer une facture
                 </button>
-              </div>
+              </Reveal>
 
-              <div style={{ flex: '1 1 420px', minWidth: 300 }} className="bg-white rounded-2xl p-6 text-navy">
+              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 300 }} className="bg-white rounded-2xl p-6 text-navy">
                 <div className="flex items-start justify-between">
                   <div className="w-11 h-[34px] border-[1.5px] border-dashed border-[#E6E9EE] rounded-md flex items-center justify-center text-[7px] text-[#B7BFC9] text-center leading-tight">Logo</div>
                   <div className="text-right">
@@ -539,8 +679,76 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <div className="flex justify-between text-[10px] text-[#8A93A0]"><span>Retenue à la source — 1%</span><span>− 24 DT</span></div>
                   <div className="flex justify-between bg-navy text-white px-3 py-2.5 rounded-lg mt-1.5 text-[11px] font-bold"><span>Net à payer</span><span>2 832 DT</span></div>
                 </div>
-              </div>
+              </Reveal>
             </div>
+          </section>
+
+          {/* MODULE EXPLORER — les six modules qui n'ont pas leur propre
+              section en grand. */}
+          <section id="modules" className="py-24 sm:py-[104px] px-6 sm:px-10 bg-[#F2F4F7]">
+            <Reveal className="text-center max-w-[640px] mx-auto mb-12">
+              <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Visite guidée</div>
+              <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">
+                Le reste de la plateforme, écran par écran
+              </h2>
+              <p className="mt-4 text-[15.5px] leading-[1.6] text-[#5B6472]">
+                Choisissez un module : voici exactement ce que votre équipe trouve en se connectant.
+              </p>
+            </Reveal>
+            <Reveal delay={100}>
+              <ModuleExplorer onCta={() => setModalPlan(FEATURED_PLAN)} />
+            </Reveal>
+          </section>
+
+          {/* PARRAINAGE */}
+          <section className="py-24 px-6 sm:px-10 bg-white">
+            <Reveal className="max-w-[1080px] mx-auto">
+              <div className="relative overflow-hidden rounded-[28px] bg-navy px-8 sm:px-14 py-14">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -top-[160px] -right-[80px] w-[440px] h-[440px] animate-[landingBreathe_11s_ease-in-out_infinite]"
+                  style={{ background: 'radial-gradient(circle, rgba(0,179,166,0.34), rgba(0,179,166,0) 70%)' }}
+                />
+                <div className="relative grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-12 items-center">
+                  <div>
+                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-white/[0.08] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#5FCBC0]">
+                      <Gift className="w-3.5 h-3.5" /> Parrainage
+                    </div>
+                    <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-white tracking-[-0.01em] leading-[1.2]">
+                      Recommandez Tâches &amp; Cash à un confrère, gagnez un mois
+                    </h2>
+                    <p className="mt-4 text-[15.5px] leading-[1.65] text-white/65 max-w-[480px]">
+                      Partagez votre lien. Le jour où votre filleul souscrit, il obtient 10 % sur son premier abonnement et vous recevez un mois offert. Tant qu'il n'a pas payé, personne ne gagne rien — c'est ce qui rend le dispositif sain.
+                    </p>
+                    <button
+                      onClick={() => setModalPlan(FEATURED_PLAN)}
+                      className="mt-8 px-[26px] py-[15px] rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white transition-colors"
+                    >
+                      Créer mon compte
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {[
+                      { v: 10, suffix: ' %', k: 'de remise pour votre filleul', tone: 'text-turquoise' },
+                      { v: 1, suffix: ' mois', k: 'offert pour vous', tone: 'text-white' },
+                    ].map(c => (
+                      <div key={c.k} className="bg-white/[0.06] border border-white/10 rounded-2xl px-5 py-7 text-center">
+                        <div className={`text-[32px] font-extrabold tabular-nums leading-none ${c.tone}`}>
+                          <CountUp to={c.v} suffix={c.suffix} />
+                        </div>
+                        <div className="mt-2.5 text-[12.5px] font-semibold text-white/60 leading-snug">{c.k}</div>
+                      </div>
+                    ))}
+                    <div className="col-span-2 flex items-center gap-3 bg-white/[0.06] border border-white/10 rounded-2xl px-5 py-4">
+                      <ShieldCheck className="w-5 h-5 text-turquoise shrink-0" />
+                      <span className="text-[12.5px] text-white/70 leading-snug">
+                        Récompense versée à la souscription du filleul, jamais à la simple inscription.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Reveal>
           </section>
         </>
       ) : (
@@ -667,6 +875,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               <p className="text-[12px] font-bold text-white uppercase tracking-[0.05em] mb-3.5">Produit</p>
               <div className="flex flex-col gap-2.5">
                 <button onClick={() => goToAnchor('fonctionnalites')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Fonctionnalités</button>
+                <button onClick={() => goToAnchor('modules')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Modules</button>
                 <button onClick={goToTarifs} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Tarifs</button>
               </div>
             </div>
