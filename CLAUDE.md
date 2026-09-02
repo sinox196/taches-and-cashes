@@ -404,6 +404,13 @@ pas coûter un client), et l'écriture de la ligne de parrainage se fait *après
 la création de l'entreprise, dans un `try/catch` : un parrainage perdu ne fait
 jamais échouer une inscription déjà aboutie.
 
+Le vocabulaire à l'écran parle de **commission** (« une commission équivalente à
+1 mois d'abonnement »), pas de « mois gratuit » : c'est ce que le parrain
+encaisse, et l'avoir de la console est ce qui le rend. Une seule phrase porte la
+réserve, en pied de page — la commission n'est acquise qu'à la souscription
+effective du filleul, pas à la création de son compte — parce que c'est la seule
+règle qui décide si quelqu'un a gagné quelque chose ou non.
+
 **Ce qui n'est délibérément pas construit** : on ne se parraine pas soi-même sur
 la seule base de l'adresse de contact — c'est le garde-fou minimal, pas une
 politique anti-fraude. Il n'existe pas non plus d'écran pour appliquer l'avoir :
@@ -503,7 +510,8 @@ The four HR tabs — congés, autorisations, prêts, avances — share one imple
 Two things are load-bearing:
 
 - **Call it with its explicit type argument** — `usePeriodPage<LeaveRow>(rows, dateOf)`. Left to inference, the `rows` / `dateOf` pair (the latter usually from a `useCallback`) collapses to `unknown` and the rendered rows lose their type, with the error surfacing in the JSX far from its cause.
-- **The pagination bar sits outside the scrolling area and is `shrink-0`**, exactly like the Brouillard's. A `sticky bottom-0` inside the scrolling container is *not* equivalent and was the first attempt: its containing block was the same height as the scrollport, so there was no room to stick and the bar rendered below the fold — measured at y=1093 in an 850px viewport. Making the table the scrolling element (and `min-h-0` on `HRManagement`'s `<main>` and card, since a `flex-1` child cannot shrink below its content without it) is what actually pins it. The bar renders even on a single page — it carries the "X à Y sur Z" count, and a bar that appears and disappears makes the table jump.
+- **The pagination bar sits outside the scrolling area and is `shrink-0`**, exactly like the Brouillard's. A `sticky bottom-0` inside the scrolling container is *not* equivalent and was the first attempt: its containing block was the same height as the scrollport, so there was no room to stick and the bar rendered below the fold — measured at y=1093 in an 850px viewport. Making the table the scrolling element is what actually pins it. The bar renders even on a single page — it carries the "X à Y sur Z" count, and a bar that appears and disappears makes the table jump.
+- **Chaque scrollport porte un plancher (`sm:min-h-[260px]`), et la chaîne au-dessus ne force plus la descente.** `min-h-0` de bout en bout — sur le `<main>` de `HRManagement`, sur la carte et sur le scrollport — laissait le tableau se faire écraser par ce qui le précède : **mesuré à 112 px sur un 1280×720**, soit l'en-tête du tableau et une ligne et demie, et il n'y avait plus rien où défiler (c'est le symptôme remonté sur l'onglet Pointage, dont la carte d'arrivée/départ est le plus haut des blocs fixes). Le plancher remplace `min-h-0` sur le scrollport et `main`/carte gardent `flex-1` sans lui : sur un écran assez haut rien ne change (le tableau prend toute la place restante — 361 px à 1920×950), sur un écran court le contenu dépasse et c'est la colonne de l'application qui défile, la barre de pagination suivant le tableau dans le flux comme sur téléphone. Ne pas « réparer » cela en remettant `min-h-0` partout.
 
 ### Scale constraints
 
@@ -532,6 +540,15 @@ règlement depuis la fiche, et c'est là qu'on applique un mois offert gagné pa
 parrainage. À ne pas confondre avec `trialEndsAt`, qui lui **bloque** la
 connexion à son terme (`expireTrialIfDue`) : un essai non payé n'a jamais donné
 de droits, un abonnement en cours de renouvellement si.
+
+**L'échéance se saisit à la main, donc elle doit se voir quand elle manque.**
+`dueDateOf()` (fin d'essai tant que rien n'est payé, fin d'abonnement ensuite)
+est l'unique définition, lue par la colonne *et* par le filtre « Toutes les
+échéances / à saisir / passée / sous 30 jours » — deux copies finiraient par ne
+plus désigner la même date. Un compte en essai ou actif sans échéance affiche
+**« À définir »** en ambre plutôt qu'un tiret muet : c'est précisément la ligne
+qu'on cherche pour relancer, et un tiret la laissait passer inaperçue. Un compte
+expiré ou suspendu garde le tiret — il n'y a rien à y échoir.
 
 `PUT /api/platform/companies/:id` travaille sur une **liste blanche** : nom, contact, email, téléphone, secteur, sièges, fin d'essai. `status` et `plan` en sont volontairement absents — ils se changent par la confirmation de paiement, qui porte ses propres effets de bord ; les accepter ici ouvrirait un second chemin capable d'activer un compte sans paiement.
 

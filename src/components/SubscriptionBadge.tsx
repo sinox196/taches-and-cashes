@@ -4,6 +4,18 @@ import { useAuth } from '../context/AuthContext';
 import { CLIENT_ROLE } from '../constants/roles';
 
 /**
+ * « 1ᵉʳ octobre 2026 », pas « 01 octobre 2026 » : en français le premier du
+ * mois porte l'ordinal, et `toLocaleDateString` ne le sait pas.
+ */
+const frenchDate = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const day = d.getDate();
+  const rest = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  return `${day === 1 ? '1ᵉʳ' : day} ${rest}`;
+};
+
+/**
  * L'état de l'**abonnement** de l'entreprise — à ne pas confondre avec le
  * badge de présence juste à côté.
  *
@@ -32,27 +44,39 @@ export const SubscriptionBadge: React.FC = () => {
     ? Math.ceil((new Date(company.trialEndsAt).getTime() - Date.now()) / 86400000)
     : null;
   const ended = daysLeft !== null && daysLeft < 0;
-  const endsOn = company.trialEndsAt
-    ? new Date(company.trialEndsAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
-    : null;
+  const endsOn = company.trialEndsAt ? frenchDate(company.trialEndsAt) : null;
 
+  // La phrase complète — celle que l'entreprise doit lire. Le bandeau n'a pas
+  // la largeur de la porter en toutes circonstances, d'où les trois paliers
+  // ci-dessous ; l'info-bulle, elle, la porte toujours en entier.
   const title = ended
-    ? "Votre période d'essai est terminée. Contactez-nous pour activer votre abonnement."
-    : `Période d'essai${endsOn ? ` jusqu'au ${endsOn}` : ''} — votre abonnement n'est pas encore souscrit.`;
+    ? "Votre période d'essai est terminée — Activez votre abonnement dès maintenant."
+    : `Période d'essai${endsOn ? ` jusqu'au ${endsOn}` : ''} — Activez votre abonnement dès maintenant.`;
 
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${
         ended ? 'bg-late-bg text-late-fg' : 'bg-[#FFFAEB] text-[#B54708]'
       }`}
     >
       {ended ? <AlertTriangle className="w-3 h-3 shrink-0" /> : <Clock className="w-3 h-3 shrink-0" />}
-      {ended
-        ? 'Essai terminé'
-        : daysLeft !== null
-          ? `Essai · ${daysLeft} j`
-          : 'Essai'}
+      {ended ? (
+        <>
+          Essai terminé
+          <span className="hidden lg:inline">&nbsp;— Activez votre abonnement dès maintenant</span>
+        </>
+      ) : (
+        <>
+          {/* Sous `sm` il ne reste que le compte à rebours : la date entière
+              pousse l'avatar et la cloche hors du bandeau sur un téléphone. */}
+          <span className="sm:hidden">{daysLeft !== null ? `Essai · ${daysLeft} j` : 'Essai'}</span>
+          <span className="hidden sm:inline">
+            Période d&rsquo;essai{endsOn ? ` jusqu'au ${endsOn}` : ''}
+            <span className="hidden lg:inline">&nbsp;— Activez votre abonnement dès maintenant</span>
+          </span>
+        </>
+      )}
     </span>
   );
 };

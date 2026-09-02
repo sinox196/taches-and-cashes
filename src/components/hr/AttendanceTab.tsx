@@ -199,7 +199,7 @@ export const AttendanceTab: React.FC = () => {
   const record = today?.record;
 
   return (
-    <div className="flex flex-col sm:h-full sm:min-h-0">
+    <div className="flex flex-col sm:h-full">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Pointage</h2>
         <div className="flex flex-wrap items-center gap-2 self-start">
@@ -262,7 +262,7 @@ export const AttendanceTab: React.FC = () => {
         )}
       </div>
 
-      <div className="hidden sm:block sm:overflow-auto sm:flex-1 sm:min-h-0 border border-gray-200 rounded-lg">
+      <div className="hidden sm:block sm:overflow-auto sm:flex-1 sm:min-h-[260px] border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50 sticky top-0">
             <tr>

@@ -162,8 +162,9 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
 
             {isSignup && invitedByCode && (
               <p className="text-[12.5px] text-[#00857C] bg-[#E3F7F5] rounded-lg px-3 py-2.5 leading-relaxed font-medium">
-                Vous arrivez par une invitation : <strong>{REFERRAL_DISCOUNT_PERCENT} % de remise</strong> sur votre
-                premier abonnement, appliquée au moment de la souscription.
+                Bienvenue ! Grâce à votre lien d'invitation, bénéficiez de{' '}
+                <strong>{REFERRAL_DISCOUNT_PERCENT} % de réduction</strong> sur votre premier abonnement au moment
+                du paiement.
               </p>
             )}
 

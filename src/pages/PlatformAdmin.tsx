@@ -67,6 +67,25 @@ const daysLeft = (iso: string | null) => {
   return Math.ceil(ms / (24 * 60 * 60 * 1000));
 };
 
+/**
+ * L'échéance d'une entreprise : la fin d'essai tant que rien n'est payé, la
+ * fin de l'abonnement ensuite. Une seule définition, lue par la colonne *et*
+ * par le filtre — deux copies finiraient par ne plus désigner la même date.
+ */
+const dueDateOf = (c: Company): string | null =>
+  (c.status === 'TRIAL' ? c.trialEndsAt : c.subscriptionEndsAt) || null;
+
+/**
+ * Une échéance qui manque là où il en faut une. Elle se saisit **à la main**
+ * depuis la fiche (la facturation vit hors de l'app), donc un compte actif
+ * sans date n'est pas un compte sans échéance : c'est une date que personne
+ * n'a encore entrée. Un tiret muet le laissait passer inaperçu, et c'est
+ * exactement la ligne qu'il faut retrouver pour relancer.
+ *
+ * Un compte expiré ou suspendu en est exclu : il n'y a rien à y échoir.
+ */
+const needsDueDate = (c: Company) => (c.status === 'TRIAL' || c.status === 'ACTIVE') && !dueDateOf(c);
+
 export const PlatformAdmin: React.FC = () => {
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
@@ -80,6 +99,8 @@ export const PlatformAdmin: React.FC = () => {
   /** Recherche libre (nom, contact, e-mail, téléphone, secteur) et statut. */
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  /** Échéance : '' (toutes), 'MISSING' (à saisir), 'OVERDUE' (passée), 'SOON' (sous 30 j). */
+  const [dueFilter, setDueFilter] = useState('');
 
   const [usersCompany, setUsersCompany] = useState<Company | null>(null);
   const [editCompany, setEditCompany] = useState<Company | null>(null);
@@ -116,11 +137,17 @@ export const PlatformAdmin: React.FC = () => {
     const q = search.trim().toLowerCase();
     return companies.filter(c => {
       if (statusFilter && c.status !== statusFilter) return false;
+      if (dueFilter) {
+        const left = daysLeft(dueDateOf(c));
+        if (dueFilter === 'MISSING' && !needsDueDate(c)) return false;
+        if (dueFilter === 'OVERDUE' && (left === null || left >= 0)) return false;
+        if (dueFilter === 'SOON' && (left === null || left < 0 || left > 30)) return false;
+      }
       if (!q) return true;
       return [c.name, c.contactName, c.contactEmail, c.phone, c.secteur]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
-  }, [companies, search, statusFilter]);
+  }, [companies, search, statusFilter, dueFilter]);
 
   // `createdAt` est la seule date que porte une entreprise : le filtre année
   // puis mois — le même geste que partout ailleurs — porte donc sur son
@@ -133,7 +160,7 @@ export const PlatformAdmin: React.FC = () => {
   // assez de pages pour que la page 3 existe encore tout en n'étant plus celle
   // qu'on regardait : on repart du début, comme le font les listes déroulantes
   // de période.
-  useEffect(() => { pager.setPage(1); }, [search, statusFilter]);
+  useEffect(() => { pager.setPage(1); }, [search, statusFilter, dueFilter]);
 
   const planFor = (c: Company) => planPick[c.id] || c.pendingPlan || c.plan || 'FREELANCE';
 
@@ -286,6 +313,20 @@ export const PlatformAdmin: React.FC = () => {
                 <option key={value} value={value}>{labelText}</option>
               ))}
             </select>
+            {/* L'échéance se saisit à la main : ce filtre est ce qui rend
+                « lesquelles restent à saisir » et « lesquelles sont passées »
+                consultables sans parcourir toutes les pages. */}
+            <select
+              value={dueFilter}
+              onChange={e => setDueFilter(e.target.value)}
+              title="Filtrer par échéance"
+              className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+            >
+              <option value="">Toutes les échéances</option>
+              <option value="MISSING">Échéance à saisir</option>
+              <option value="OVERDUE">Échéance passée</option>
+              <option value="SOON">Échéance sous 30 jours</option>
+            </select>
             {/* Les deux listes de période portent sur la date d'inscription —
                 le libellé le dit, « Toutes les années » seul ne dirait pas de
                 quelle date il parle. */}
@@ -351,9 +392,20 @@ export const PlatformAdmin: React.FC = () => {
                         d'un accès reste une décision prise à la main, par le
                         bouton de la fiche. */}
                     <td className="px-3 py-3 whitespace-nowrap">{(() => {
-                      const due = c.status === 'TRIAL' ? c.trialEndsAt : c.subscriptionEndsAt;
-                      const left = daysLeft(due || null);
-                      if (!due) return <span className="text-gray-300">—</span>;
+                      const due = dueDateOf(c);
+                      const left = daysLeft(due);
+                      if (!due) {
+                        return needsDueDate(c) ? (
+                          <span
+                            className="text-[11.5px] font-semibold text-[#B54708] bg-[#FFFAEB] px-2 py-0.5 rounded-full"
+                            title="Aucune échéance enregistrée — elle se saisit à la main dans la fiche (bouton Modifier)."
+                          >
+                            À définir
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        );
+                      }
                       const over = left !== null && left < 0;
                       return (
                         <div title={c.status === 'TRIAL' ? "Fin de la période d'essai" : "Fin de l'abonnement en cours — à repousser à chaque règlement"}>

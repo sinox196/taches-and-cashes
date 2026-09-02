@@ -104,11 +104,15 @@ export const ReferralPage: React.FC = () => {
   return (
     <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col gap-4 sm:gap-6 max-w-[1000px] w-full mx-auto">
       <div>
-        <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">Parrainage</h1>
-        <p className="text-[12px] text-gray-500 mt-1">
-          Invitez un confrère : il obtient {data.discountPercent} % de remise sur son premier abonnement, et vous
-          gagnez un mois gratuit dès qu'il souscrit.
+        <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">
+          Parrainez vos confrères. Gagnez de l&rsquo;argent. 💰
+        </h1>
+        <p className="text-[12.5px] text-gray-500 mt-1.5 leading-relaxed max-w-[70ch]">
+          Partagez votre lien de parrainage avec vos confrères : ils bénéficient de {data.discountPercent} % de
+          réduction sur leur abonnement, et vous gagnez une commission équivalente à 1 mois d&rsquo;abonnement pour
+          chaque nouveau client qui s&rsquo;abonne grâce à vous.
         </p>
+        <p className="text-[12.5px] font-semibold text-turquoise mt-1">Plus vous parrainez, plus vous gagnez !</p>
       </div>
 
       {/* Le lien : la seule chose que l'utilisateur vient chercher ici — sauf
@@ -121,11 +125,12 @@ export const ReferralPage: React.FC = () => {
           </div>
           <div>
             <p className="text-[14px] font-semibold text-gray-900 leading-tight">
-              Le parrainage s'ouvre avec votre abonnement
+              Le parrainage s&rsquo;active avec votre abonnement
             </p>
             <p className="text-[12.5px] text-gray-500 mt-1 leading-relaxed">
-              Votre lien d'invitation est créé dès que votre abonnement est actif. Vous pourrez alors offrir{' '}
-              {data.discountPercent} % de remise à un confrère et gagner un mois gratuit à chaque souscription.
+              Dès que votre abonnement est actif, votre lien de parrainage est automatiquement créé. Partagez-le
+              avec vos confrères : ils bénéficient de {data.discountPercent} % de réduction et vous gagnez une
+              commission équivalente à 1 mois d&rsquo;abonnement pour chaque nouvelle souscription.
             </p>
           </div>
         </div>
@@ -157,6 +162,13 @@ export const ReferralPage: React.FC = () => {
               {copied ? <><Check className="w-4 h-4" /> Copié</> : <><Copy className="w-4 h-4" /> Copier le lien</>}
             </button>
           </div>
+
+          {/* L'argument à coller avec le lien. Il vit ici plutôt qu'en tête de
+              page parce que c'est au moment de partager qu'on en a besoin. */}
+          <p className="mt-3 text-[12.5px] font-medium text-[#00857C] bg-[#E3F7F5] rounded-lg px-3 py-2.5 leading-relaxed">
+            Parrainage : {data.discountPercent} % de remise pour votre confrère — 1 mois gratuit pour vous dès
+            qu&rsquo;il devient abonné !
+          </p>
         </div>
       )}
 
@@ -211,9 +223,9 @@ export const ReferralPage: React.FC = () => {
       </div>
 
       <p className="text-[11.5px] text-gray-400 leading-relaxed">
-        Le mois est gagné lorsque votre filleul souscrit son abonnement, pas à la création de son compte :
-        une inscription qui n'aboutit pas ne rapporte rien. Il est enregistré comme un avoir déduit de votre
-        prochaine échéance.
+        À noter : votre commission est acquise uniquement lorsque la personne parrainée souscrit effectivement à
+        un abonnement, et non lors de la simple création de son compte. Une inscription sans souscription ne
+        génère aucune commission.
       </p>
     </main>
   );

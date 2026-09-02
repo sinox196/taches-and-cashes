@@ -41,20 +41,21 @@ export const HRManagement: React.FC = () => {
   }
 
   return (
-    // `min-h-0` : sans lui, un enfant `flex-1` ne peut pas descendre sous la
-    // taille de son contenu, la page grandit, et la barre de pagination du
-    // tableau se retrouve sous la ligne de flottaison. Même montage que la
-    // page Clients.
+    // Le tableau de chaque onglet fait défiler son propre corps et garde sa
+    // barre de pagination en dehors — mais **jamais sous une hauteur
+    // utilisable**. La chaîne `flex-1 min-h-0` de bout en bout laissait le
+    // scrollport se faire écraser par ce qui le précède : mesuré à 112 px sur
+    // un 1280x720 (l'en-tête, les cartes de solde, la barre d'onglets et la
+    // carte de pointage prennent 594 px à elles seules), soit l'en-tête du
+    // tableau et une ligne et demie — on ne pouvait plus y défiler.
     //
-    // Mais **à partir de `sm` seulement**. Sur un téléphone, l'en-tête, les
-    // deux cartes de solde et la barre d'onglets consomment la quasi-totalité
-    // des ~720 px disponibles : la même chaîne `flex-1 min-h-0` ne laissait
-    // que 2 à 102 px de liste selon l'onglet (2 px sur Pointage, mesuré à
-    // 375×780). En dessous de `sm` on rend donc à hauteur naturelle et c'est
-    // la page qui défile — ce qu'un téléphone fait de toute façon le mieux ;
-    // la barre de pagination suit la liste dans le flux au lieu d'être
-    // épinglée sous un scrollport haut de deux pixels.
-    <main className="p-4 sm:p-6 lg:p-8 sm:flex-1 sm:min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
+    // Chaque scrollport porte donc un plancher (`sm:min-h-[260px]`, cinq
+    // lignes) au lieu de `min-h-0`, et cette chaîne-ci ne force plus la
+    // descente : sur un écran assez haut rien ne change (le tableau prend
+    // toute la place restante), sur un écran court le contenu dépasse et
+    // c'est la colonne de l'application qui défile — la barre de pagination
+    // suit alors le tableau dans le flux, comme sur téléphone.
+    <main className="p-4 sm:p-6 lg:p-8 sm:flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t('hr.title')}</h1>
@@ -83,7 +84,7 @@ export const HRManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col sm:flex-1 sm:min-h-0">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col sm:flex-1">
         {/* Scrolls sideways below sm: four tabs sharing 390px squeezed
             "Autorisations d'absence" onto two lines and clipped the rest. */}
         <div className="flex border-b border-gray-200 overflow-x-auto shrink-0">
@@ -123,7 +124,7 @@ export const HRManagement: React.FC = () => {
             garde sa barre de pagination en dehors, comme le Brouillard de
             caisse. Un `overflow-auto` ici ferait défiler la barre avec le
             contenu, et il faudrait descendre tout en bas pour l'atteindre. */}
-        <div className="p-4 flex flex-col sm:flex-1 sm:min-h-0">
+        <div className="p-4 flex flex-col sm:flex-1">
           {activeTab === 'leaves' ? <LeavesTab />
             : activeTab === 'absences' ? <AbsencesTab />
             : activeTab === 'attendance' ? <AttendanceTab />
