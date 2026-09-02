@@ -43,11 +43,11 @@ const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
   // portail n'est simplement pas ce qu'elle vend.
   portalSeats: p.portalSeatLimit > 0 ? `${p.portalSeatLimit} comptes portail client` : '',
   features: p.features,
-  cta: 'Essai gratuit',
+  cta: 'Commencez gratuitement !',
   highlighted: p.highlighted,
 }));
 
-/** L'offre mise en avant : celle que visent tous les boutons « Essai gratuit ». */
+/** L'offre mise en avant : celle que visent tous les boutons « Commencez gratuitement ». */
 const FEATURED_PLAN = (PLANS.find(p => p.highlighted) || PLANS[0]).name;
 
 /**
@@ -240,20 +240,11 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             >
               Se connecter
             </button>
-            {/* Dropped on small screens: it opens exactly the same signup
-                modal as "Essai gratuit" beside it, so it's the one of the
-                three that costs nothing to lose. */}
-            <button
-              onClick={() => setModalPlan(FEATURED_PLAN)}
-              className="landing-shine hidden min-[561px]:inline-block px-4 py-2.5 rounded-[10px] text-[14px] font-bold text-navy bg-white border-[1.5px] border-[#E6E9EE] hover:border-navy hover:-translate-y-0.5 transition-all whitespace-nowrap"
-            >
-              Créer un compte
-            </button>
             <button
               onClick={() => setModalPlan(FEATURED_PLAN)}
               className="landing-shine px-3 sm:px-[18px] py-2.5 sm:py-[11px] rounded-[10px] text-[13px] sm:text-[14px] font-bold text-white bg-navy hover:bg-turquoise hover:-translate-y-0.5 transition-all whitespace-nowrap"
             >
-              Essai gratuit
+              Commencez gratuitement&nbsp;!
             </button>
           </div>
         </div>
@@ -318,7 +309,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                       onClick={() => setModalPlan(FEATURED_PLAN)}
                       className="landing-shine group bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] hover:-translate-y-0.5 transition-all inline-flex items-center gap-2"
                     >
-                      Essai gratuit 30 jours
+                      Commencez gratuitement&nbsp;!
                       <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
                     </button>
                     <button
