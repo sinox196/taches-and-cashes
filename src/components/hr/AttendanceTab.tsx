@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LogIn, LogOut, Smartphone, Clock, CheckCircle2, AlertTriangle, X, Coffee } from 'lucide-react';
 import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
 import { MultiSelectFilterDropdown } from '../MultiSelectFilterDropdown';
+import { formatTimeTN } from '../../utils/formatters';
 
 interface AttendanceRecord {
   id: number;
@@ -56,7 +57,7 @@ const presenceMinutes = (r: AttendanceRecord): number | null => {
   return Math.round(ms / 60000);
 };
 
-const time = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
+const time = (iso: string | null) => formatTimeTN(iso);
 
 /**
  * Within tolerance -> "à l'heure"; beyond it -> flagged, direction-aware for

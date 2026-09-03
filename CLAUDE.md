@@ -753,10 +753,33 @@ fuseau, et le `TZ` de la machine ne doit rien changer au résultat.
 Deux distinctions à garder :
 
 - Un **instant** (`createdAt`, `checkinAt`, `lastStartedAt`…) reste en ISO/UTC
-  et se rend dans le fuseau du lecteur par le navigateur. C'est une date
-  civile — « quel jour, quelle heure murale » — qui a besoin du fuseau du
-  cabinet, parce qu'elle sert de clé (`date` d'une entrée, jour du pointage) ou
-  se compare à un horaire saisi en heure murale.
+  et se rend, côté client, dans le fuseau du cabinet — jamais dans celui de
+  l'appareil qui regarde.
+
+**Le fuseau se possède aussi côté navigateur.** `toLocaleTimeString()` /
+`toLocaleDateString()` sans option `timeZone` rendent un instant dans le
+fuseau *de l'appareil qui affiche*, pas celui du cabinet — et un appareil mal
+réglé (une VM restée en UTC, un poste dont le fuseau système n'est pas
+Africa/Tunis) décale l'affichage d'une heure pile, exactement comme le
+serveur avant ce correctif, alors même que `checkinAt` est un instant
+parfaitement correct. Le symptôme se voit surtout en le comparant à Pointage,
+dont l'heure de début est une chaîne déjà écrite en heure de Tunis côté
+serveur : les deux écrans parlent du même instant et n'affichent pas la même
+heure. `formatTimeTN` / `formatDateTimeTN` / `civilDateKeyTN` dans
+[formatters.ts](src/utils/formatters.ts) épinglent donc explicitement
+`Africa/Tunis`, la contrepartie client d'`APP_TIMEZONE` — utilisés par
+l'heure d'entrée/sortie du pointage de présence
+([AttendanceTab.tsx](src/components/hr/AttendanceTab.tsx)), le « modifié le »
+de [EntryDeviceBadge.tsx](src/components/EntryDeviceBadge.tsx), et l'heure
+plus le regroupement Aujourd'hui/Hier de la messagerie
+([ChatPage.tsx](src/components/chat/ChatPage.tsx), dont le regroupement par
+jour comparait `toDateString()` — même piège que `civilDateKeyTN` documente :
+un message envoyé à 00h15 heure de Tunis se rangeait sous la veille sur un
+appareil resté en UTC). Une chaîne déjà écrite par le serveur (`date`,
+`heureDebut`, `heureFin`) n'a pas besoin de ce traitement — elle est déjà en
+heure de Tunis, la rendre demanderait de la reparser puis de la reformater
+pour rien.
+
 **Rattraper l'historique** : `npm run db:fix-timezone -- --before "<instant ISO>"` ([scripts/fix-timezone-history.ts](scripts/fix-timezone-history.ts)), l'instant étant la mise en service du correctif. Sans `--apply` il ne fait que lister. Deux traitements, parce que les deux familles n'offrent pas la même matière : le **pointage de présence** porte `checkinAt`/`checkoutAt`, de vrais instants, donc le jour et le retard sont **recalculés** — idempotent par construction ; une **entrée de temps** ne porte aucun instant de création (`lastStartedAt` est réécrit à chaque reprise), donc elle est **décalée**, ce qui n'est pas idempotent — d'où la coupure obligatoire et une marque `tzFixedAt` par ligne, qu'une seconde exécution respecte. Le décalage est calculé pour la date de chaque ligne, jamais « +1 h » en dur. `dateGranted` d'un prêt ou d'une avance n'est délibérément pas touché : la valeur par défaut était fausse une heure par jour, mais elle peut aussi avoir été saisie à la main et rien ne distingue les deux.
 
 - `minutesFromShift()` compare des **heures murales**, pas des instants :

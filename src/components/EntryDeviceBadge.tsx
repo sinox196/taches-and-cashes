@@ -1,6 +1,7 @@
 import React from 'react';
 import { Smartphone, Monitor } from 'lucide-react';
 import { TimeEntry } from '../types';
+import { formatDateTimeTN } from '../utils/formatters';
 
 /**
  * Where a task was worked from — a phone or a computer.
@@ -32,9 +33,7 @@ export const EntryDeviceBadge: React.FC<{ entry: TimeEntry }> = ({ entry }) => {
     const who = entry.lastEditedByName && entry.lastEditedByName !== entry.userName
       ? ` par ${entry.lastEditedByName}`
       : '';
-    const when = entry.lastEditedAt
-      ? ` le ${new Date(entry.lastEditedAt).toLocaleDateString('fr-FR')} à ${new Date(entry.lastEditedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
-      : '';
+    const when = entry.lastEditedAt ? ` le ${formatDateTimeTN(entry.lastEditedAt).replace(' ', ' à ')}` : '';
     lines.push(`Modifiée depuis un ${label(entry.lastEditedVia)}${who}${when}`);
   }
 

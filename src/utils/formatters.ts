@@ -1,4 +1,55 @@
 /**
+ * Le fuseau du cabinet, côté navigateur — la contrepartie client de
+ * `APP_TIMEZONE` dans server.ts.
+ *
+ * Un instant (`checkinAt`, `lastEditedAt`, l'horodatage d'un message…) est
+ * stocké en ISO/UTC et, par défaut, `toLocaleTimeString()` le rend dans le
+ * fuseau *du navigateur* — celui de l'appareil qui regarde, pas celui du
+ * cabinet. Ça tient tant que l'appareil est correctement réglé sur
+ * Africa/Tunis, et ça casse net sinon : un poste dont l'horloge système est
+ * en UTC (une VM, un kiosque, un fuseau mal détecté) affiche une heure
+ * décalée d'une heure pile — exactement le symptôme du fuseau du cabinet
+ * étant UTC+1. La comparaison avec Pointage, dont l'heure de début est une
+ * chaîne déjà écrite en heure de Tunis côté serveur, rend le décalage
+ * flagrant : les deux écrans parlent du même instant et ne s'accordent pas.
+ *
+ * `formatTimeTN`/`formatDateTimeTN` épinglent donc le fuseau explicitement,
+ * plutôt que de faire confiance à l'appareil qui regarde.
+ */
+export const APP_TIMEZONE = 'Africa/Tunis';
+
+/** « 08:56 » — l'heure d'un instant ISO, dans le fuseau du cabinet. */
+export function formatTimeTN(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIMEZONE });
+}
+
+/** « 03/09/2026 08:56 » — jour puis heure d'un instant ISO, fuseau du cabinet. */
+export function formatDateTimeTN(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const date = d.toLocaleDateString('fr-FR', { timeZone: APP_TIMEZONE });
+  const time = formatTimeTN(iso);
+  return `${date} ${time}`;
+}
+
+/**
+ * « 2026-09-03 » — le jour civil du cabinet pour un instant ISO, en clé
+ * triable. Sert à comparer deux instants « même jour ? » (aujourd'hui, hier)
+ * sans retomber sur `toDateString()`, qui découpe la journée dans le fuseau
+ * de l'appareil : un message envoyé à 00h15 heure de Tunis (23h15 UTC la
+ * veille) se rangerait sous la mauvaise journée sur un appareil resté en UTC.
+ */
+export function civilDateKeyTN(iso: string | Date): string {
+  const d = typeof iso === 'string' ? new Date(iso) : iso;
+  // en-CA rend directement YYYY-MM-DD, sans avoir à réassembler les parts.
+  return d.toLocaleDateString('en-CA', { timeZone: APP_TIMEZONE });
+}
+
+/**
  * Formats seconds into HH:MM:SS string
  */
 export function formatHHMMSS(totalSeconds: number): string {

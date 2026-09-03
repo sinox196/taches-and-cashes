@@ -5,6 +5,7 @@ import { usePresence } from '../../context/PresenceContext';
 import { PresenceBadge } from '../PresenceBadge';
 import { Loader2, Send, MessageCircle, Check, CheckCheck, ArrowLeft, Users, Plus, Settings2 } from 'lucide-react';
 import { GroupModal, type ChatGroup } from './GroupModal';
+import { formatTimeTN, civilDateKeyTN } from '../../utils/formatters';
 
 interface Contact {
   id: number;
@@ -47,20 +48,17 @@ const initials = (name: string) =>
     .map(p => p[0]?.toUpperCase())
     .join('') || '?';
 
-const formatTime = (iso: string) => {
-  const d = new Date(iso);
-  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-};
+const formatTime = (iso: string) => formatTimeTN(iso);
 
 const formatDay = (iso: string) => {
-  const d = new Date(iso);
+  const key = civilDateKeyTN(iso);
   const today = new Date();
-  const isToday = d.toDateString() === today.toDateString();
-  if (isToday) return "Aujourd'hui";
+  if (key === civilDateKeyTN(today)) return "Aujourd'hui";
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'Hier';
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+  if (key === civilDateKeyTN(yesterday)) return 'Hier';
+  const d = new Date(iso);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Africa/Tunis' });
 };
 
 /**
