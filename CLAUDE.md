@@ -319,16 +319,28 @@ porte les vues qu'elle vend, désignées par l'identifiant que porte déjà leur
 entrée de barre latérale (`Cash`, `Clients`, `HR`…) — **absent = toutes**, ce
 qui est le cas des trois packs et ce qui fait qu'ajouter une offre restreinte
 n'a touché à rien de ce qui existait. Le pack **Facturation** (30 DT, un siège,
-aucun compte portail) déclare `['Cash', 'Users']` : c'est un outil de
-facturation, pas le cabinet complet — **fichier clients compris**, qu'il
-n'ouvre pas. L'éditeur de document s'y adapte de lui-même en demandant
-`hasPermission('VIEW_CLIENTS')`, qui consulte déjà l'offre : sans fichier
-clients, la raison sociale devient un champ libre au lieu d'un type-ahead (une
-loupe qui ne cherche nulle part se lirait comme une panne), la validation porte
-sur ce qui est tapé plutôt que sur une fiche choisie, et le document part avec
-`clientId: null` — le serveur accepte depuis toujours l'un **ou** l'autre.
-Matricule fiscal et adresse, eux, étaient déjà des champs libres ; ils étaient
-seulement pré-remplis depuis la fiche.
+aucun compte portail) déclare `['Cash', 'Clients']` : Cash et le fichier
+clients qu'il faut bien pouvoir facturer, rien d'autre — **Équipe non plus**,
+l'offre étant à un siège, il n'y a personne à gérer (le mot de passe se change
+alors par « mot de passe oublié », que `PLAN_NEUTRAL_PREFIXES` laisse ouvert à
+toute offre).
+
+`standalone: true` la sort de l'échelle des sièges : elle est **en tête** de
+`PLANS` et la page de tarifs lui donne son propre ton (`TONES.accent`, le fond
+turquoise clair de la charte). Quatre cartes identiques feraient lire « 30 DT »
+comme le pack le moins cher, alors que ce n'est pas le même produit — d'où
+trois tons et non deux : `navy` met une offre **en avant** parmi ses pareilles,
+`accent` dit qu'une offre **n'est pas de la même famille**. Les encres du ton
+accent sont assombries pour tenir sur ce fond : le gris `#8A93A0` des cartes
+blanches y tombe à 2,6:1.
+
+L'éditeur de document reste capable de se passer du fichier clients : il
+demande `hasPermission('VIEW_CLIENTS')` — qui consulte déjà l'offre — et sans
+lui la raison sociale devient un champ libre au lieu d'un type-ahead (une loupe
+qui ne cherche nulle part se lirait comme une panne), la validation porte sur ce
+qui est tapé, et le document part avec `clientId: null`, que le serveur accepte
+depuis toujours. Aucune offre vendue n'est dans ce cas aujourd'hui, mais un
+compte à qui on donne `MANAGE_CASH` sans `VIEW_CLIENTS` l'est.
 
 Le périmètre se ferme à **trois endroits, et les trois sont nécessaires** :
 
@@ -341,7 +353,12 @@ Le périmètre se ferme à **trois endroits, et les trois sont nécessaires** :
   refusé aux offres restreintes, donc une route ajoutée demain naît fermée pour
   elles — la contrepartie est qu'une nouvelle route doit être classée dans
   cette table. Seuls `PLAN_NEUTRAL_PREFIXES` (se connaître, la cloche, le push,
-  le battement de présence, la console plateforme) échappent au classement.
+  le battement de présence, la réinitialisation de mot de passe, la console
+  plateforme) échappent au classement. **Un préfixe ne vaut que sur une
+  frontière de segment** (`pathUnderPrefix`) : avec un `startsWith()` nu,
+  `/api/me` était le préfixe de `/api/messages` et la messagerie entière
+  passait pour neutre — mesuré, `/api/messages/contacts` répondait 200 au pack
+  Facturation. Tout nouveau préfixe passe par ce helper.
 - **`requirePermission`**, par `planAllowsPermission` et la table
   `PERMISSION_MODULE` — **devant le court-circuit ADMIN**, comme le garde de
   secteur : c'est l'abonnement de l'entreprise qui décide, pas le rôle de la

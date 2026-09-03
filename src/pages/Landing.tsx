@@ -24,7 +24,44 @@ interface PricingPlan {
   features: string[];
   cta: string;
   highlighted?: boolean;
+  tone: Tone;
 }
+
+/**
+ * Trois traitements, pas deux, parce qu'il y a deux axes différents à dire :
+ * `navy` met une offre **en avant** parmi ses pareilles (le pack le plus
+ * populaire), `accent` dit qu'une offre **n'est pas de la même famille** —
+ * l'offre Facturation ne se compare pas aux packs, qui sont le même produit
+ * à trois tailles d'équipe. Quatre cartes identiques feraient lire « 30 DT »
+ * comme le pack le moins cher.
+ */
+type Tone = 'navy' | 'accent' | 'plain';
+
+const TONES: Record<Tone, {
+  card: string; title: string; muted: string; portal: string;
+  rule: string; bullet: string; feature: string; cta: string;
+}> = {
+  navy: {
+    card: 'bg-navy shadow-[0_30px_60px_-20px_rgba(13,27,42,0.4)]',
+    title: 'text-white', muted: 'text-white/55', portal: 'text-turquoise',
+    rule: 'bg-white/[0.12]', bullet: 'bg-turquoise text-navy', feature: 'text-white/85',
+    cta: 'bg-turquoise text-navy hover:bg-white',
+  },
+  // Le fond turquoise clair de la charte. Les encres sont assombries pour
+  // tenir sur lui : le gris `#8A93A0` des cartes blanches y tombe à 2,6:1.
+  accent: {
+    card: 'bg-[#E3F7F5] border border-[#7FD8CF]',
+    title: 'text-navy', muted: 'text-[#3D6560]', portal: 'text-[#00655E]',
+    rule: 'bg-[#B6E7E1]', bullet: 'bg-turquoise text-navy', feature: 'text-[#22453F]',
+    cta: 'bg-navy text-white hover:bg-navy-hover',
+  },
+  plain: {
+    card: 'bg-white border border-[#E6E9EE]',
+    title: 'text-navy', muted: 'text-[#8A93A0]', portal: 'text-[#00857C]',
+    rule: 'bg-[#EEF1F4]', bullet: 'bg-[#E3F7F5] text-[#00857C]', feature: 'text-[#3D4655]',
+    cta: 'bg-white text-navy border-[1.5px] border-[#E6E9EE] hover:border-navy',
+  },
+};
 
 /**
  * Les cartes de tarifs sont dérivées de [plans.ts](../constants/plans.ts), la
@@ -45,6 +82,7 @@ const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
   features: p.features,
   cta: 'Commencez gratuitement !',
   highlighted: p.highlighted,
+  tone: p.highlighted ? 'navy' : p.standalone ? 'accent' : 'plain',
 }));
 
 /** L'offre mise en avant : celle que visent tous les boutons « Commencez gratuitement ». */
@@ -698,8 +736,8 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 Un prix simple, qui grandit avec votre équipe
               </h1>
               <p className="mt-[18px] text-[16.5px] text-[#5B6472] leading-[1.6]">
-                Les packs donnent accès à l'intégralité des vues — tâches, temps, coûts, facturation et trésorerie.
-                L'offre Facturation, elle, n'ouvre que la facturation : c'est un outil de facturation, pas le cabinet complet.
+                Les trois packs donnent accès à l'intégralité des vues — tâches, temps, coûts, facturation et trésorerie.
+                L'offre Facturation est un autre produit : la facturation et vos clients, pour un seul utilisateur.
               </p>
             </div>
           </section>
@@ -707,60 +745,53 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           {/* PRICING CARDS */}
           <section className="pt-6 px-6 sm:px-10 pb-[100px] bg-[#F2F4F7]">
             <div className="max-w-[1240px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
-              {PLANS.map(plan => (
+              {PLANS.map(plan => {
+                const tone = TONES[plan.tone];
+                return (
                 <div
                   key={plan.name}
-                  className={`relative rounded-[20px] px-[30px] py-9 text-left flex flex-col ${
-                    plan.highlighted
-                      ? 'bg-navy shadow-[0_30px_60px_-20px_rgba(13,27,42,0.4)]'
-                      : 'bg-white border border-[#E6E9EE]'
-                  }`}
+                  className={`relative rounded-[20px] px-[30px] py-9 text-left flex flex-col ${tone.card}`}
                 >
                   {plan.highlighted && (
                     <span className="absolute -top-[13px] left-1/2 -translate-x-1/2 bg-turquoise text-navy text-[11px] font-extrabold px-[14px] py-[5px] rounded-full tracking-[0.03em] whitespace-nowrap">
                       Le plus populaire
                     </span>
                   )}
-                  <h3 className={`text-[15px] font-bold ${plan.highlighted ? 'text-white' : 'text-navy'}`}>{plan.name}</h3>
-                  <p className={`text-[13.5px] mt-1.5 ${plan.highlighted ? 'text-white/55' : 'text-[#8A93A0]'}`}>{plan.tagline}</p>
+                  <h3 className={`text-[15px] font-bold ${tone.title}`}>{plan.name}</h3>
+                  <p className={`text-[13.5px] mt-1.5 ${tone.muted}`}>{plan.tagline}</p>
 
                   <div className="mt-6 flex items-baseline gap-1.5">
-                    <span className={`text-[40px] font-extrabold ${plan.highlighted ? 'text-white' : 'text-navy'}`}>{plan.price}</span>
-                    {plan.period && <span className={`text-[14px] ${plan.highlighted ? 'text-white/55' : 'text-[#8A93A0]'}`}>{plan.period}</span>}
+                    <span className={`text-[40px] font-extrabold ${tone.title}`}>{plan.price}</span>
+                    {plan.period && <span className={`text-[14px] ${tone.muted}`}>{plan.period}</span>}
                   </div>
-                  <p className={`text-[13px] mt-1 ${plan.highlighted ? 'text-white/55' : 'text-[#8A93A0]'}`}>{plan.seats}</p>
+                  <p className={`text-[13px] mt-1 ${tone.muted}`}>{plan.seats}</p>
                   {/* Les comptes du portail client se comptent dans un panier
                       séparé des sièges de l'équipe — la carte le dit, faute de
                       quoi « 5 utilisateurs + 50 portail » se lit comme 55. */}
                   {plan.portalSeats && (
-                    <p className={`text-[13px] ${plan.highlighted ? 'text-turquoise' : 'text-[#00857C]'}`}>+ {plan.portalSeats}</p>
+                    <p className={`text-[13px] ${tone.portal}`}>+ {plan.portalSeats}</p>
                   )}
 
-                  <div className={`h-px my-6 ${plan.highlighted ? 'bg-white/[0.12]' : 'bg-[#EEF1F4]'}`} />
+                  <div className={`h-px my-6 ${tone.rule}`} />
 
                   <div className="flex flex-col gap-3 flex-1">
                     {plan.features.map(f => (
-                      <div key={f} className="flex items-center gap-2.5">
-                        <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-extrabold shrink-0 ${
-                          plan.highlighted ? 'bg-turquoise text-navy' : 'bg-[#E3F7F5] text-[#00857C]'
-                        }`}>✓</span>
-                        <span className={`text-[13.5px] leading-snug ${plan.highlighted ? 'text-white/85' : 'text-[#3D4655]'}`}>{f}</span>
+                      <div key={f} className="flex items-start gap-2.5">
+                        <span className={`w-4 h-4 mt-0.5 rounded-full flex items-center justify-center text-[9px] font-extrabold shrink-0 ${tone.bullet}`}>✓</span>
+                        <span className={`text-[13.5px] leading-snug ${tone.feature}`}>{f}</span>
                       </div>
                     ))}
                   </div>
 
                   <button
                     onClick={() => setModalPlan(plan.name)}
-                    className={`mt-7 w-full py-[14px] px-6 rounded-xl text-[14.5px] font-bold transition-colors ${
-                      plan.highlighted
-                        ? 'bg-turquoise text-navy hover:bg-white'
-                        : 'bg-white text-navy border-[1.5px] border-[#E6E9EE] hover:border-navy'
-                    }`}
+                    className={`mt-7 w-full py-[14px] px-6 rounded-xl text-[14.5px] font-bold transition-colors ${tone.cta}`}
                   >
                     {plan.cta}
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             <p className="mt-9 text-center text-[13.5px] text-[#8A93A0]">

@@ -354,16 +354,29 @@ const PLAN_MODULE_ROUTES: [string, PlanModule][] = [
  */
 const PLAN_NEUTRAL_PREFIXES = [
   '/api/me', '/api/logout', '/api/notifications', '/api/push',
-  '/api/presence', '/api/auth/', '/api/platform',
+  '/api/presence', '/api/auth', '/api/platform',
 ];
+
+/**
+ * Un préfixe ne vaut que sur une **frontière de segment**.
+ *
+ * `startsWith()` seul faisait de `/api/me` le préfixe de `/api/messages` :
+ * la messagerie entière passait pour une route neutre et restait ouverte à
+ * une offre qui ne la vend pas — mesuré, `/api/messages/contacts` répondait
+ * 200 au pack Facturation. Un chemin n'appartient à un préfixe que s'il lui
+ * est égal ou s'il continue par `/` (ou `?`, une requête montée à la main).
+ */
+const pathUnderPrefix = (path: string, prefix: string) => {
+  const p = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  return path === p || path.startsWith(p + '/') || path.startsWith(p + '?');
+};
 
 /** Le module d'un chemin : le préfixe le plus long l'emporte (`/api/cash-journal` avant `/api/cash`). */
 const moduleForPath = (path: string): PlanModule | null => {
   let best: PlanModule | null = null;
   let bestLength = 0;
   for (const [prefix, module] of PLAN_MODULE_ROUTES) {
-    if ((path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix + '?'))
-        && prefix.length > bestLength) {
+    if (pathUnderPrefix(path, prefix) && prefix.length > bestLength) {
       best = module;
       bestLength = prefix.length;
     }
@@ -792,7 +805,7 @@ async function startServer() {
       // Facturation) voit ses routes refusées ici, une fois pour toutes,
       // plutôt que vue par vue. Une offre généraliste n'a pas de liste de
       // modules et ne traverse donc rien de tout ceci.
-      if (planModules(company?.plan) && !PLAN_NEUTRAL_PREFIXES.some(p => req.path === p || req.path.startsWith(p))) {
+      if (planModules(company?.plan) && !PLAN_NEUTRAL_PREFIXES.some(p => pathUnderPrefix(req.path, p))) {
         const module = moduleForPath(req.path);
         if (!module || !planAllowsModule(company?.plan, module)) {
           res.status(403).json({ error: "Cette fonctionnalité n'est pas incluse dans votre offre." });

@@ -45,6 +45,13 @@ export interface PlanMeta {
   trialDocumentQuota?: number;
   /** Mise en avant sur la page de tarifs. */
   highlighted?: boolean;
+  /**
+   * L'offre n'est pas un barreau de l'échelle des sièges — c'est un autre
+   * produit. La page de tarifs la place en tête et lui donne sa propre
+   * couleur : quatre cartes identiques feraient lire « 30 DT » comme le pack
+   * le moins cher, alors qu'elle ne vend pas la même chose.
+   */
+  standalone?: boolean;
   /** Offre retirée du catalogue : encore portée par des entreprises, plus vendue. */
   legacy?: boolean;
 }
@@ -85,12 +92,40 @@ export const CORE_FEATURES: string[] = [
 export const FACTURATION_FEATURES: string[] = [
   'Essai gratuit : 10 documents par mois (les brouillons ne comptent pas)',
   'Abonné : documents illimités — factures, devis, bons de livraison…',
+  'Fichier clients : raison sociale, matricule fiscal, adresse',
   'Multidevises',
   'Export des données',
   'Signature intégrée',
 ];
 
 export const PLANS: PlanMeta[] = [
+  /**
+   * L'offre facturation seule : un produit de facturation, pas le cabinet
+   * complet. Elle ouvre Cash et le fichier clients qu'il faut bien pouvoir
+   * facturer — pointage, RH, missions, ressources métier et tableau de bord
+   * restent fermés, entrée de menu comprise. **Équipe non plus** : l'offre
+   * est à un siège, il n'y a personne à gérer. Le mot de passe se change
+   * alors par « mot de passe oublié », qui reste ouvert à toute offre.
+   *
+   * Elle est **en tête** de la liste et `standalone`, donc dessinée à part
+   * sur la page de tarifs : elle ne se compare pas aux trois packs, qui sont
+   * le même produit à trois tailles d'équipe.
+   *
+   * Son essai gratuit est plafonné à dix documents émis par mois : c'est le
+   * plafond, et non une durée, que l'abonnement lève.
+   */
+  {
+    id: 'FACTURATION',
+    label: 'Facturation',
+    tagline: "L'outil de facturation seul",
+    priceDT: 30,
+    seatLimit: 1,
+    portalSeatLimit: 0,
+    modules: ['Cash', 'Clients'],
+    trialDocumentQuota: 10,
+    features: FACTURATION_FEATURES,
+    standalone: true,
+  },
   {
     id: 'PACK_5',
     label: 'Pack 5',
@@ -118,28 +153,6 @@ export const PLANS: PlanMeta[] = [
     seatLimit: 15,
     portalSeatLimit: 150,
     features: CORE_FEATURES,
-  },
-  /**
-   * L'offre facturation seule : un produit de facturation, pas le cabinet
-   * complet. Elle n'ouvre que Cash — pointage, RH, missions, ressources,
-   * tableau de bord *et fichier clients* restent fermés, entrée de menu
-   * comprise. Il n'y a donc pas de fiche client où puiser : raison sociale,
-   * matricule fiscal et adresse se saisissent à la main sur le document
-   * (voir InvoiceEditor).
-   *
-   * Son essai gratuit est plafonné à dix documents émis par mois : c'est le
-   * plafond, et non une durée, que l'abonnement lève.
-   */
-  {
-    id: 'FACTURATION',
-    label: 'Facturation',
-    tagline: 'Facturez, rien de plus',
-    priceDT: 30,
-    seatLimit: 1,
-    portalSeatLimit: 0,
-    modules: ['Cash', 'Users'],
-    trialDocumentQuota: 10,
-    features: FACTURATION_FEATURES,
   },
 
   // ---- Offres retirées du catalogue ----
