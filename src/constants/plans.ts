@@ -93,6 +93,7 @@ export const FACTURATION_FEATURES: string[] = [
   'Essai gratuit : 10 documents par mois (les brouillons ne comptent pas)',
   'Abonné : documents illimités — factures, devis, bons de livraison…',
   'Fichier clients : raison sociale, matricule fiscal, adresse',
+  'Suivi trésorerie : règlements clients et brouillard de caisse',
   'Multidevises',
   'Export des données',
   'Signature intégrée',
