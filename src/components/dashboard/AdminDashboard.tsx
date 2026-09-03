@@ -3,18 +3,34 @@ import { useAuth } from '../../context/AuthContext';
 import { Loader2, Filter, Calendar } from 'lucide-react';
 import { KPICards } from './KPICards';
 import { EmployeeTable } from './EmployeeTable';
-import { DashboardCharts } from './DashboardCharts';
 import { EmployeeDetailsModal } from './EmployeeDetailsModal';
 import { EmployeeTasksModal } from './EmployeeTasksModal';
 import { ClientBreakdown } from './ClientBreakdown';
 import { MultiSelectAutocomplete } from './MultiSelectAutocomplete';
-import { ResourcesProgressCard } from './ResourcesProgressCard';
 import { ExecutiveBar } from './ExecutiveBar';
 import { AlertsPanel } from './AlertsPanel';
 import { ClientProfitability } from './ClientProfitability';
 import { ConcentrationCard } from './ConcentrationCard';
 import { TaskIntelligence } from './TaskIntelligence';
 
+/**
+ * Un cran au-dessus des en-têtes de carte (« RENTABILITÉ DU PORTEFEUILLE »,
+ * « MISSIONS & TYPES DE TÂCHE »…) : ceux-là nomment une carte, ceci nomme un
+ * groupe de plusieurs cartes qui répondent ensemble à une seule question. Le
+ * titre est la question elle-même — pas un intitulé de module — pour que
+ * l'écran se lise comme une suite de réponses plutôt que comme une liste de
+ * fonctionnalités.
+ */
+const SectionHeading: React.FC<{ eyebrow: string; title: string; subtitle: string }> = ({ eyebrow, title, subtitle }) => (
+  <div className="pt-2 first:pt-0">
+    <div className="flex items-center gap-2.5">
+      <span className="text-[10.5px] font-extrabold text-turquoise uppercase tracking-[0.08em] shrink-0">{eyebrow}</span>
+      <span className="flex-1 h-px bg-gray-200" aria-hidden />
+    </div>
+    <h2 className="mt-1 text-[16px] font-extrabold text-navy tracking-tight">{title}</h2>
+    <p className="text-[12px] text-gray-500 mt-0.5">{subtitle}</p>
+  </div>
+);
 
 export const AdminDashboard: React.FC = () => {
   const { token, hasPermission } = useAuth();
@@ -255,18 +271,18 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Ressources métier — independent of the Pointage-driven stats below:
-            no date range, no collaborateur/client filter, just current state. */}
-        <ResourcesProgressCard selectedClients={selectedClients} />
-
-        {/* ① Le bandeau exécutif — lecture en dix secondes.
-            ② Les alertes juste derrière : enterrées sous trois blocs de
-               graphiques, elles ne seraient plus des alertes mais une archive.
-            ③ La rentabilité avant la performance de l'équipe : l'activité est
-               un moyen, la rentabilité est la fin. « 480 heures produites »
-               rassure ; « 3 clients en marge négative » fait agir. */}
+        {/* Quatre groupes, lus dans cet ordre comme une histoire : comment va
+            l'entreprise, où est l'argent, où part le temps, qui fait quoi.
+            Chaque groupe répond à sa propre question et ne se mélange pas
+            avec le suivant — c'est ce qui rend le tout lisible d'un coup
+            d'œil plutôt qu'en balayant une pile de cartes indifférenciées. */}
         {exec && (
           <>
+            <SectionHeading
+              eyebrow="01 · Vue d'ensemble"
+              title="Comment va l'entreprise ?"
+              subtitle="Le bandeau exécutif, puis ce qui demande une décision — la synthèse en dix secondes."
+            />
             <ExecutiveBar
               data={exec.executive}
               financialsFiltered={exec.financialsFiltered}
@@ -294,22 +310,42 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             {exec.clients && (
-              <div id="dashboard-rentabilite" className="scroll-mt-4">
-                <ClientProfitability
-                  clients={exec.clients}
-                  onOpenClient={(key, name) => focusOnClient(key, name)}
+              <>
+                <SectionHeading
+                  eyebrow="02 · Rentabilité"
+                  title="Où est l'argent ?"
+                  subtitle="Le rendement de chaque client, et le poids des plus gros dans le portefeuille."
                 />
-              </div>
+                <div id="dashboard-rentabilite" className="scroll-mt-4">
+                  <ClientProfitability
+                    clients={exec.clients}
+                    onOpenClient={(key, name) => focusOnClient(key, name)}
+                  />
+                </div>
+                {exec.concentration && <ConcentrationCard data={exec.concentration} />}
+              </>
             )}
 
-            {exec.concentration && <ConcentrationCard data={exec.concentration} />}
-
-            {exec.missions && exec.missions.length > 0 && <TaskIntelligence missions={exec.missions} />}
+            {exec.missions && exec.missions.length > 0 && (
+              <>
+                <SectionHeading
+                  eyebrow="03 · Opérations"
+                  title="Où part le temps ?"
+                  subtitle="Répartition du temps consommé par mission, puis par type de tâche."
+                />
+                <TaskIntelligence missions={exec.missions} />
+              </>
+            )}
           </>
         )}
 
         {stats && (
           <>
+            <SectionHeading
+              eyebrow="04 · Clients & équipe"
+              title="Qui fait quoi ?"
+              subtitle="L'activité détaillée client par client, puis la charge et la performance de chaque collaborateur."
+            />
             <KPICards stats={stats.globalStats} />
             <div id="dashboard-activite-client" className="scroll-mt-4" />
             <ClientBreakdown
@@ -322,7 +358,6 @@ export const AdminDashboard: React.FC = () => {
                 filterClientIds: selectedClients.map(c => c.id),
               }}
             />
-            <DashboardCharts employees={stats.employeeStats} />
             <EmployeeTable
               employees={employeesWithCapacity}
               onRowClick={setSelectedEmployee}

@@ -1,9 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import {
   Briefcase, ChevronDown, ChevronRight, Clock, Users, CheckCircle2, Play, Pause, AlertTriangle, Search,
+  ArrowUpDown, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { formatCostTND } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
+
+type SortField =
+  | 'name' | 'taskCount' | 'contributors' | 'durationSeconds' | 'totalCost'
+  | 'soldeAnterieur' | 'montantFacture' | 'encaissements' | 'resteAPayer';
+type SortDirection = 'asc' | 'desc';
+
+const fieldRaw = (c: any, field: SortField): number | string => {
+  switch (field) {
+    case 'name': return (c.name || '').toLowerCase();
+    case 'contributors': return c.contributors?.length ?? 0;
+    default: return c[field] ?? 0;
+  }
+};
 
 interface ClientBreakdownProps {
   clients: any[];
@@ -80,6 +94,26 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
   };
 
   const [search, setSearch] = useState('');
+  // Durée décroissante par défaut : le client le plus actif de la période
+  // en premier, même repli que la barre de grandeur ci-dessous.
+  const [sortField, setSortField] = useState<SortField>('durationSeconds');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'name' ? 'asc' : 'desc');
+    }
+  };
+
+  const renderSortIcon = (field: SortField) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 group-hover/th:text-gray-500 inline ml-1 transition-colors" />;
+    return sortDirection === 'asc'
+      ? <ArrowUp className="w-3 h-3 text-navy inline ml-1" />
+      : <ArrowDown className="w-3 h-3 text-navy inline ml-1" />;
+  };
 
   // Hundreds of clients would mean hundreds of DOM rows; show the costliest
   // first and reveal more on demand.
@@ -114,7 +148,15 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
   const matching = term
     ? clients.filter(c => c.name.toLowerCase().includes(term))
     : clients;
-  const shown = matching.slice(0, visible);
+  const sorted = [...matching].sort((a, b) => {
+    const av = fieldRaw(a, sortField);
+    const bv = fieldRaw(b, sortField);
+    if (typeof av === 'string') {
+      return sortDirection === 'asc' ? av.localeCompare(bv as string) : (bv as string).localeCompare(av);
+    }
+    return sortDirection === 'asc' ? av - (bv as number) : (bv as number) - av;
+  });
+  const shown = sorted.slice(0, visible);
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -146,15 +188,43 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
         <table className="w-full text-left whitespace-nowrap">
           <thead>
             <tr className="bg-[#F9FAFB] border-b border-gray-200 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-3">Client</th>
-              <th className="px-3 py-3 text-center">Tâches</th>
-              <th className="px-3 py-3 text-center">Intervenants</th>
-              <th className="px-4 py-3">Durée</th>
-              {isAdmin && <th className="px-4 py-3 text-right bg-emerald-50/40">Coût employeur</th>}
-              {isAdmin && <th className="px-4 py-3 text-right">Solde antérieur</th>}
-              {isAdmin && <th className="px-4 py-3 text-right">Montant de facture</th>}
-              {isAdmin && <th className="px-4 py-3 text-right">Encaissements</th>}
-              {isAdmin && <th className="px-4 py-3 text-right">Reste à payer</th>}
+              <th onClick={() => handleSort('name')} className="px-4 py-3 cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                Client {renderSortIcon('name')}
+              </th>
+              <th onClick={() => handleSort('taskCount')} className="px-3 py-3 text-center cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                Tâches {renderSortIcon('taskCount')}
+              </th>
+              <th onClick={() => handleSort('contributors')} className="px-3 py-3 text-center cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                Intervenants {renderSortIcon('contributors')}
+              </th>
+              <th onClick={() => handleSort('durationSeconds')} className="px-4 py-3 cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                Durée {renderSortIcon('durationSeconds')}
+              </th>
+              {isAdmin && (
+                <th onClick={() => handleSort('totalCost')} className="px-4 py-3 text-right bg-emerald-50/40 cursor-pointer select-none group/th hover:bg-emerald-100/60 transition-colors">
+                  Coût employeur {renderSortIcon('totalCost')}
+                </th>
+              )}
+              {isAdmin && (
+                <th onClick={() => handleSort('soldeAnterieur')} className="px-4 py-3 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Solde antérieur {renderSortIcon('soldeAnterieur')}
+                </th>
+              )}
+              {isAdmin && (
+                <th onClick={() => handleSort('montantFacture')} className="px-4 py-3 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Montant de facture {renderSortIcon('montantFacture')}
+                </th>
+              )}
+              {isAdmin && (
+                <th onClick={() => handleSort('encaissements')} className="px-4 py-3 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Encaissements {renderSortIcon('encaissements')}
+                </th>
+              )}
+              {isAdmin && (
+                <th onClick={() => handleSort('resteAPayer')} className="px-4 py-3 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Reste à payer {renderSortIcon('resteAPayer')}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="text-[12.5px] divide-y divide-gray-100">

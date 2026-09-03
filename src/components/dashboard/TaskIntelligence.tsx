@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ListTree, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { ListTree, ChevronDown, ChevronRight, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface TaskTypeRow {
   name: string;
@@ -36,6 +36,16 @@ const hoursLabel = (h: number) => {
 
 const money = (n: number) => (n !== 0 && Math.abs(n) < 0.5 ? nf(n, 3) : nf(n));
 
+type SortField = 'pole' | 'heures' | 'cout' | 'taches' | 'dureeMoyenneH' | 'collaborateurs' | 'clients';
+type SortDirection = 'asc' | 'desc';
+
+const fieldRaw = (r: MissionRow, field: SortField): number | string | undefined => {
+  switch (field) {
+    case 'pole': return r.pole.toLowerCase();
+    default: return r[field];
+  }
+};
+
 /**
  * Où part le temps, mission par mission puis type de tâche par type de
  * tâche — heures et coût employeur uniquement, jamais de marge ni de
@@ -47,24 +57,44 @@ const money = (n: number) => (n !== 0 && Math.abs(n) < 0.5 ? nf(n, 3) : nf(n));
  */
 export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<'heures' | 'cout' | 'taches'>('heures');
+  const [sortField, setSortField] = useState<SortField>('heures');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [expandedMission, setExpandedMission] = useState<string | null>(null);
   const [tableExpanded, setTableExpanded] = useState(true);
 
   const showMoney = (missions || []).some(m => m.cout !== undefined);
 
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'pole' ? 'asc' : 'desc');
+    }
+  };
+
+  const renderSortIcon = (field: SortField) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 group-hover/th:text-gray-500 inline ml-1 transition-colors" />;
+    return sortDirection === 'asc'
+      ? <ArrowUp className="w-3 h-3 text-navy inline ml-1" />
+      : <ArrowDown className="w-3 h-3 text-navy inline ml-1" />;
+  };
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let out = (missions || []).filter(m => !q || m.pole.toLowerCase().includes(q));
-    out = [...out].sort((a, b) => {
-      switch (sort) {
-        case 'cout': return (b.cout ?? 0) - (a.cout ?? 0);
-        case 'taches': return b.taches - a.taches;
-        default: return b.heures - a.heures;
+    const out = (missions || []).filter(m => !q || m.pole.toLowerCase().includes(q));
+    return [...out].sort((a, b) => {
+      const av = fieldRaw(a, sortField);
+      const bv = fieldRaw(b, sortField);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') {
+        return sortDirection === 'asc' ? av.localeCompare(bv as string) : (bv as string).localeCompare(av);
       }
+      return sortDirection === 'asc' ? av - (bv as number) : (bv as number) - av;
     });
-    return out;
-  }, [missions, query, sort]);
+  }, [missions, query, sortField, sortDirection]);
 
   const totals = useMemo(() => rows.reduce(
     (a, r) => ({
@@ -105,15 +135,6 @@ export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
               className="pl-8 pr-3 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full lg:w-48"
             />
           </div>
-          <select
-            value={sort}
-            onChange={e => setSort(e.target.value as any)}
-            className="px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none shrink-0"
-          >
-            <option value="heures">Heures décroissantes</option>
-            {showMoney && <option value="cout">Coût décroissant</option>}
-            <option value="taches">Tâches décroissantes</option>
-          </select>
         </div>
       </div>
 
@@ -131,13 +152,29 @@ export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
           <table className="w-full text-left border-collapse min-w-[760px]">
             <thead>
               <tr className="bg-[#F9FAFB] border-y border-gray-200 text-[10.5px] font-semibold text-gray-500 uppercase tracking-wider">
-                <th className="px-4 py-2.5">Mission</th>
-                <th className="px-3 py-2.5 text-right">Heures</th>
-                {showMoney && <th className="px-3 py-2.5 text-right">Coût</th>}
-                <th className="px-3 py-2.5 text-right">Tâches</th>
-                <th className="px-3 py-2.5 text-right">Durée moy.</th>
-                <th className="px-3 py-2.5 text-right">Collab.</th>
-                <th className="px-3 py-2.5 text-right">Clients</th>
+                <th onClick={() => handleSort('pole')} className="px-4 py-2.5 cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Mission {renderSortIcon('pole')}
+                </th>
+                <th onClick={() => handleSort('heures')} className="px-3 py-2.5 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Heures {renderSortIcon('heures')}
+                </th>
+                {showMoney && (
+                  <th onClick={() => handleSort('cout')} className="px-3 py-2.5 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                    Coût {renderSortIcon('cout')}
+                  </th>
+                )}
+                <th onClick={() => handleSort('taches')} className="px-3 py-2.5 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Tâches {renderSortIcon('taches')}
+                </th>
+                <th onClick={() => handleSort('dureeMoyenneH')} className="px-3 py-2.5 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Durée moy. {renderSortIcon('dureeMoyenneH')}
+                </th>
+                <th onClick={() => handleSort('collaborateurs')} className="px-3 py-2.5 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Collab. {renderSortIcon('collaborateurs')}
+                </th>
+                <th onClick={() => handleSort('clients')} className="px-3 py-2.5 text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                  Clients {renderSortIcon('clients')}
+                </th>
               </tr>
             </thead>
             <tbody className="text-[12px] divide-y divide-gray-50">
