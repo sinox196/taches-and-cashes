@@ -2518,7 +2518,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     // ---- Grand-livre client ------------------------------------------------
     // Mêmes chiffres que la page Clients, calculés de la même façon, pour que
     // les deux écrans ne puissent pas se contredire. C'est un stock, pas une
-    // grandeur de période.
+    // grandeur de période : le filtre de dates ne s'y applique jamais. Le
+    // filtre client, lui, s'applique bien — comme sur le reste de la route —
+    // en restreignant à quels clients le stock est sommé, sans changer ce
+    // que vaut le stock de chacun.
     const journalByClient = journalEncaissementsByClient(allJournal || []);
     const netAllTime = new Map<string, number>();
     for (const inv of (allInvoices || [])) {
@@ -2529,6 +2532,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     let resteAEncaisser = 0;
     const resteByClientId = new Map<string, number>();
     for (const c of (allClients || [])) {
+      if (filterClientIds.length > 0 && !filterClientIds.includes(Number(c.id))) continue;
       const facture = round3((netAllTime.get(String(c.id)) || 0) + (netAllTime.get(`name:${c.name}`) || 0));
       const enc = round3(sumEncaissements(c) + sumAmounts(journalFor(journalByClient, c)));
       const reste = round3(num(Number(c.soldeAnterieur), 0) - enc + facture);

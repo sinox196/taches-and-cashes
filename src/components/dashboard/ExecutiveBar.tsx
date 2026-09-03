@@ -121,10 +121,13 @@ export const ExecutiveBar: React.FC<ExecutiveBarProps> = ({ data, financialsFilt
             <Card
               label="Reste à encaisser"
               value={tnd(e.resteAEncaisser)} unit="TND"
-              foot={e.creancesEchues > 0
-                ? <span className="text-late-fg font-medium">dont {tnd(e.creancesEchues)} échus</span>
-                : <span>rien d'échu</span>}
-              title="Créances clients ouvertes, tous exercices. Le montant échu est un majorant : aucun règlement ne porte de lien vers une facture précise."
+              foot={<>
+                <span className="text-gray-400">toutes périodes ·</span>
+                {e.creancesEchues > 0
+                  ? <span className="text-late-fg font-medium">dont {tnd(e.creancesEchues)} échus</span>
+                  : <span>rien d'échu</span>}
+              </>}
+              title="Créances clients ouvertes, tous exercices — ne varie pas avec le filtre de période, seulement avec le filtre client. Le montant échu est un majorant : aucun règlement ne porte de lien vers une facture précise."
             />
           </>
         ) : (
