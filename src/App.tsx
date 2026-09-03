@@ -73,7 +73,9 @@ export default function App() {
       return fromPush;
     }
     const saved = localStorage.getItem('active_nav');
-    return saved && NAV_IDS.includes(saved) ? saved : 'Time Tracking';
+    // Équipe en premier — pas Pointage — pour qu'une première connexion
+    // arrive sur l'effectif plutôt que sur un chrono à l'arrêt.
+    return saved && NAV_IDS.includes(saved) ? saved : 'Users';
   });
 
   useEffect(() => {
@@ -83,31 +85,47 @@ export default function App() {
   /**
    * La section réellement affichée.
    *
-   * Une offre restreinte peut fermer celle qui est mémorisée — et c'est le
-   * cas par défaut : le repli du sélecteur ci-dessus est « Time Tracking »,
-   * que le pack Facturation ne vend pas. On retombe donc sur la première
-   * section que l'offre ouvre, plutôt que sur « section en cours de
+   * Une offre restreinte peut fermer celle qui est mémorisée, et « Équipe »
+   * — le repli par défaut ci-dessus — ferme en plus le sien : un collaborateur
+   * sans `MANAGE_USERS` ne peut pas plus la voir qu'un pack Facturation ne
+   * vend Pointage. `canShow` traite les deux refus pareil, pour retomber sur
+   * la même chaîne de secours plutôt que sur « section en cours de
    * développement ». `Plateforme` échappe au filtre : elle appartient à
-   * l'administrateur de la plateforme, pas à l'abonnement de l'entreprise.
+   * l'administrateur de la plateforme, pas à l'abonnement de l'entreprise ni
+   * au rôle de la personne.
    */
+  const canShowNav = (id: string) =>
+    id === 'Plateforme' ||
+    (planAllowsModule(user?.company?.plan, id as PlanModule) && (id !== 'Users' || hasPermission('MANAGE_USERS')));
+
   const activeNav = (() => {
-    if (activeSidebarItem === 'Plateforme' || planAllowsModule(user?.company?.plan, activeSidebarItem as PlanModule)) {
-      return activeSidebarItem;
-    }
-    // L'ordre de l'offre d'abord : le pack Facturation déclare `Cash` en
-    // tête, donc il ouvre sur Cash — pas sur la première entrée de NAV_IDS
-    // qui se trouve être autorisée, qui n'a aucune raison d'être la bonne.
-    return planModules(user?.company?.plan)?.[0]
-      || NAV_IDS.find(id => planAllowsModule(user?.company?.plan, id as PlanModule))
+    if (canShowNav(activeSidebarItem)) return activeSidebarItem;
+    // L'ordre de l'offre d'abord : le pack Facturation déclare `Clients` en
+    // tête, donc il ouvre sur Clients — pas sur la première entrée de
+    // NAV_IDS qui se trouve être autorisée, qui n'a aucune raison d'être la
+    // bonne.
+    return planModules(user?.company?.plan)?.find(canShowNav)
+      || NAV_IDS.find(canShowNav)
       || activeSidebarItem;
   })();
 
   // Et on l'écrit dans l'état, pour que `localStorage` cesse de porter une
   // section morte et que les effets calés sur la section active (le flux SSE
   // du pointage) voient la même chose que l'écran.
+  //
+  // Attend un `user` réel. Les hooks tournent même quand le rendu retombe
+  // sur l'écran public (le même piège que documente le portail client plus
+  // bas) : sans ce garde, un visiteur non connecté — `hasPermission` rend
+  // toujours `false` sans utilisateur — faisait fermer « Users » par
+  // `canShowNav` et cet effet réécrivait `activeSidebarItem` sur « Dashboard »
+  // *pendant qu'il remplissait le formulaire d'inscription*, avant même de se
+  // connecter. La correction se figeait alors avant que la vraie permission
+  // ne soit connue, et un tout nouvel administrateur Freelancer atterrissait
+  // sur le tableau de bord au lieu d'Équipe.
   useEffect(() => {
+    if (!user) return;
     if (activeNav !== activeSidebarItem) setActiveSidebarItem(activeNav);
-  }, [activeNav, activeSidebarItem]);
+  }, [activeNav, activeSidebarItem, user]);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [clientsList, setClientsList] = useState<any[]>([]);
   const [servicesList, setServicesList] = useState<any[]>([]);

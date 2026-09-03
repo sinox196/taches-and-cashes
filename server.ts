@@ -7367,11 +7367,18 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // un lien partagé reste valide indéfiniment, l'abonnement du parrain non.
       const validReferrer = referrer && !selfReferral && canRefer(referrer) ? referrer : null;
 
-      const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      // Le pack Freelancer est gratuit pour de bon, pas seulement pendant un
+      // essai : l'entreprise part directement `ACTIVE` sans `trialEndsAt`,
+      // pour qu'`expireTrialIfDue` (qui ne touche que `status === 'TRIAL'`)
+      // n'ait jamais prise dessus et que `documentQuotaFor()` rende `null`
+      // (aucun plafond) comme pour n'importe quel abonnement payé — c'est
+      // précisément ce que « gratuit, sans période d'essai » veut dire.
+      const isFreePlan = plan === 'FREELANCER';
+      const trialEndsAt = isFreePlan ? null : new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
       const company = await db.createCompany({
         id: genId('company'),
         name: companyName,
-        status: 'TRIAL',
+        status: isFreePlan ? 'ACTIVE' : 'TRIAL',
         plan,
         seatLimit: PLAN_SEAT_LIMITS[plan] || 1,
         portalSeatLimit: PLAN_PORTAL_SEAT_LIMITS[plan] || 0,
@@ -7426,14 +7433,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // creation; the platform admin panel remains the source of truth.
       sendMail({
         to: 'contact@taches-and-cash.com',
-        subject: `Nouvel essai gratuit — ${companyName}`,
+        subject: isFreePlan ? `Nouvelle inscription Freelancer (gratuit) — ${companyName}` : `Nouvel essai gratuit — ${companyName}`,
         html: `
           <p><strong>Entreprise :</strong> ${escapeHtml(companyName)}</p>
           <p><strong>Contact :</strong> ${escapeHtml(contactName)}</p>
           <p><strong>Email :</strong> ${escapeHtml(contactEmail)}</p>
           <p><strong>Téléphone :</strong> ${escapeHtml(phone)}</p>
           <p><strong>Offre visée :</strong> ${escapeHtml(plan)}</p>
-          <p><strong>Fin de la période d'essai :</strong> ${trialEndsAt.slice(0, 10)}</p>
+          <p><strong>Fin de la période d'essai :</strong> ${trialEndsAt ? trialEndsAt.slice(0, 10) : 'Aucune — offre Freelancer gratuite'}</p>
         `,
       }).catch(() => {});
 

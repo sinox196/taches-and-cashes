@@ -122,10 +122,34 @@ export const PLANS: PlanMeta[] = [
     priceDT: 30,
     seatLimit: 1,
     portalSeatLimit: 0,
-    modules: ['Cash', 'Clients'],
+    // Clients en tête, pas Cash : App.tsx retombe sur le premier module de
+    // cette liste quand la section mémorisée est fermée par l'offre (le cas
+    // par défaut d'une première connexion), et c'est le fichier clients
+    // qu'on veut voir en arrivant — pas un formulaire de facture vide sans
+    // dossier encore choisi.
+    modules: ['Clients', 'Cash'],
     trialDocumentQuota: 10,
     features: FACTURATION_FEATURES,
     standalone: true,
+  },
+  /**
+   * Un seul siège, ADMIN, gratuit **pour de bon** — pas un essai qui expire :
+   * `POST /api/signup` la reconnaît et pose l'entreprise `ACTIVE` d'emblée,
+   * sans `trialEndsAt`, pour qu'`expireTrialIfDue` n'ait jamais prise dessus
+   * et que `documentQuotaFor()` rende `null` (aucun plafond de documents)
+   * comme pour n'importe quel abonnement payé. Elle ouvre les mêmes vues que
+   * les packs — `modules` absent — donc un indépendant seul y trouve tout le
+   * cabinet, juste sans personne à ajouter (le siège unique fait déjà ce que
+   * `seatLimitError()` ferait à la main).
+   */
+  {
+    id: 'FREELANCER',
+    label: 'Freelancer',
+    tagline: 'Pour un indépendant, seul',
+    priceDT: 0,
+    seatLimit: 1,
+    portalSeatLimit: 0,
+    features: CORE_FEATURES,
   },
   {
     id: 'PACK_5',

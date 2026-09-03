@@ -72,8 +72,10 @@ const TONES: Record<Tone, {
 const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
   name: p.label,
   tagline: p.tagline,
-  price: formatDT(p.priceDT),
-  period: '/mois',
+  // « 0 DT/mois » se lit comme un prix qu'on a oublié de saisir — le pack
+  // Freelancer n'a pas de période, il n'a pas de prix du tout.
+  price: p.priceDT === 0 ? 'Gratuit' : formatDT(p.priceDT),
+  period: p.priceDT === 0 ? undefined : '/mois',
   seats: `${p.seatLimit} utilisateur${p.seatLimit > 1 ? 's' : ''}`,
   // Une offre sans portail client ne porte pas la ligne du tout : « + 0
   // comptes portail client » se lit comme une privation, alors que ce
@@ -84,9 +86,6 @@ const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
   highlighted: p.highlighted,
   tone: p.highlighted ? 'navy' : p.standalone ? 'accent' : 'plain',
 }));
-
-/** L'offre mise en avant : celle que visent tous les boutons « Commencez gratuitement ». */
-const FEATURED_PLAN = (PLANS.find(p => p.highlighted) || PLANS[0]).name;
 
 /**
  * Les douze modules de l'application, chacun dans sa carte. La liste couvre
@@ -279,7 +278,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               Se connecter
             </button>
             <button
-              onClick={() => setModalPlan(FEATURED_PLAN)}
+              onClick={goToTarifs}
               className="landing-shine px-3 sm:px-[18px] py-2.5 sm:py-[11px] rounded-[10px] text-[13px] sm:text-[14px] font-bold text-white bg-navy hover:bg-turquoise hover:-translate-y-0.5 transition-all whitespace-nowrap"
             >
               Commencez gratuitement&nbsp;!
@@ -344,7 +343,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 <Reveal delay={220}>
                   <div className="mt-8 flex gap-3.5 flex-wrap">
                     <button
-                      onClick={() => setModalPlan(FEATURED_PLAN)}
+                      onClick={goToTarifs}
                       className="landing-shine group bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] hover:-translate-y-0.5 transition-all inline-flex items-center gap-2"
                     >
                       Commencez gratuitement&nbsp;!
@@ -640,7 +639,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <CheckRow text="Coût calculé automatiquement dès l'arrêt du chronomètre" />
                 </div>
                 <button
-                  onClick={() => setModalPlan(FEATURED_PLAN)}
+                  onClick={goToTarifs}
                   className="landing-shine inline-block mt-8 bg-navy text-white px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-turquoise hover:-translate-y-0.5 transition-all"
                 >
                   Essayer le suivi du temps
@@ -663,7 +662,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <CheckRow onDark text="Chaque facture rattachée à sa mission et son flux de trésorerie" />
                 </div>
                 <button
-                  onClick={() => setModalPlan(FEATURED_PLAN)}
+                  onClick={goToTarifs}
                   className="landing-shine inline-block mt-8 bg-turquoise text-navy px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-white hover:-translate-y-0.5 transition-all"
                 >
                   Créer une facture
@@ -721,7 +720,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               </p>
             </Reveal>
             <Reveal delay={100}>
-              <ModuleExplorer onCta={() => setModalPlan(FEATURED_PLAN)} />
+              <ModuleExplorer onCta={goToTarifs} />
             </Reveal>
           </section>
 
@@ -820,13 +819,13 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <p className="mt-4 text-[15.5px] text-white/65 max-w-[480px] mx-auto">
               {view === 'home'
                 ? 'Rejoignez les équipes qui pilotent leur rentabilité avec Tâches & Cash.'
-                : "Créez votre compte en quelques minutes — l'essai est gratuit, aucune carte bancaire requise."}
+                : "Choisissez votre offre ci-dessus pour créer votre compte — l'essai est gratuit, aucune carte bancaire requise."}
             </p>
             <button
-              onClick={() => setModalPlan(FEATURED_PLAN)}
+              onClick={goToTarifs}
               className="landing-shine mt-7 inline-flex items-center gap-2 px-[30px] py-4 rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white hover:-translate-y-0.5 transition-all group"
             >
-              {view === 'home' ? 'Démarrer maintenant' : 'Créer un compte'}
+              {view === 'home' ? 'Démarrer maintenant' : 'Voir les offres'}
               <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
             </button>
           </div>

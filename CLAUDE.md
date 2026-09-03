@@ -307,6 +307,20 @@ factures comprises et sans plafond. Changer un prix, c'est éditer une ligne :
 une valeur corrigée sur la page de tarifs mais pas côté serveur produirait une
 page qui annonce un montant et un e-mail de RIB qui en demande un autre.
 
+**Le pack Freelancer est gratuit pour de bon, pas seulement à l'essai.** Un
+siège, ADMIN, `priceDT: 0`, et les mêmes vues que les trois packs (`modules`
+absent) — un indépendant y trouve tout le cabinet, juste sans personne
+d'autre à ajouter, ce que le siège unique impose déjà par `seatLimitError()`
+sans règle à part. « Gratuit, sans période d'essai » n'est pas ce que
+`POST /api/signup` fait par défaut : toute inscription part `TRIAL` avec un
+`trialEndsAt`, quelle que soit l'offre. Le Freelancer est donc reconnu à part
+(`plan === 'FREELANCER'`) et posé `ACTIVE` d'emblée, `trialEndsAt: null` —
+`expireTrialIfDue` ne touche que `status === 'TRIAL'`, donc un compte qui
+n'y entre jamais n'expire jamais, et `documentQuotaFor()` rend `null` (aucun
+plafond) exactement comme pour un abonnement payé confirmé. La page de
+tarifs affiche « Gratuit » plutôt que « 0 DT/mois » pour la même offre — un
+prix à zéro se lit comme un champ oublié, pas comme une promesse.
+
 **Les offres retirées restent dans la liste** (`legacy: true`) — `FREELANCE`,
 `EQUIPE`, `CROISSANCE`. Une entreprise inscrite sous l'ancien catalogue les
 porte encore dans sa fiche ; les effacer lui ferait perdre son libellé et sa
@@ -319,13 +333,16 @@ la réécrit pas.
 **Une offre peut n'ouvrir qu'une partie de l'application.** `PlanMeta.modules`
 porte les vues qu'elle vend, désignées par l'identifiant que porte déjà leur
 entrée de barre latérale (`Cash`, `Clients`, `HR`…) — **absent = toutes**, ce
-qui est le cas des trois packs et ce qui fait qu'ajouter une offre restreinte
-n'a touché à rien de ce qui existait. Le pack **Facturation** (30 DT, un siège,
-aucun compte portail) déclare `['Cash', 'Clients']` : Cash et le fichier
-clients qu'il faut bien pouvoir facturer, rien d'autre — **Équipe non plus**,
-l'offre étant à un siège, il n'y a personne à gérer (le mot de passe se change
-alors par « mot de passe oublié », que `PLAN_NEUTRAL_PREFIXES` laisse ouvert à
-toute offre).
+qui est le cas des trois packs (et du Freelancer) et ce qui fait qu'ajouter
+une offre restreinte n'a touché à rien de ce qui existait. Le pack
+**Facturation** (30 DT, un siège, aucun compte portail) déclare
+`['Clients', 'Cash']` — dans cet ordre : Clients en tête et non Cash, parce
+que c'est le premier module de cette liste qu'App.tsx ouvre par défaut, et
+c'est le fichier clients qu'on veut voir en arrivant, pas un formulaire de
+facture sans dossier encore choisi — le fichier clients qu'il faut bien
+pouvoir facturer, rien d'autre — **Équipe non plus**, l'offre étant à un
+siège, il n'y a personne à gérer (le mot de passe se change alors par « mot
+de passe oublié », que `PLAN_NEUTRAL_PREFIXES` laisse ouvert à toute offre).
 
 `standalone: true` la sort de l'échelle des sièges : elle est **en tête** de
 `PLANS` et la page de tarifs lui donne son propre ton (`TONES.accent`, le fond
@@ -373,9 +390,15 @@ Le périmètre se ferme à **trois endroits, et les trois sont nécessaires** :
 
 App.tsx dérive de tout ça la section réellement affichée (`activeNav`) : la
 section mémorisée peut être fermée par l'offre — et l'est par défaut, le repli
-du sélecteur étant « Time Tracking » —, auquel cas on retombe sur **la première
-vue déclarée par l'offre** (`Cash` pour le pack Facturation), pas sur la
-première entrée de `NAV_IDS` qui se trouve autorisée.
+du sélecteur étant « Équipe » —, auquel cas on retombe sur **la première vue
+déclarée par l'offre** (`Clients` pour le pack Facturation, puisque « Équipe »
+n'y figure pas — un siège unique n'a personne à gérer), pas sur la première
+entrée de `NAV_IDS` qui se trouve autorisée. `canShowNav` traite le même refus
+pour une seconde raison, indépendante de l'offre : « Équipe » ferme aussi pour
+un utilisateur sans `MANAGE_USERS`, exactement comme elle fermerait pour une
+offre qui ne la vend pas — un collaborateur en première connexion retombe donc
+sur la même chaîne de secours qu'un compte Facturation, plutôt que sur
+« section en cours de développement ».
 
 **Le plafond de documents est ce que lève l'abonnement.**
 `PlanMeta.trialDocumentQuota` (10 pour le pack Facturation) plafonne les
@@ -809,6 +832,8 @@ Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use
 **Les animations d'apparition passent par [Reveal.tsx](src/components/landing/Reveal.tsx)**, jamais par une classe CSS seule. Une animation d'entrée rate toujours de la même façon — en laissant du contenu invisible — donc trois règles y sont câblées : `prefers-reduced-motion` rend le bloc **visible immédiatement** (et non « figé à l'état de départ », c'est-à-dire à `opacity: 0`) ; sans `IntersectionObserver` l'état initial est *visible*, le défaut étant de montrer ; et l'observation s'arrête à la première apparition, sans quoi un défilement normal devient un clignotement. `CountUp` suit les mêmes règles et écrit la valeur finale telle quelle sous réglage réduit. Le décor purement décoratif (aurores du hero, ruban défilant, liseré de la chaîne de valeur) vit en `@keyframes landing*` dans [index.css](src/index.css), où un seul bloc `prefers-reduced-motion` les coupe toutes — sûr parce qu'aucune ne porte l'état visible de son élément.
 
 Deux pièges déjà rencontrés : des barres de graphique en hauteur `%` dans un conteneur `items-end` ne se résolvent contre rien (la colonne prend sa hauteur de contenu) — le graphique disparaît ; et la chaîne de valeur à cinq pastilles doit rétrécir sous `sm`, sinon les libellés se chevauchent sur un téléphone.
+
+**Tous les boutons « Commencez gratuitement » hors des cartes de tarifs mènent à la page Tarifs, jamais directement à l'inscription.** Ils appelaient `setModalPlan(FEATURED_PLAN)` — l'offre la plus mise en avant, choisie sans que le visiteur ait rien décidé — et ouvraient le formulaire de création de compte directement dessus : le hero, la bannière de fin de page, les CTA « Essayer le suivi du temps » / « Créer une facture » et celui du `ModuleExplorer` créaient tous un compte sur la même offre par défaut, sans jamais montrer les autres. Ils appellent maintenant `goToTarifs()`, la même fonction que le lien « Tarifs » de la nav — le visiteur choisit son offre sur une carte (`onClick={() => setModalPlan(plan.name)}`, seul point d'entrée qui reste vers `RequestAccessModal`) avant que le formulaire ne s'ouvre. `goToTarifs()` reste sûr à appeler depuis la page Tarifs elle-même (le bouton de la bannière de fin de page, par exemple) : il ne fait alors que remonter en haut de la page, au-dessus des cartes.
 
 **Les avis clients de [Testimonials.tsx](src/components/landing/Testimonials.tsx) sont des exemples de mise en page, pas de vrais avis.** Le tableau `TESTIMONIALS` et la note `RATING` portent l'avertissement en tête de fichier et les auteurs s'appellent « Exemple à remplacer » : publier un témoignage inventé sous le nom d'un cabinet qui ne l'a pas donné trompe le visiteur, et relève de la pratique commerciale déloyale à peu près partout. Ils se remplacent par des citations réellement recueillies, ou la section se retire.
 
