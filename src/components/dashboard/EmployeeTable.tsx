@@ -27,7 +27,8 @@ type SortField =
   | 'leavesRemaining' 
   | 'authorizations'
   | 'completionRate'
-  | 'punctuality';
+  | 'punctuality'
+  | 'occupation';
 
 type SortDirection = 'asc' | 'desc';
 
@@ -109,6 +110,10 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
           valA = a.attendance?.punctualityRate ?? -1;
           valB = b.attendance?.punctualityRate ?? -1;
           break;
+        case 'occupation':
+          valA = a.occupation ?? -1;
+          valB = b.occupation ?? -1;
+          break;
         default:
           valA = 0;
           valB = 0;
@@ -150,6 +155,7 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
             className="text-[12px] bg-gray-50 border border-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer font-medium"
           >
             <option value="duration">Temps passé</option>
+            <option value="occupation">Taux d'occupation</option>
             {isAdmin && <option value="cost">Coût employeur</option>}
             <option value="tasks">Total tâches</option>
             <option value="completed">Tâches terminées</option>
@@ -222,6 +228,13 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
               >
                 Temps passé {renderSortIcon('duration')}
               </th>
+              <th
+                onClick={() => handleSort('occupation')}
+                className="px-3 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none group/th hover:bg-purple-100/60 transition-colors text-center bg-purple-50/40"
+                title="Temps pointé rapporté à la capacité nette (régime horaire − congés approuvés sur la période)."
+              >
+                Occupation {renderSortIcon('occupation')}
+              </th>
               {isAdmin && (
                 <th
                   onClick={() => handleSort('cost')}
@@ -260,7 +273,7 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
           <tbody className="text-[12px] divide-y divide-gray-50">
             {sortedEmployees.length === 0 ? (
               <tr>
-                <td colSpan={13} className="px-5 py-8 text-center text-gray-500 italic">
+                <td colSpan={14} className="px-5 py-8 text-center text-gray-500 italic">
                   Aucune donnée disponible pour cette période et ces filtres
                 </td>
               </tr>
@@ -352,6 +365,28 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                     >
                       {formattedDuration}
                     </button>
+                  </td>
+
+                  {/* Occupation — vient de /api/dashboard/executive (fusionné dans
+                      AdminDashboard.tsx), donc absente pour l'ADMIN lui-même
+                      (sa ligne n'y figure pas) : se lit alors comme « — ». */}
+                  <td className="px-3 py-3 text-center bg-purple-50/20">
+                    {emp.occupation == null ? (
+                      <span className="text-gray-300">—</span>
+                    ) : (
+                      <span
+                        title={`${emp.capacite != null ? `Capacité nette : ${emp.capacite.toFixed(1)} h sur la période.` : ''}`}
+                        className={`inline-flex items-center px-2 py-0.5 rounded font-semibold text-[12px] ${
+                          emp.occupation > 0.95
+                            ? 'bg-late-bg text-late-fg'
+                            : emp.occupation < 0.5
+                              ? 'bg-orange-50 text-orange-700'
+                              : 'bg-purple-50 text-purple-800'
+                        }`}
+                      >
+                        {Math.round(emp.occupation * 100)} %
+                      </span>
+                    )}
                   </td>
 
                   {/* Coût employeur — each task at the rate in force when it was logged */}

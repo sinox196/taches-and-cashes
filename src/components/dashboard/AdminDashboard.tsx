@@ -13,6 +13,7 @@ import { ExecutiveBar } from './ExecutiveBar';
 import { AlertsPanel } from './AlertsPanel';
 import { ClientProfitability } from './ClientProfitability';
 import { ConcentrationCard } from './ConcentrationCard';
+import { TaskIntelligence } from './TaskIntelligence';
 
 
 export const AdminDashboard: React.FC = () => {
@@ -165,6 +166,23 @@ export const AdminDashboard: React.FC = () => {
     );
   }
 
+  /**
+   * `/api/dashboard/executive` calcule déjà capacité/occupation par
+   * collaborateur (c'est ce que lisent les alertes A7/A8), mais
+   * `/api/kpi/dashboard` — qui alimente EmployeeTable — ne les porte pas.
+   * Fusionné ici plutôt que dupliqué côté serveur : les deux routes gardent
+   * leur périmètre propre, et le tableau affiche enfin ce que l'alerte
+   * « Ahmed — 91 % d'occupation » explique déjà en haut de l'écran.
+   * `exec.collaborateurs` ne porte pas la ligne ADMIN (voir `employees` dans
+   * la route) — celle de `employeeStats` reste sans capacité/occupation, ce
+   * qui se lit correctement comme « — ».
+   */
+  const execByUserId = new Map<number, any>((exec?.collaborateurs || []).map((c: any) => [c.userId, c]));
+  const employeesWithCapacity = (stats?.employeeStats || []).map((e: any) => {
+    const c = execByUserId.get(e.id);
+    return c ? { ...e, capacite: c.capacite, occupation: c.occupation, heuresPrev: c.heuresPrev } : e;
+  });
+
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-canvas">
       <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
@@ -285,6 +303,8 @@ export const AdminDashboard: React.FC = () => {
             )}
 
             {exec.concentration && <ConcentrationCard data={exec.concentration} />}
+
+            {exec.missions && exec.missions.length > 0 && <TaskIntelligence missions={exec.missions} />}
           </>
         )}
 
@@ -304,7 +324,7 @@ export const AdminDashboard: React.FC = () => {
             />
             <DashboardCharts employees={stats.employeeStats} />
             <EmployeeTable
-              employees={stats.employeeStats}
+              employees={employeesWithCapacity}
               onRowClick={setSelectedEmployee}
               onClientsClick={emp => { setTasksModalInitialSearch(''); setTasksEmployee(emp); }}
             />

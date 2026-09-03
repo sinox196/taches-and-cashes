@@ -2659,6 +2659,69 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       };
     }).sort((a: any, b: any) => b.heures - a.heures);
 
+    // ---- Missions et types de tâche ----------------------------------------
+    // Heures et coût uniquement — jamais de marge ni de rentabilité ici, parce
+    // que rien ne relie une tâche à une facture : l'inventer serait exactement
+    // ce que la règle des taux interdit ailleurs sur cet écran (Q-03).
+    const missionAgg = new Map<string, any>();
+    for (const t of entries) {
+      const key = t.pole || 'Sans mission';
+      let row = missionAgg.get(key);
+      if (!row) {
+        row = { pole: key, heures: 0, heuresPrev: 0, cout: 0, taches: 0, tachesSansTaux: 0,
+                collaborateurs: new Set<number>(), clients: new Set<string>(), types: new Map<string, any>() };
+        missionAgg.set(key, row);
+      }
+      const secs = accruedSeconds(t);
+      row.heures += secs / 3600;
+      row.taches += 1;
+      row.collaborateurs.add(t.userId);
+      row.clients.add(clientBucketKey(t));
+      const c = taskCost(t);
+      if (c === null) row.tachesSansTaux += 1; else row.cout += c;
+
+      // Le type de tâche se lit *dans* sa mission (deux missions peuvent
+      // légitimement avoir un type « Saisie », comme partout ailleurs dans
+      // l'app où missionKey()/le catalogue le rappellent).
+      const typeKey = t.taskType || 'Non précisé';
+      let typeRow = row.types.get(typeKey);
+      if (!typeRow) {
+        typeRow = { name: typeKey, heures: 0, cout: 0, taches: 0, tachesSansTaux: 0 };
+        row.types.set(typeKey, typeRow);
+      }
+      typeRow.heures += secs / 3600;
+      typeRow.taches += 1;
+      if (c === null) typeRow.tachesSansTaux += 1; else typeRow.cout += c;
+    }
+    for (const t of prevEntries) {
+      const row = missionAgg.get(t.pole || 'Sans mission');
+      if (row) row.heuresPrev += accruedSeconds(t) / 3600;
+    }
+    const missions = Array.from(missionAgg.values())
+      .map((r: any) => ({
+        pole: r.pole,
+        heures: round3(r.heures),
+        heuresPrev: round3(r.heuresPrev),
+        taches: r.taches,
+        tachesSansTaux: r.tachesSansTaux,
+        collaborateurs: r.collaborateurs.size,
+        clients: r.clients.size,
+        dureeMoyenneH: r.taches > 0 ? round3(r.heures / r.taches) : 0,
+        // Coût employeur — même garde que le reste du bandeau : jamais envoyé
+        // à un non-ADMIN, pas seulement masqué à l'écran.
+        ...(showMoney ? { cout: round3(r.cout) } : {}),
+        taskTypes: Array.from(r.types.values())
+          .map((tr: any) => ({
+            name: tr.name,
+            heures: round3(tr.heures),
+            taches: tr.taches,
+            tachesSansTaux: tr.tachesSansTaux,
+            ...(showMoney ? { cout: round3(tr.cout) } : {}),
+          }))
+          .sort((a: any, b: any) => b.heures - a.heures),
+      }))
+      .sort((a: any, b: any) => b.heures - a.heures);
+
     // ---- Opérationnel ------------------------------------------------------
     // Le mois « courant » est celui du cabinet, pas celui du conteneur.
     const nowCivil = civilParts(new Date());
@@ -2806,6 +2869,9 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       collaborateurs: collaborateurs.map((c: any) =>
         isAdminViewer ? c : { ...c, cout: undefined, rendementClients: undefined }),
       operationnel: { echeancesVides, echeancesAttendues, tachesEnPause: pausedLong },
+      // Heures et compteurs sont visibles d'un SUPERVISEUR comme le reste de
+      // l'écran ; `cout` est déjà retiré ligne par ligne ci-dessus (showMoney).
+      missions,
     };
     if (showMoney) {
       payload.clients = clientRows;
