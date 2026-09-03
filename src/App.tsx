@@ -421,16 +421,25 @@ export default function App() {
     if (!myRunning) { setOvertimeAlert(null); return; }
     if (overtimeAlert) return;
 
-    const cycle = overtimeCycleOf(myRunning.dureeSeconds);
-    if (cycle < 1) return;
-    if (cycle <= (myRunning.overtimeAckCycle || 0)) return;
+    // The *next* unacknowledged milestone, not whichever one the duration
+    // currently sits at. A backgrounded tab (throttled timers, a laptop
+    // closed mid-task) can leave `dureeSeconds` unobserved for a long
+    // stretch and then jump straight from under 2h to past 4h the next time
+    // this effect runs — asking about the current cycle would silently
+    // swallow the 2h prompt every time that happens, which is exactly what
+    // reads as "the alert never comes at 2h, only at 4h". Catching up one
+    // milestone at a time keeps the "every 2h" promise: this fires for 2h
+    // first, and once that's acknowledged the very next tick re-evaluates
+    // and catches 4h too if the duration already cleared it.
+    const nextCycle = (myRunning.overtimeAckCycle || 0) + 1;
+    if (overtimeCycleOf(myRunning.dureeSeconds) < nextCycle) return;
 
     // Recorded when the popup is *shown*, not when it is answered, so a
     // reload while it is open doesn't bring it straight back. The write goes
     // through updateTimeEntryApi, which applies it to local state first —
     // otherwise this effect would re-fire on the next tick, before the
     // round-trip and broadcast land.
-    updateTimeEntryApi(myRunning.id, { overtimeAckCycle: cycle });
+    updateTimeEntryApi(myRunning.id, { overtimeAckCycle: nextCycle });
     setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
   }, [timeEntries, user?.id, overtimeAlert]);
 
@@ -1009,7 +1018,11 @@ export default function App() {
 
       {overtimeAlert && (() => {
         const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-        const hours = entry ? Math.floor(entry.dureeSeconds / OVERTIME_THRESHOLD_SECONDS) * 2 : 2;
+        // The milestone being acknowledged, not the raw duration — the two
+        // diverge exactly when catch-up applies (see the effect above): a
+        // task already past 4h when the 2h prompt fires must still read
+        // "depuis plus de 2h", not overshoot to the duration's own cycle.
+        const hours = (entry?.overtimeAckCycle || 1) * 2;
         return (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
