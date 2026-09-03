@@ -7,7 +7,7 @@ import { friendlyError } from '../utils/errors';
 
 /**
  * An admin hands a mission + type de tâche to a staff member. It shows up
- * pending under Tâches → « Mes tâches déléguées » until they start it,
+ * pending under Tâches → « Tâches déléguées » until they start it,
  * at which point it becomes an ordinary running time entry — same client
  * picker and mission/type cascade as "Démarrer nouvelle tâche" (NewTaskCard),
  * with a collaborator field added.
@@ -149,7 +149,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
               <Send className="w-5 h-5" />
             </div>
             <p className="text-[13px] font-semibold text-gray-900">Tâche assignée.</p>
-            <p className="text-[12px] text-gray-500 mt-1">Elle apparaît maintenant dans Tâches → « Mes tâches déléguées » du collaborateur.</p>
+            <p className="text-[12px] text-gray-500 mt-1">Elle apparaît maintenant dans Tâches → « Tâches déléguées » du collaborateur.</p>
             <button
               onClick={onClose}
               className="mt-4 px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover"

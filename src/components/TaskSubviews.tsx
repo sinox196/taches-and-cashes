@@ -121,7 +121,7 @@ export const TaskSubviews: React.FC<{
   const TABS: { id: Tab; label: string; icon: any; count?: number }[] = [
     { id: 'chrono', label: 'Mon chrono', icon: Timer },
     { id: 'planned', label: 'Mes tâches planifiées', icon: CalendarClock, count: planned.length },
-    { id: 'assigned', label: 'Mes tâches déléguées', icon: ClipboardCheck, count: assigned.length },
+    { id: 'assigned', label: 'Tâches déléguées', icon: ClipboardCheck, count: assigned.length },
   ];
 
   return (
