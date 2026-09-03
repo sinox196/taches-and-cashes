@@ -321,6 +321,18 @@ plafond) exactement comme pour un abonnement payé confirmé. La page de
 tarifs affiche « Gratuit » plutôt que « 0 DT/mois » pour la même offre — un
 prix à zéro se lit comme un champ oublié, pas comme une promesse.
 
+**« Nouvel utilisateur » et « Exporter » disparaissent tous les deux d'Équipe
+sur un siège unique.** [UsersManagement.tsx](src/components/UsersManagement.tsx)
+lit `planMeta(user?.company?.plan)?.seatLimit <= 1` plutôt que de comparer
+littéralement `plan === 'FREELANCER'` — le Freelancer est aujourd'hui la
+seule offre à un siège qui ouvre encore cette vue (Facturation aussi est à un
+siège, mais `modules` lui ferme Équipe avant qu'on y arrive), mais une future
+offre à un seul compte suivrait la même règle sans y toucher. « Nouvel
+utilisateur » n'empêche rien côté serveur — `seatLimitError()` refuserait de
+toute façon la création — il évite seulement d'offrir un geste qui échouera à
+coup sûr ; « Exporter » n'a simplement rien à exporter d'utile quand la seule
+ligne du tableau est soi-même.
+
 **Les offres retirées restent dans la liste** (`legacy: true`) — `FREELANCE`,
 `EQUIPE`, `CROISSANCE`. Une entreprise inscrite sous l'ancien catalogue les
 porte encore dans sa fiche ; les effacer lui ferait perdre son libellé et sa

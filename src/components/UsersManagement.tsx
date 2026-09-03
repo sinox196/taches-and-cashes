@@ -9,6 +9,7 @@ import { PresenceBadge } from './PresenceBadge';
 import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import { ExportButton } from './ExportButton';
 import { ClientSearchInput } from './cash/ClientSearchInput';
+import { planMeta } from '../constants/plans';
 
 const PERMISSIONS_GROUPED = [
   {
@@ -68,7 +69,12 @@ const PERMISSIONS_GROUPED = [
 ];
 
 export const UsersManagement: React.FC = () => {
-  const { token, hasPermission, logout } = useAuth();
+  const { token, user, hasPermission, logout } = useAuth();
+  // Un siège unique n'a personne d'autre à ajouter — le pack Freelancer, mais
+  // écrit contre le siège plutôt que l'id de l'offre pour couvrir toute
+  // future offre à un seul compte de la même façon. Le bouton ne fait
+  // qu'anticiper le refus déjà posé par seatLimitError() côté serveur.
+  const singleSeatPlan = (planMeta(user?.company?.plan)?.seatLimit ?? Infinity) <= 1;
   const { presenceOf } = usePresence();
   const { t } = useLanguage();
   const [users, setUsers] = useState<User[]>([]);
@@ -339,6 +345,7 @@ export const UsersManagement: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
+        {!singleSeatPlan && (
         <ExportButton
           fileName="utilisateurs"
           rows={users}
@@ -349,6 +356,8 @@ export const UsersManagement: React.FC = () => {
             { header: 'Solde congés (jours)', value: (u: any) => u.soldeConge ?? '' },
           ]}
         />
+        )}
+        {!singleSeatPlan && (
         <button
           onClick={handleOpenCreate}
           className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors shrink-0 whitespace-nowrap"
@@ -356,6 +365,7 @@ export const UsersManagement: React.FC = () => {
           <Plus className="w-4 h-4" />
           <span>{t('users.add')}</span>
         </button>
+        )}
         </div>
       </div>
 
