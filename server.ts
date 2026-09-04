@@ -4489,6 +4489,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   app.post('/api/hr/leaves', authenticate, requirePermission('CREATE_LEAVE_REQUEST'), async (req: any, res: any) => {
     try {
       const { type, startDate, endDate, duration, reason, approverId } = req.body;
+      // Le formulaire porte déjà `required` sur le motif — ceinture et
+      // bretelles côté serveur, pour qui appelle la route directement.
+      if (!String(reason || '').trim()) {
+        return res.status(400).json({ error: 'Le motif est obligatoire' });
+      }
       const leave = await db.createLeaveRequest(req.user.companyId, {
         id: Date.now(),
         userId: req.user.id,
@@ -4645,6 +4650,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   app.post('/api/hr/authorizations', authenticate, requirePermission('CREATE_ABSENCE_AUTHORIZATION'), async (req: any, res: any) => {
     try {
       const { date, startTime, endTime, duration, reason, comment, approverId } = req.body;
+      // Le formulaire porte déjà `required` sur le motif — ceinture et
+      // bretelles côté serveur, pour qui appelle la route directement.
+      if (!String(reason || '').trim()) {
+        return res.status(400).json({ error: 'Le motif est obligatoire' });
+      }
       const auth = await db.createAbsenceAuthorization(req.user.companyId, {
         id: Date.now(),
         userId: req.user.id,
