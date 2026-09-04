@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Timer, CalendarClock, ClipboardCheck, Play, Loader, X } from 'lucide-react';
+import { Timer, CalendarClock, ClipboardCheck, Play, Loader, X, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 
@@ -11,7 +11,20 @@ const PRIORITY_STYLE: Record<string, string> = {
 };
 const PRIORITY_LABEL: Record<string, string> = { BASSE: 'Basse', NORMALE: 'Normale', HAUTE: 'Haute', URGENTE: 'Urgente' };
 
-type Tab = 'chrono' | 'planned' | 'assigned';
+/** Le statut d'une tâche déléguée avant démarrage est celui de l'assignation
+ * (PENDING) ; une fois démarrée c'est celui, vivant, de l'entrée de pointage
+ * qu'elle a fait naître — voir GET /api/task-assignments/delegated. */
+const DELEGATED_STATUS_STYLE: Record<string, string> = {
+  PENDING: 'bg-gray-100 text-gray-500',
+  RUNNING: 'bg-run-bg text-run-fg',
+  PAUSED: 'bg-pause-bg text-pause-fg',
+  COMPLETED: 'bg-done-bg text-done-fg',
+};
+const DELEGATED_STATUS_LABEL: Record<string, string> = {
+  PENDING: 'En attente', RUNNING: 'En cours', PAUSED: 'En pause', COMPLETED: 'Terminée',
+};
+
+type Tab = 'chrono' | 'planned' | 'assigned' | 'delegatedByMe';
 
 /**
  * Les trois sous-vues de **Tâches** : le chrono, les tâches qu'on s'est
@@ -46,9 +59,11 @@ export const TaskSubviews: React.FC<{
   /** Une tâche vient de démarrer : le pointage a une entrée de plus à aller chercher. */
   onStarted?: () => void;
 }> = ({ children, onStarted }) => {
-  const { token, user } = useAuth();
+  const { token, user, hasPermission } = useAuth();
+  const canDelegate = hasPermission('ASSIGN_TASKS');
   const [tab, setTab] = useState<Tab>('chrono');
   const [items, setItems] = useState<any[]>([]);
+  const [delegated, setDelegated] = useState<any[]>([]);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -59,7 +74,17 @@ export const TaskSubviews: React.FC<{
       .then(res => (res.ok ? res.json() : []))
       .then(data => setItems(Array.isArray(data) ? data : []))
       .catch(() => {});
-  }, [token]);
+    // Ce que vous avez délégué à quelqu'un d'autre — invisible partout
+    // ailleurs, puisque `/mine` ne répond qu'à « qu'est-ce qui m'est
+    // assigné ». Réservé à qui peut déléguer : sans ASSIGN_TASKS la liste
+    // serait toujours vide.
+    if (canDelegate) {
+      fetch('/api/task-assignments/delegated', { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => (res.ok ? res.json() : []))
+        .then(data => setDelegated(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    }
+  }, [token, canDelegate]);
 
   // Planifier/déléguer une tâche se fait depuis les boutons de l'en-tête,
   // au-dessus de cette sous-vue mais hors d'elle (App.tsx monte les modales
@@ -122,6 +147,9 @@ export const TaskSubviews: React.FC<{
     { id: 'chrono', label: 'Mon chrono', icon: Timer },
     { id: 'planned', label: 'Mes tâches planifiées', icon: CalendarClock, count: planned.length },
     { id: 'assigned', label: 'Tâches déléguées', icon: ClipboardCheck, count: assigned.length },
+    // Réservé à qui peut déléguer — sinon un onglet toujours vide n'apprend
+    // rien à personne.
+    ...(canDelegate ? [{ id: 'delegatedByMe' as Tab, label: 'Déléguées par moi', icon: Send, count: delegated.length }] : []),
   ];
 
   return (
@@ -153,7 +181,9 @@ export const TaskSubviews: React.FC<{
         ))}
       </div>
 
-      {tab === 'chrono' ? children : (
+      {tab === 'chrono' ? children : tab === 'delegatedByMe' ? (
+        <DelegatedByMeList rows={delegated} />
+      ) : (
         <div className="flex flex-col gap-4">
           {error && (
             <div className="p-2.5 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
@@ -255,6 +285,55 @@ const AssignmentList: React.FC<{
               >
                 {cancelingId === a.id ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
               </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Ce que vous avez délégué à quelqu'un d'autre — en lecture seule : ni
+ * démarrer ni annuler ne vous appartient une fois que la tâche est partie
+ * chez son assignataire, à qui l'onglet « Tâches déléguées » sert exactement
+ * ces deux boutons. Ce qui est demandé ici est le statut, la mission, le
+ * client, le type de tâche et la description ; le nom de l'assignataire
+ * s'ajoute par nécessité — une liste de délégations sans dire à qui n'aide
+ * personne.
+ */
+const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
+  if (rows.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-10 text-center">
+        <p className="text-[13px] font-medium text-gray-600">Vous n'avez délégué aucune tâche.</p>
+        <p className="text-[12px] text-gray-400 mt-1 max-w-[46ch] mx-auto leading-relaxed">
+          Utilisez « Déléguer une tâche » ci-dessus. Vous verrez ici son statut, du démarrage à sa fin.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-4 sm:p-5">
+      <div className="divide-y divide-gray-100">
+        {rows.map(a => (
+          <div key={a.id} className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 py-3 first:pt-0 last:pb-0">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[13.5px] font-semibold text-gray-900">{a.pole}</span>
+                {a.taskType && (
+                  <span className="text-[10.5px] text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">{a.taskType}</span>
+                )}
+                <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${DELEGATED_STATUS_STYLE[a.status] || DELEGATED_STATUS_STYLE.PENDING}`}>
+                  {DELEGATED_STATUS_LABEL[a.status] || a.status}
+                </span>
+              </div>
+              {a.client && <div className="text-[12px] text-gray-500 mt-0.5">{a.client}</div>}
+              {a.description && (
+                <div className="text-[12px] text-gray-400 italic mt-0.5" title={a.description}>{a.description}</div>
+              )}
+              <div className="text-[11px] text-gray-400 mt-1">Assignée à {a.assignedToName}</div>
             </div>
           </div>
         ))}

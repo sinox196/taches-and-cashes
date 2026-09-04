@@ -6487,6 +6487,58 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   });
 
   /**
+   * The other side of the same coin: what a delegator sees about the work
+   * they handed out. `/mine` only ever answers "what's assigned to me" — a
+   * task delegated to someone else has never been visible anywhere to the
+   * person who delegated it, before or after it starts. This is read-only
+   * (no start/cancel here — those stay the assignee's and, for a still-PENDING
+   * one, the delegator's own via the existing DELETE route) and reports
+   * exactly what was asked for: status, mission, client, type de tâche,
+   * description — plus who it's assigned to, since a list of delegated work
+   * with no name on it isn't a list anyone can act on.
+   *
+   * A `PENDING` assignment has no time entry yet, so its status is the
+   * assignment's own. Once `STARTED`, the assignment record itself never
+   * changes again — the live status (RUNNING/PAUSED/COMPLETED) lives on the
+   * time entry it spawned, so it's read from there instead of going stale.
+   */
+  app.get('/api/task-assignments/delegated', authenticate, async (req: any, res: any) => {
+    try {
+      const rows = (await db.getAllTaskAssignments(req.user.companyId))
+        .filter((a: any) => a.assignedByUserId === req.user.id && a.assignedToUserId !== req.user.id);
+
+      const usersById = new Map<number, any>((await db.getAllUsers(req.user.companyId)).map((u: any) => [u.id, u]));
+      const out = [];
+      for (const a of rows) {
+        let status = a.status;
+        if (a.status === 'STARTED' && a.timeEntryId) {
+          const entry = await db.getTimeEntryById(req.user.companyId, a.timeEntryId);
+          if (entry) status = entry.statut;
+        }
+        const assignee = usersById.get(a.assignedToUserId);
+        out.push({
+          id: a.id,
+          status,
+          pole: a.pole,
+          taskType: a.taskType,
+          client: a.client,
+          description: a.description,
+          assignedToName: assignee?.fullName || assignee?.username || 'Collaborateur',
+          scheduledDate: a.scheduledDate,
+          priority: a.priority,
+          createdAt: a.createdAt,
+        });
+      }
+
+      out.sort((x: any, y: any) => (y.createdAt || '').localeCompare(x.createdAt || ''));
+      res.json(out);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * The assignee starts it: this becomes exactly the same thing as clicking
    * "Démarrer" on a manually-created task, through the same helper — so it
    * obeys the one-running-task-per-person rule and appears in Pointage the
