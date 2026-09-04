@@ -293,7 +293,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                   <td className="px-3 py-2.5 font-medium text-gray-900 truncate" title={row.userName || 'Unknown'}>
                     <span className="inline-flex items-center gap-1.5 max-w-full">
                       {(() => { const p = presenceOf(row.userId);
-                        return <PresenceBadge state={p.state} idleMs={p.idleMs} variant="dot" />; })()}
+                        return <PresenceBadge state={p.state} idleMs={p.idleMs} onLeaveUntil={p.onLeaveUntil} variant="dot" />; })()}
                       <span className="truncate">{row.userName || 'Unknown'}</span>
                       <EntryDeviceBadge entry={row} />
                     </span>

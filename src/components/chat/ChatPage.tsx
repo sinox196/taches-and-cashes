@@ -421,7 +421,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
                       // concurrence.
                       <span className="absolute -bottom-1 -right-1 bg-white rounded-full border border-gray-200 px-1 py-0.5 flex items-center shadow-sm">
                         {(() => { const p = presenceOf(c.id);
-                          return <PresenceBadge state={p.state} idleMs={p.idleMs} device={p.device} variant="dot" />; })()}
+                          return <PresenceBadge state={p.state} idleMs={p.idleMs} device={p.device} onLeaveUntil={p.onLeaveUntil} variant="dot" />; })()}
                       </span>
                     )}
                   </div>
@@ -496,7 +496,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
                     <div className="text-[11px] text-gray-400 truncate flex items-center gap-1.5">
                       {roleMeta(selected.contact.role).label}
                       {canSeePresence && (() => { const p = presenceOf(selected.contact.id);
-                        return <PresenceBadge state={p.state} idleMs={p.idleMs} device={p.device} />; })()}
+                        return <PresenceBadge state={p.state} idleMs={p.idleMs} device={p.device} onLeaveUntil={p.onLeaveUntil} />; })()}
                     </div>
                   </div>
                 </>

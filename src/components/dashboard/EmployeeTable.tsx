@@ -304,7 +304,7 @@ export const EmployeeTable: React.FC<EmployeeTableProps> = ({ employees, onRowCl
                       <div>
                         <div className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                           {(() => { const p = presenceOf(emp.id);
-                            return <PresenceBadge state={p.state} idleMs={p.idleMs} variant="dot" />; })()}
+                            return <PresenceBadge state={p.state} idleMs={p.idleMs} onLeaveUntil={p.onLeaveUntil} variant="dot" />; })()}
                           {emp.name}
                         </div>
                         <div className="text-[11px] text-gray-400">{emp.department && emp.department !== 'N/A' ? emp.department : roleLabel(emp.role)}</div>

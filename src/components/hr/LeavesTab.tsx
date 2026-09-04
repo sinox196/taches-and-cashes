@@ -35,7 +35,9 @@ export const LeavesTab: React.FC = () => {
         setDuration(0);
       } else {
         setDateError('');
-        const diffDays = (end - start) / (1000 * 3600 * 24);
+        // Inclusif : un congé du 14 au 15 couvre deux jours, pas un — la
+        // soustraction brute des timestamps ne compte que l'écart entre eux.
+        const diffDays = (end - start) / (1000 * 3600 * 24) + 1;
         setDuration(diffDays);
       }
     } else {
@@ -438,9 +440,6 @@ export const LeavesTab: React.FC = () => {
                   />
                   {dateError && (
                     <p className="mt-1 text-[12px] text-red-600 font-medium">{dateError}</p>
-                  )}
-                  {!dateError && duration === 0 && startDate && endDate && (
-                    <p className="mt-1 text-[12px] text-amber-600 font-medium">La durée doit être supérieure à 0 (les dates ne peuvent pas être identiques si la formule est Date Fin - Date Début).</p>
                   )}
                 </div>
 

@@ -3677,13 +3677,36 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     res.json({ success: true });
   });
 
+  /**
+   * Qui est en congé approuvé aujourd'hui, et jusqu'à quand — la civile du
+   * cabinet, pas celle du serveur (`formatDateISO`, même règle que le reste de
+   * l'horodatage). Un utilisateur avec plusieurs congés approuvés qui se
+   * chevauchent ou s'enchaînent affiche la date de fin la plus tardive parmi
+   * ceux qui couvrent aujourd'hui.
+   */
+  const onLeaveUntilByUser = async (companyId: string): Promise<Map<number, string>> => {
+    const todayIso = formatDateISO(new Date());
+    const leaves = await db.getAllLeaveRequests(companyId);
+    const out = new Map<number, string>();
+    for (const l of (leaves || [])) {
+      if (l.status !== 'APPROVED' || !l.startDate || !l.endDate) continue;
+      if (l.startDate > todayIso || l.endDate < todayIso) continue;
+      const prev = out.get(l.userId);
+      if (!prev || l.endDate > prev) out.set(l.userId, l.endDate);
+    }
+    return out;
+  };
+
   /** Presence of every known user in this company, keyed by id. */
   app.get('/api/presence', authenticate, async (req: any, res: any) => {
     try {
       const users = await db.getAllUsers(req.user.companyId);
       const awayMs = await awayAfterMs(req.user.companyId);
+      const onLeaveUntil = await onLeaveUntilByUser(req.user.companyId);
       const byUser: Record<string, any> = {};
-      for (const u of users) byUser[u.id] = presenceFor(req.user.companyId, u.id, awayMs);
+      for (const u of users) {
+        byUser[u.id] = { ...presenceFor(req.user.companyId, u.id, awayMs), onLeaveUntil: onLeaveUntil.get(u.id) || null };
+      }
       res.json(byUser);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

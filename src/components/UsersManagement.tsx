@@ -409,7 +409,7 @@ export const UsersManagement: React.FC = () => {
                   </td>
                   <td className="px-5 py-3">
                     {(() => { const p = presenceOf(user.id);
-                      return <PresenceBadge state={p.state} idleMs={p.idleMs} />; })()}
+                      return <PresenceBadge state={p.state} idleMs={p.idleMs} onLeaveUntil={p.onLeaveUntil} />; })()}
                   </td>
                   <td className="px-5 py-3">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${roleMeta(user.role).badgeClass}`}>

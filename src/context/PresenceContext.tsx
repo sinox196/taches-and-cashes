@@ -15,6 +15,13 @@ interface PresenceEntry {
    * ça se lit, ça ne décide de rien (voir `EntryDeviceBadge`).
    */
   device: 'MOBILE' | 'DESKTOP' | null;
+  /**
+   * Date ISO (YYYY-MM-DD) du dernier jour d'un congé approuvé couvrant
+   * aujourd'hui, ou `null`. Calculée côté serveur depuis les congés — pas une
+   * présence au sens propre (souris/clavier), mais elle voyage avec elle
+   * puisque c'est le même badge par personne qui l'affiche partout.
+   */
+  onLeaveUntil: string | null;
 }
 
 interface PresenceContextType {
@@ -29,7 +36,7 @@ interface PresenceContextType {
   refreshAwayAfter: () => void;
 }
 
-const OFFLINE: PresenceEntry = { state: 'INACTIVE', idleMs: null, lastSeenAt: null, device: null };
+const OFFLINE: PresenceEntry = { state: 'INACTIVE', idleMs: null, lastSeenAt: null, device: null, onLeaveUntil: null };
 const PresenceContext = createContext<PresenceContextType | undefined>(undefined);
 
 /** Real user input — pointer, keyboard, wheel, touch. */
@@ -165,6 +172,7 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // le battement, et le refaire ici serait une deuxième détection à
         // garder en phase avec `deviceFromRequest`.
         device: byUser[String(userId)]?.device ?? null,
+        onLeaveUntil: byUser[String(userId)]?.onLeaveUntil ?? null,
       };
     }
     return byUser[String(userId)] ?? OFFLINE;
