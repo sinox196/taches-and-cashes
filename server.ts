@@ -2515,27 +2515,51 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     const capaciteNette = round3(scopedEmployees.reduce((s: number, u: any) => s + capacityOf(u, startTs, endTs), 0));
     const capaciteNettePrev = round3(scopedEmployees.reduce((s: number, u: any) => s + capacityOf(u, prevStartTs, prevEndTs), 0));
 
-    // ---- Grand-livre client ------------------------------------------------
-    // Mêmes chiffres que la page Clients, calculés de la même façon, pour que
-    // les deux écrans ne puissent pas se contredire. C'est un stock, pas une
-    // grandeur de période : le filtre de dates ne s'y applique jamais. Le
-    // filtre client, lui, s'applique bien — comme sur le reste de la route —
-    // en restreignant à quels clients le stock est sommé, sans changer ce
-    // que vaut le stock de chacun.
-    const journalByClient = journalEncaissementsByClient(allJournal || []);
-    const netAllTime = new Map<string, number>();
-    for (const inv of (allInvoices || [])) {
-      if (!isBillable(inv) || !isTnd(inv)) continue;
+    // ---- Grand-livre client (période sélectionnée) -------------------------
+    // Suivait autrefois le solde global, tous exercices, pour ne jamais
+    // contredire la page Clients — mais un mois sans aucune activité gardait
+    // alors la même valeur qu'un autre, ce qui se lisait comme un chiffre
+    // figé plutôt que comme un solde global assumé. À la demande explicite de
+    // l'utilisateur, ce bloc suit désormais le même filtre de dates que le
+    // reste du bandeau : « combien a été facturé et encaissé sur cette
+    // période, net » plutôt que « combien reste dû au total ». Les deux
+    // questions sont légitimes mais distinctes — celle de la page Clients
+    // (solde cumulé depuis toujours) n'a pas changé et peut désormais
+    // diverger de celle-ci, en connaissance de cause.
+    //
+    // `soldeAnterieur` — un solde d'ouverture, sans date propre — est
+    // délibérément exclu ici : l'ajouter à chaque période l'aurait fait
+    // compter indéfiniment, un mois après l'autre, ce qui n'est pas ce que
+    // « suivre le filtre » demande.
+    const periodJournal = (allJournal || []).filter((row: any) => {
+      const ts = row?.date ? new Date(row.date).getTime() : NaN;
+      return Number.isFinite(ts) && ts >= startTs && ts <= endTs;
+    });
+    const journalByClientPeriod = journalEncaissementsByClient(periodJournal);
+    // Miroir de `sumEncaissements()`, restreint à la période. La forme héritée
+    // (un simple nombre, sans détail daté) ne peut être située dans aucune
+    // période : elle est exclue plutôt que devinée.
+    const sumEncaissementsInRange = (client: any, fromTs: number, toTs: number): number => {
+      const raw = client?.encaissements;
+      if (!Array.isArray(raw)) return 0;
+      return round3(raw.reduce((s: number, e: any) => {
+        const ts = e?.date ? new Date(e.date).getTime() : NaN;
+        return (Number.isFinite(ts) && ts >= fromTs && ts <= toTs) ? s + num(Number(e?.amount), 0) : s;
+      }, 0));
+    };
+
+    const netPeriod = new Map<string, number>();
+    for (const inv of periodInvoices) {
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
-      netAllTime.set(key, round3((netAllTime.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+      netPeriod.set(key, round3((netPeriod.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
     }
     let resteAEncaisser = 0;
     const resteByClientId = new Map<string, number>();
     for (const c of (allClients || [])) {
       if (filterClientIds.length > 0 && !filterClientIds.includes(Number(c.id))) continue;
-      const facture = round3((netAllTime.get(String(c.id)) || 0) + (netAllTime.get(`name:${c.name}`) || 0));
-      const enc = round3(sumEncaissements(c) + sumAmounts(journalFor(journalByClient, c)));
-      const reste = round3(num(Number(c.soldeAnterieur), 0) - enc + facture);
+      const facture = round3((netPeriod.get(String(c.id)) || 0) + (netPeriod.get(`name:${c.name}`) || 0));
+      const enc = round3(sumEncaissementsInRange(c, startTs, endTs) + sumAmounts(journalFor(journalByClientPeriod, c)));
+      const reste = round3(facture - enc);
       resteByClientId.set(String(c.id), reste);
       if (reste > 0) resteAEncaisser = round3(resteAEncaisser + reste);
     }
@@ -2543,15 +2567,15 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     /**
      * Créances échues — un MAJORANT, pas un chiffre exact (Q-04 non tranchée).
      * Aucun règlement ne porte d'`invoiceId` : on ne sait pas si une facture
-     * précise est soldée. On somme donc les factures dont `dueDate` est
-     * dépassée, PLAFONNÉES au reste réellement dû par le client — sans ce
-     * plafond, un client à jour dont les vieilles factures sont payées serait
-     * compté comme en retard.
+     * précise est soldée. On somme donc, parmi les factures ÉMISES sur la
+     * période, celles dont `dueDate` est dépassée (fin de journée),
+     * PLAFONNÉES au reste dû sur la période — sans ce plafond, un client à
+     * jour dont les vieilles factures sont payées serait compté en retard.
      */
     const today = Date.now();
     const overdueByClient = new Map<string, number>();
-    for (const inv of (allInvoices || [])) {
-      if (!isBillable(inv) || !isTnd(inv) || !inv.dueDate) continue;
+    for (const inv of periodInvoices) {
+      if (!inv.dueDate) continue;
       // Fin de journée : une facture due aujourd'hui n'est pas en retard.
       if (new Date(inv.dueDate).getTime() + dayMs - 1 >= today) continue;
       const key = String(inv.clientId ?? '');
