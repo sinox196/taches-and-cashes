@@ -44,7 +44,7 @@ import {
 } from './utils/formatters';
 
 export default function App() {
-  const { user, token, isLoading, hasPermission } = useAuth();
+  const { user, token, isLoading, hasPermission, isImpersonating, stopImpersonating } = useAuth();
 
   // Shown only while logged out — the public marketing/pricing page, or the
   // login form reached from it via "Se connecter". Distinct from
@@ -783,7 +783,26 @@ export default function App() {
   // effet ni aucun fetch du back-office (SSE du pointage, KPI, liste des
   // services…) ne parte pour un compte qui n'a le droit d'en lire aucun.
   if (user.role === CLIENT_ROLE) {
-    return <ClientPortal />;
+    // Un administrateur en train de regarder ce portail à la place du client
+    // (depuis la fiche client) doit toujours pouvoir revenir en un clic — la
+    // bannière reste fixée en haut, au-dessus du portail lui-même.
+    return isImpersonating ? (
+      <div className="min-h-screen flex flex-col">
+        <div className="shrink-0 bg-navy text-white text-[12.5px] font-medium px-4 py-2 flex items-center justify-between gap-3">
+          <span>Vous consultez l'espace de « {user.username} » à sa place.</span>
+          <button
+            type="button"
+            onClick={stopImpersonating}
+            className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded-md font-semibold transition-colors shrink-0"
+          >
+            Retour à l'administration
+          </button>
+        </div>
+        <div className="flex-1 min-h-0">
+          <ClientPortal />
+        </div>
+      </div>
+    ) : <ClientPortal />;
   }
 
   return (

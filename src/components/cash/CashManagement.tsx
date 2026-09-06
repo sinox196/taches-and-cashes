@@ -67,6 +67,7 @@ export const CashManagement: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [kindFilter, setKindFilter] = useState('');
   /** false = closed, null = creating, object = editing that document. */
   const [editor, setEditor] = useState<false | { invoice: any | null }>(false);
   const [companyOpen, setCompanyOpen] = useState(false);
@@ -91,11 +92,11 @@ export const CashManagement: React.FC = () => {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const load = async (q = '', p = page) => {
+  const load = async (q = '', p = page, kind = kindFilter) => {
     try {
       const offset = (p - 1) * PAGE_SIZE;
       const res = await fetch(
-        `/api/invoices?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+        `/api/invoices?limit=${PAGE_SIZE}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ''}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`,
         { headers: authHeaders },
       );
       if (!res.ok) throw new Error('Chargement impossible');
@@ -120,9 +121,9 @@ export const CashManagement: React.FC = () => {
   // loaded client-side. Page resets to 1 in the search input's own handler,
   // so a new search can't land on a page that no longer exists.
   useEffect(() => {
-    const h = setTimeout(() => load(search.trim(), page), 250);
+    const h = setTimeout(() => load(search.trim(), page, kindFilter), 250);
     return () => clearTimeout(h);
-  }, [search, page]);
+  }, [search, page, kindFilter]);
 
   /**
    * Émettre un brouillon : c'est le serveur qui lui attribue son numéro, à ce
@@ -216,6 +217,16 @@ export const CashManagement: React.FC = () => {
               className="pl-8 pr-3 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full sm:w-56"
             />
           </div>
+          <select
+            value={kindFilter}
+            onChange={e => { setKindFilter(e.target.value); setPage(1); }}
+            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 shrink-0"
+          >
+            <option value="">Tous les types</option>
+            {Object.entries(KIND_LABEL).map(([id, label]) => (
+              <option key={id} value={id}>{label}</option>
+            ))}
+          </select>
           {canManage && (
             <button
               onClick={() => setCompanyOpen(true)}

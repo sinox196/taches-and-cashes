@@ -6,14 +6,14 @@ import { useLanguage } from '../context/LanguageContext';
 import { ROLES, roleMeta, CLIENT_ROLE, type Role } from '../constants/roles';
 import { usePresence } from '../context/PresenceContext';
 import { PresenceBadge } from './PresenceBadge';
-import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, Shield, X, Loader2, Info, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { ExportButton } from './ExportButton';
 import { ClientSearchInput } from './cash/ClientSearchInput';
 import { planMeta } from '../constants/plans';
 
 const PERMISSIONS_GROUPED = [
   {
-    group: 'Time Tracking',
+    group: 'Pointage',
     permissions: [
       { id: 'VIEW', label: 'Voir (VIEW)', desc: 'Peut consulter le suivi du temps' },
       { id: 'EDIT', label: 'Modifier (EDIT)', desc: 'Peut modifier le suivi du temps' },
@@ -82,6 +82,12 @@ export const UsersManagement: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   useEscapeToClose(() => setIsModalOpen(false), isModalOpen);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  /** « Équipe » (back-office) et « Comptes clients » (portail) sont deux
+   *  populations qu'on ne lit jamais ensemble — mélanger les deux dans une
+   *  seule liste noierait les quelques comptes clients dans des dizaines de
+   *  collaborateurs, et inversement. */
+  const [teamTab, setTeamTab] = useState<'staff' | 'clients'>('staff');
+  const [userSearch, setUserSearch] = useState('');
   
   const toggleGroup = (groupName: string) => {
     setCollapsedGroups(prev => ({
@@ -151,11 +157,11 @@ export const UsersManagement: React.FC = () => {
     }
   };
 
-  const handleOpenCreate = () => {
+  const handleOpenCreate = (defaultRole: Role = 'COLLABORATOR') => {
     setEditingUserId(null);
     setFormUsername('');
     setFormPassword('');
-    setFormRole('COLLABORATOR');
+    setFormRole(defaultRole);
     setFormPermissions([]);
     setFormSalaireBrut('');
     setFormRegimeHoraire(48);
@@ -194,7 +200,7 @@ export const UsersManagement: React.FC = () => {
     setFormShiftEnd(user.shiftEnd || '');
     setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
     setFormClientId(user.clientId ?? null);
-    setFormClientName('');
+    setFormClientName(user.clientName ?? '');
     setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
     setFormError('');
     setIsModalOpen(true);
@@ -216,11 +222,18 @@ export const UsersManagement: React.FC = () => {
   };
 
   const togglePermission = (permId: string) => {
-    setFormPermissions(prev => 
-      prev.includes(permId) 
+    setFormPermissions(prev =>
+      prev.includes(permId)
         ? prev.filter(p => p !== permId)
         : [...prev, permId]
     );
+  };
+
+  /** Tout cocher/décocher pour un groupe entier en un clic. */
+  const toggleGroupAll = (groupPermIds: string[], allSelected: boolean) => {
+    setFormPermissions(prev => allSelected
+      ? prev.filter(p => !groupPermIds.includes(p))
+      : Array.from(new Set([...prev, ...groupPermIds])));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -333,6 +346,11 @@ export const UsersManagement: React.FC = () => {
     return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
   })();
 
+  const clientAccountsCount = users.filter(u => u.role === CLIENT_ROLE).length;
+  const visibleUsers = users
+    .filter(u => (teamTab === 'clients' ? u.role === CLIENT_ROLE : u.role !== CLIENT_ROLE))
+    .filter(u => !userSearch.trim() || u.username.toLowerCase().includes(userSearch.trim().toLowerCase()));
+
   return (
     <div className="flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1000px] w-full mx-auto p-4 sm:p-6 lg:p-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -347,9 +365,12 @@ export const UsersManagement: React.FC = () => {
         <div className="flex items-center gap-2 self-start sm:self-auto">
         {!singleSeatPlan && (
         <ExportButton
-          fileName="utilisateurs"
-          rows={users}
-          columns={[
+          fileName={teamTab === 'clients' ? 'comptes-clients' : 'utilisateurs'}
+          rows={visibleUsers}
+          columns={teamTab === 'clients' ? [
+            { header: 'Utilisateur', value: (u: any) => u.username },
+            { header: 'Dossier client', value: (u: any) => u.clientName ?? '' },
+          ] : [
             { header: 'Utilisateur', value: (u: any) => u.username },
             { header: 'Rôle', value: (u: any) => roleMeta(u.role).label },
             { header: 'Permissions', value: (u: any) => (u.role === 'ADMIN' ? 'Accès complet' : (u.permissions || []).join(' | ')) },
@@ -359,17 +380,52 @@ export const UsersManagement: React.FC = () => {
         )}
         {!singleSeatPlan && (
         <button
-          onClick={handleOpenCreate}
+          onClick={() => handleOpenCreate(teamTab === 'clients' ? CLIENT_ROLE : 'COLLABORATOR')}
           className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-2 transition-colors shrink-0 whitespace-nowrap"
         >
           <Plus className="w-4 h-4" />
-          <span>{t('users.add')}</span>
+          <span>{teamTab === 'clients' ? 'Nouveau compte client' : t('users.add')}</span>
         </button>
         )}
         </div>
       </div>
 
       <PresenceSettingsCard />
+
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1 border-b border-gray-200 sm:border-b-0">
+          {([
+            { id: 'staff' as const, label: 'Équipe' },
+            { id: 'clients' as const, label: 'Comptes clients', count: clientAccountsCount },
+          ]).map(tb => (
+            <button
+              key={tb.id}
+              onClick={() => setTeamTab(tb.id)}
+              className={`px-3.5 py-2 text-[13px] font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
+                teamTab === tb.id ? 'border-navy text-navy' : 'border-transparent text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              {tb.label}
+              {'count' in tb && !!tb.count && (
+                <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.5 ${
+                  teamTab === tb.id ? 'bg-navy text-white' : 'bg-blue-50 text-blue-600'
+                }`}>
+                  {tb.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="relative w-full sm:w-56">
+          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={userSearch}
+            onChange={e => setUserSearch(e.target.value)}
+            placeholder="Rechercher un nom d'utilisateur…"
+            className="w-full pl-8 pr-3 py-2 text-[12.5px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"
+          />
+        </div>
+      </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         {isLoading ? (
@@ -391,7 +447,7 @@ export const UsersManagement: React.FC = () => {
                   Statut
                 </th>
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  Rôle
+                  {teamTab === 'clients' ? 'Dossier client' : 'Rôle'}
                 </th>
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   Permissions
@@ -402,7 +458,7 @@ export const UsersManagement: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {users.map(user => (
+              {visibleUsers.map(user => (
                 <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors group">
                   <td className="px-5 py-3">
                     <div className="font-semibold text-gray-900 text-[13px]">{user.username}</div>
@@ -412,10 +468,14 @@ export const UsersManagement: React.FC = () => {
                       return <PresenceBadge state={p.state} idleMs={p.idleMs} onLeaveUntil={p.onLeaveUntil} />; })()}
                   </td>
                   <td className="px-5 py-3">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${roleMeta(user.role).badgeClass}`}>
-                      {roleMeta(user.role).hasShield && <Shield className="w-3 h-3" />}
-                      {roleMeta(user.role).label}
-                    </span>
+                    {teamTab === 'clients' ? (
+                      <span className="text-[13px] text-gray-700">{user.clientName || '—'}</span>
+                    ) : (
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${roleMeta(user.role).badgeClass}`}>
+                        {roleMeta(user.role).hasShield && <Shield className="w-3 h-3" />}
+                        {roleMeta(user.role).label}
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-3">
                     <div className="flex flex-wrap gap-1">
@@ -450,10 +510,12 @@ export const UsersManagement: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {users.length === 0 && (
+              {visibleUsers.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-5 py-8 text-center text-gray-500 text-[13px]">
-                    Aucun utilisateur trouvé.
+                    {userSearch.trim()
+                      ? 'Aucun utilisateur ne correspond à cette recherche.'
+                      : teamTab === 'clients' ? 'Aucun compte client pour le moment.' : 'Aucun utilisateur trouvé.'}
                   </td>
                 </tr>
               )}
@@ -513,6 +575,59 @@ export const UsersManagement: React.FC = () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                     placeholder="••••••••"
                   />
+                </div>
+
+                <div className="pt-4 border-t border-gray-200 mt-4">
+                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
+                  <select
+                    value={formRole}
+                    onChange={e => setFormRole(e.target.value as Role)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
+                  >
+                    {ROLES.map(r => (
+                      <option key={r.id} value={r.id}>{r.label}</option>
+                    ))}
+                  </select>
+
+                  {/* Un compte client n'a de sens que rattaché à un dossier :
+                      sans lui le portail n'a rien à montrer et le dit. Le
+                      choix passe par la recherche serveur, jamais par une
+                      liste complète — il y a des centaines de clients. */}
+                  {formRole === CLIENT_ROLE && (
+                    <div className="mt-3">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Dossier client rattaché</label>
+                      {formClientId && !formClientName ? (
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-gray-50">
+                          <span className="text-gray-700">Dossier n° {formClientId}</span>
+                          <button
+                            type="button"
+                            onClick={() => { setFormClientId(null); setFormClientName(''); }}
+                            className="text-[12px] text-blue-600 hover:underline shrink-0"
+                          >
+                            Changer
+                          </button>
+                        </div>
+                      ) : (
+                        <ClientSearchInput
+                          value={formClientName}
+                          onChange={(name, id) => {
+                            setFormClientName(name);
+                            setFormClientId(id ?? null);
+                            // Le compte portail se connecte sous le nom du
+                            // client, pas un identifiant que l'admin invente —
+                            // uniquement à la création : une fois le compte
+                            // créé, le nom d'utilisateur ne se change plus
+                            // (champ désactivé plus haut).
+                            if (!editingUserId) setFormUsername(name);
+                          }}
+                          placeholder="Rechercher un client…"
+                        />
+                      )}
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Ce compte ne verra que ce dossier. Plusieurs comptes peuvent viser le même client (gérant, comptable…).
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Salaire, shift et congés n'ont aucun sens pour un client :
@@ -742,70 +857,44 @@ export const UsersManagement: React.FC = () => {
                 </>
                 )}
 
-                <div className="pt-4 border-t border-gray-200 mt-4">
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
-                  <select
-                    value={formRole}
-                    onChange={e => setFormRole(e.target.value as Role)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
-                  >
-                    {ROLES.map(r => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
-                    ))}
-                  </select>
-
-                  {/* Un compte client n'a de sens que rattaché à un dossier :
-                      sans lui le portail n'a rien à montrer et le dit. Le
-                      choix passe par la recherche serveur, jamais par une
-                      liste complète — il y a des centaines de clients. */}
-                  {formRole === CLIENT_ROLE && (
-                    <div className="mt-3">
-                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Dossier client rattaché</label>
-                      {formClientId && !formClientName ? (
-                        <div className="flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-gray-50">
-                          <span className="text-gray-700">Dossier n° {formClientId}</span>
-                          <button
-                            type="button"
-                            onClick={() => { setFormClientId(null); setFormClientName(''); }}
-                            className="text-[12px] text-blue-600 hover:underline shrink-0"
-                          >
-                            Changer
-                          </button>
-                        </div>
-                      ) : (
-                        <ClientSearchInput
-                          value={formClientName}
-                          onChange={(name, id) => { setFormClientName(name); setFormClientId(id ?? null); }}
-                          placeholder="Rechercher un client…"
-                        />
-                      )}
-                      <p className="text-[11px] text-gray-500 mt-1">
-                        Ce compte ne verra que ce dossier. Plusieurs comptes peuvent viser le même client (gérant, comptable…).
-                      </p>
-                    </div>
-                  )}
-                </div>
-
                 {formRole !== 'ADMIN' && formRole !== CLIENT_ROLE && (
                   <div>
                     <label className="block text-[12px] font-semibold text-gray-700 mb-2 mt-2">Permissions</label>
                     <div className="space-y-4 border border-gray-200 rounded-lg p-3 bg-gray-50 max-h-[300px] overflow-y-auto">
                       {PERMISSIONS_GROUPED.map(group => {
                         const isCollapsed = collapsedGroups[group.group];
-                        const groupSelectedCount = group.permissions.filter(p => formPermissions.includes(p.id)).length;
+                        const groupPermIds = group.permissions.map(p => p.id);
+                        const groupSelectedCount = groupPermIds.filter(id => formPermissions.includes(id)).length;
+                        const allSelected = groupSelectedCount === group.permissions.length;
                         return (
                         <div key={group.group} className="space-y-2">
-                          <div 
-                            className="flex items-center justify-between border-b border-gray-200 pb-1 mb-2 cursor-pointer hover:bg-gray-100 p-1 -mx-1 rounded transition-colors"
-                            onClick={() => toggleGroup(group.group)}
+                          <div
+                            className="flex items-center justify-between border-b border-gray-200 pb-1 mb-2 hover:bg-gray-100 p-1 -mx-1 rounded transition-colors"
                           >
                             <div className="flex items-center gap-1.5">
-                              {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
-                              <h4 className="text-[11px] font-bold text-gray-800 uppercase tracking-wide mb-0 select-none">
-                                {group.group}
-                              </h4>
+                              <input
+                                type="checkbox"
+                                title="Tout sélectionner pour ce groupe"
+                                className="rounded border-gray-300 text-navy focus:ring-navy"
+                                checked={allSelected}
+                                ref={el => { if (el) el.indeterminate = groupSelectedCount > 0 && !allSelected; }}
+                                onChange={() => toggleGroupAll(groupPermIds, allSelected)}
+                                onClick={e => e.stopPropagation()}
+                              />
+                              <div
+                                className="flex items-center gap-1.5 cursor-pointer"
+                                onClick={() => toggleGroup(group.group)}
+                              >
+                                {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
+                                <h4 className="text-[11px] font-bold text-gray-800 uppercase tracking-wide mb-0 select-none">
+                                  {group.group}
+                                </h4>
+                              </div>
                             </div>
-                            <span className="text-[10px] font-bold text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
+                            <span
+                              className="text-[10px] font-bold text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded cursor-pointer"
+                              onClick={() => toggleGroup(group.group)}
+                            >
                               {groupSelectedCount} / {group.permissions.length}
                             </span>
                           </div>

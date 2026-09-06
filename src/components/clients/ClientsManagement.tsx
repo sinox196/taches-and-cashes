@@ -3,7 +3,7 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { ExportButton } from '../ExportButton';
 import { csvNumber } from '../../utils/exportCsv';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet } from 'lucide-react';
+import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet, LogIn } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
 import { MultiSelectAutocomplete } from '../dashboard/MultiSelectAutocomplete';
 import { formatCostTND } from '../../utils/formatters';
@@ -81,7 +81,17 @@ const encaissementsForEditing = (client: Pick<Client, 'encaissements' | 'updated
 };
 
 export const ClientsManagement: React.FC = () => {
-  const { token, hasPermission } = useAuth();
+  const { token, hasPermission, impersonateClient } = useAuth();
+  const [impersonateError, setImpersonateError] = useState('');
+  const [impersonateLoadingId, setImpersonateLoadingId] = useState<number | null>(null);
+
+  const handleOpenClientSpace = async (clientId: number) => {
+    setImpersonateError('');
+    setImpersonateLoadingId(clientId);
+    const err = await impersonateClient(clientId);
+    setImpersonateLoadingId(null);
+    if (err) setImpersonateError(err);
+  };
   const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -1483,10 +1493,30 @@ export const ClientsManagement: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <button onClick={() => setViewingClient(null)} className="text-gray-400 hover:text-gray-600 p-1">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                {hasPermission('MANAGE_USERS') && (
+                  <button
+                    onClick={() => handleOpenClientSpace(viewingClient.id)}
+                    disabled={impersonateLoadingId === viewingClient.id}
+                    title="Ouvrir l'espace portail de ce client, à sa place"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[12px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {impersonateLoadingId === viewingClient.id
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <LogIn className="w-3.5 h-3.5" />}
+                    Espace client
+                  </button>
+                )}
+                <button onClick={() => setViewingClient(null)} className="text-gray-400 hover:text-gray-600 p-1">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
+            {impersonateError && (
+              <div className="mx-6 mt-3 p-2.5 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
+                {impersonateError}
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-6 space-y-8">
               {/* Contact Info */}

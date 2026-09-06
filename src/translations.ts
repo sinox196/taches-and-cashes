@@ -26,7 +26,7 @@ export const translations: Translations = {
     // Login
     'login.title': 'Connexion',
     'login.subtitle': 'Accédez à votre espace',
-    'login.username': 'Adresse mail',
+    'login.username': 'Identifiant',
     'login.password': 'Mot de passe',
     'login.button': 'Se connecter',
     'login.error': 'Identifiants invalides',
@@ -86,7 +86,7 @@ export const translations: Translations = {
     // Login
     'login.title': 'Login',
     'login.subtitle': 'Access your account',
-    'login.username': 'Email address',
+    'login.username': 'Username',
     'login.password': 'Password',
     'login.button': 'Sign In',
     'login.error': 'Invalid credentials',

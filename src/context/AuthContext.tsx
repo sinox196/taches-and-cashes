@@ -18,6 +18,8 @@ export interface User {
   breakMinutes?: number | null;
   /** Dossier client rattaché — renseigné uniquement pour un compte de rôle CLIENT. */
   clientId?: number | null;
+  /** Nom du dossier rattaché, résolu par le serveur pour l'écran Équipe — jamais saisi côté client. */
+  clientName?: string | null;
   cnss?: number;
   tfp?: number;
   foprolos?: number;
@@ -44,6 +46,12 @@ interface AuthContextType {
   login: (token: string, user: User) => void;
   logout: (reason?: string) => void;
   hasPermission: (permission: string) => boolean;
+  /** True while an admin is viewing a client's portal space in their place. */
+  isImpersonating: boolean;
+  /** Opens that client's portal space as them — resolves to an error message, or null on success. */
+  impersonateClient: (clientId: number) => Promise<string | null>;
+  /** Drops the client session and restores the admin's own. */
+  stopImpersonating: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -53,6 +61,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
   const [isLoading, setIsLoading] = useState(true);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  // Le jeton admin de côté pendant qu'on regarde l'espace d'un client — dans
+  // une clé distincte de `auth_token`, jamais dans le même état, pour qu'un
+  // rechargement de page pendant l'impersonation ne le perde pas.
+  const [impersonatorToken, setImpersonatorToken] = useState<string | null>(
+    () => localStorage.getItem('impersonator_token'),
+  );
 
   useEffect(() => {
     const fetchMe = async () => {
@@ -113,6 +127,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // message — rendering that object would crash the login screen.
     setAuthMessage(typeof reason === 'string' ? reason : null);
     localStorage.removeItem('auth_token');
+    // Une déconnexion complète efface aussi un retour d'impersonation resté
+    // en suspens — il n'y a plus de session admin à retrouver.
+    localStorage.removeItem('impersonator_token');
+    setImpersonatorToken(null);
+  };
+
+  /**
+   * Bascule le jeton actif sans passer par `login()` : il n'y a pas d'objet
+   * `User` sous la main pour la cible, seulement son jeton — `user` est donc
+   * vidé puis réhydraté par le `useEffect` ci-dessus au prochain rendu
+   * (`/api/me` sur le nouveau jeton), exactement comme au chargement de l'app.
+   */
+  const switchToken = (newToken: string) => {
+    setUser(null);
+    setToken(newToken);
+    localStorage.setItem('auth_token', newToken);
+  };
+
+  const impersonateClient = async (clientId: number): Promise<string | null> => {
+    if (!token) return 'Non authentifié.';
+    try {
+      const res = await fetch(`/api/clients/${clientId}/impersonate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return body.error || "Impossible d'ouvrir cet espace client.";
+      localStorage.setItem('impersonator_token', token);
+      setImpersonatorToken(token);
+      switchToken(body.token);
+      return null;
+    } catch {
+      return "Impossible d'ouvrir cet espace client.";
+    }
+  };
+
+  const stopImpersonating = () => {
+    if (!impersonatorToken) return;
+    switchToken(impersonatorToken);
+    localStorage.removeItem('impersonator_token');
+    setImpersonatorToken(null);
   };
 
   const hasPermission = (permission: string) => {
@@ -129,7 +184,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, authMessage, login, logout, hasPermission }}>
+    <AuthContext.Provider value={{
+      user, token, isLoading, authMessage, login, logout, hasPermission,
+      isImpersonating: !!impersonatorToken, impersonateClient, stopImpersonating,
+    }}>
       {children}
     </AuthContext.Provider>
   );

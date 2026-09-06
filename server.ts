@@ -1108,10 +1108,20 @@ async function startServer() {
     try {
       const users = await db.getAllUsers(req.user.companyId);
       const balances = await db.getAllLeaveBalances(req.user.companyId);
+      // Un compte CLIENT n'a de sens que par le nom du dossier qu'il regarde —
+      // l'éditer sans lui montrait « Dossier n° 123 » au lieu du nom du
+      // client. Indexé une fois plutôt qu'un aller-retour par utilisateur.
+      const clientUserIds = users.some((u: any) => u.clientId != null);
+      const clientsById = clientUserIds
+        ? new Map((await db.getAllClients(req.user.companyId)).map((c: any) => [c.id, c]))
+        : new Map<number, any>();
       // Don't send passwords to client. Same shape as POST/PUT responses so the
       // list can be updated in place after a create/edit.
       const sorted = [...users].sort((a: any, b: any) => (a.username || '').localeCompare(b.username || ''));
-      res.json(sorted.map((u: any) => withLeaveBalance(publicUser(u), balances)));
+      res.json(sorted.map((u: any) => {
+        const pu = withLeaveBalance(publicUser(u), balances);
+        return u.clientId != null ? { ...pu, clientName: clientsById.get(u.clientId)?.name || null } : pu;
+      }));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -1215,7 +1225,12 @@ async function startServer() {
         used: 0,
       });
 
-      res.json(withLeaveBalance(publicUser(newUser), await db.getAllLeaveBalances(req.user.companyId)));
+      const puNew = withLeaveBalance(publicUser(newUser), await db.getAllLeaveBalances(req.user.companyId));
+      if (newUser.clientId != null) {
+        const linkedClient = await db.getClientById(req.user.companyId, newUser.clientId);
+        (puNew as any).clientName = linkedClient?.name || null;
+      }
+      res.json(puNew);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1287,7 +1302,12 @@ async function startServer() {
         await db.updateLeaveBalance(req.user.companyId, id, { entitlement: soldeConge });
       }
 
-      res.json(withLeaveBalance(publicUser(updatedUser), await db.getAllLeaveBalances(req.user.companyId)));
+      const puUpdated = withLeaveBalance(publicUser(updatedUser), await db.getAllLeaveBalances(req.user.companyId));
+      if (updatedUser.clientId != null) {
+        const linkedClient = await db.getClientById(req.user.companyId, updatedUser.clientId);
+        (puUpdated as any).clientName = linkedClient?.name || null;
+      }
+      res.json(puUpdated);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -3138,6 +3158,38 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  /**
+   * Un administrateur ouvre l'espace portail d'un client sans en connaître le
+   * mot de passe — pour vérifier ce qu'un client voit, ou l'assister en
+   * direct — plutôt que de devoir se déconnecter et se reconnecter à la main.
+   * Émet un jeton pour le compte CLIENT rattaché à ce dossier, comme
+   * `/api/login`, mais l'autorisation vient de `MANAGE_USERS` et non d'un mot
+   * de passe. Si plusieurs comptes visent le même dossier (gérant,
+   * comptable…), le premier sert. Journalisé en console, même esprit que la
+   * suppression d'entreprise : une bascule d'identité se garde en mémoire.
+   */
+  app.post('/api/clients/:id/impersonate', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
+    try {
+      const clientId = parseInt(req.params.id, 10);
+      const client = await db.getClientById(req.user.companyId, clientId);
+      if (!client) return res.status(404).json({ error: 'Client introuvable' });
+      const users = await db.getAllUsers(req.user.companyId);
+      const target = users.find((u: any) => u.role === CLIENT_ROLE && u.clientId === clientId);
+      if (!target) return res.status(404).json({ error: "Ce client n'a pas encore de compte portail." });
+
+      console.log(`[impersonate] admin ${req.user.id} -> user ${target.id} (client ${clientId}, "${client.name}") at ${new Date().toISOString()}`);
+
+      const token = jwt.sign(
+        { id: target.id, role: target.role, companyId: req.user.companyId, clientId: target.clientId ?? null, isPlatformAdmin: false },
+        JWT_SECRET, { expiresIn: '1d' },
+      );
+      res.json({ token, username: target.username });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // ---------------------------------------------------------
   // Services API Routes
   // ---------------------------------------------------------
@@ -4059,12 +4111,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     try {
       const all = await db.getAllInvoices(req.user.companyId);
       const q = String(req.query.q || '').toLowerCase();
-      const filtered = q
-        ? all.filter((i: any) =>
-            (i.number || '').toLowerCase().includes(q) ||
-            (i.clientName || '').toLowerCase().includes(q) ||
-            (i.title || '').toLowerCase().includes(q))
-        : all;
+      const kind = String(req.query.kind || '');
+      const filtered = all
+        .filter((i: any) => !q ||
+          (i.number || '').toLowerCase().includes(q) ||
+          (i.clientName || '').toLowerCase().includes(q) ||
+          (i.title || '').toLowerCase().includes(q))
+        .filter((i: any) => !kind || i.documentKind === kind);
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
       const offset = parseInt(req.query.offset, 10) || 0;
 

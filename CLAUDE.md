@@ -552,6 +552,49 @@ le gérant et son comptable — sans table pivot, et un compte ne peut par
 construction en viser qu'un seul. `CLIENT_ROLE` vit dans
 [roles.ts](src/constants/roles.ts) et sert des deux côtés.
 
+**Un administrateur ouvre l'espace d'un client sans connaître son mot de
+passe, ni se déconnecter.** Le bouton « Espace client » de la fiche client
+(`ClientsManagement.tsx`, derrière `MANAGE_USERS`) appelle
+`POST /api/clients/:id/impersonate`, qui trouve le compte `CLIENT` rattaché à
+ce dossier (le premier s'il y en a plusieurs) et émet un jeton pour lui,
+exactement comme `/api/login` mais sans mot de passe — l'autorisation vient de
+la permission, pas d'un secret. `AuthContext.impersonateClient()` range le
+jeton admin sous une clé `localStorage` distincte (`impersonator_token`,
+jamais dans `auth_token`, pour survivre à un rechargement pendant la bascule)
+avant de basculer sur celui du client ; `stopImpersonating()` fait le chemin
+inverse. `App.tsx` affiche une bannière fixe au-dessus du portail tant que
+`isImpersonating` est vrai, avec le seul bouton de retour — sans elle,
+l'admin resterait coincé dans une session client sans porte de sortie
+visible. Un dossier sans aucun compte `CLIENT` renvoie une erreur affichée
+dans le tiroir plutôt qu'une bascule silencieuse vers rien.
+
+**« Comptes clients » est une sous-vue d'Équipe, pas un second écran.**
+[UsersManagement.tsx](src/components/UsersManagement.tsx) porte deux onglets
+sur la même liste déjà chargée (`GET /api/users`) — « Équipe » (tout sauf
+`CLIENT_ROLE`) et « Comptes clients » (uniquement `CLIENT_ROLE`), avec un
+compteur sur le second. Les deux populations ne se lisent jamais ensemble :
+noyer une poignée de comptes portail parmi des dizaines de collaborateurs (ou
+l'inverse) ne montre rien d'utile. La colonne « Rôle » devient « Dossier
+client » dans cet onglet — le rôle y est toujours `CLIENT`, donc l'afficher
+répéterait ce que l'onglet dit déjà — et « Nouvel utilisateur » devient
+« Nouveau compte client », qui ouvre le formulaire avec `Rôle` déjà sur
+`Client`. Une recherche par nom d'utilisateur filtre les deux onglets.
+
+`GET /api/users` résout `clientName` pour chaque compte `CLIENT` (un
+`Map` sur `getAllClients`, pas un aller-retour par utilisateur) — sans quoi
+la fiche d'édition d'un compte client affichait « Dossier n° 123 » au lieu du
+nom du client, faute d'avoir jamais reçu autre chose que l'id.
+`POST`/`PUT /api/users` répondent de même après écriture. Le nom d'utilisateur
+d'un compte client se pré-remplit avec le nom du client choisi dans le
+sélecteur — c'est ainsi qu'un compte portail se connecte, pas avec un
+identifiant que l'admin invente — mais reste modifiable avant la création.
+
+**Le champ « Rôle » vit juste sous nom d'utilisateur et mot de passe**, pas
+après tout le bloc coût employeur / shift / congés : c'est lui qui décide si
+ce bloc s'affiche ou s'efface au profit du sélecteur de dossier client, donc
+le choisir en dernier obligeait à faire défiler tout un formulaire non
+pertinent avant de trouver le réglage qui en changeait le contenu.
+
 **La sécurité est un périmètre global, pas un filtre par route.** Un compte
 `CLIENT` n'a aucune permission, donc `requirePermission` le refuse déjà partout
 où il est posé — mais beaucoup de routes ne portent que `authenticate` et lui
