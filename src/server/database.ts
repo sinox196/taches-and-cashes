@@ -64,6 +64,7 @@ const TENANT_COLLECTIONS = [
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
+  'publicHolidays',
 ];
 
 async function initJsonDb(): Promise<Database> {
@@ -97,6 +98,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.echeanceColumns) db.echeanceColumns = [];
     if (!db.echeanceStatuses) db.echeanceStatuses = [];
     if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
+    if (!db.publicHolidays) db.publicHolidays = [];
     if (!db.orders) db.orders = [];
     if (!db.messageGroups) db.messageGroups = [];
     if (!db.platformSettings) db.platformSettings = defaultPlatformSettings();
@@ -856,6 +858,28 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.echeanceStatusOptions, companyId, id);
       if (index === -1) return false;
       db.echeanceStatusOptions.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllPublicHolidays: async (companyId: string) => scoped(db.publicHolidays, companyId),
+    createPublicHoliday: async (companyId: string, holiday: any) => {
+      const row = { ...holiday, companyId };
+      db.publicHolidays.push(row);
+      await saveDb();
+      return row;
+    },
+    updatePublicHoliday: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.publicHolidays, companyId, id);
+      if (index === -1) return null;
+      db.publicHolidays[index] = { ...db.publicHolidays[index], ...updates };
+      await saveDb();
+      return db.publicHolidays[index];
+    },
+    deletePublicHoliday: async (companyId: string, id: string) => {
+      const index = indexScoped(db.publicHolidays, companyId, id);
+      if (index === -1) return false;
+      db.publicHolidays.splice(index, 1);
       await saveDb();
       return true;
     },

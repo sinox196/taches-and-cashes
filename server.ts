@@ -4741,6 +4741,62 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  // Calendrier des jours fériés — un calendrier de référence géré par
+  // l'admin (`MANAGE_LEAVE_REQUESTS`, le même que le reste de la gestion RH),
+  // consultable par quiconque a `VIEW_HR`. Délibérément aucune connexion au
+  // pointage : ni blocage de saisie un jour férié, ni pré-remplissage, ni
+  // calcul de capacité — juste une liste de dates que l'admin tient à jour.
+  app.get('/api/hr/holidays', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
+    try {
+      const rows = await db.getAllPublicHolidays(req.user.companyId);
+      res.json(rows.slice().sort((a: any, b: any) => String(a.date).localeCompare(String(b.date))));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/hr/holidays', authenticate, requirePermission('MANAGE_LEAVE_REQUESTS'), async (req: any, res: any) => {
+    try {
+      const date = String(req.body?.date ?? '').trim();
+      const label = String(req.body?.label ?? '').trim().slice(0, 80);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Date invalide' });
+      if (!label) return res.status(400).json({ error: 'Le libellé est obligatoire' });
+
+      const existing = await db.getAllPublicHolidays(req.user.companyId);
+      const clash = existing.find((h: any) => h.date === date && String(h.label).toLowerCase() === label.toLowerCase());
+      if (clash) return res.json(clash);
+
+      res.status(201).json(await db.createPublicHoliday(req.user.companyId, { id: genId('holiday'), date, label }));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/hr/holidays/:id', authenticate, requirePermission('MANAGE_LEAVE_REQUESTS'), async (req: any, res: any) => {
+    try {
+      const date = String(req.body?.date ?? '').trim();
+      const label = String(req.body?.label ?? '').trim().slice(0, 80);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Date invalide' });
+      if (!label) return res.status(400).json({ error: 'Le libellé est obligatoire' });
+
+      const updated = await db.updatePublicHoliday(req.user.companyId, req.params.id, { date, label });
+      if (!updated) return res.status(404).json({ error: 'Not found' });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/hr/holidays/:id', authenticate, requirePermission('MANAGE_LEAVE_REQUESTS'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deletePublicHoliday(req.user.companyId, req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET Absence Authorizations
   app.get('/api/hr/authorizations', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
     try {

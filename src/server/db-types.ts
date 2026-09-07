@@ -108,6 +108,17 @@ export interface Database {
   getLeaveBalanceByUserId(companyId: string, userId: number): Promise<any>;
   updateLeaveBalance(companyId: string, userId: number, updates: any): Promise<any>;
 
+  /**
+   * Calendrier des jours fériés — `{id, date: 'YYYY-MM-DD', label}`. Purement
+   * un calendrier de référence : rien ici ne bloque, ne pré-remplit ni ne
+   * modifie le pointage d'un utilisateur. Voir CLAUDE.md « Leave balances »
+   * / RH.
+   */
+  getAllPublicHolidays(companyId: string): Promise<any[]>;
+  createPublicHoliday(companyId: string, holiday: any): Promise<any>;
+  updatePublicHoliday(companyId: string, id: string, updates: any): Promise<any | null>;
+  deletePublicHoliday(companyId: string, id: string): Promise<boolean>;
+
   getAllTimeEntries(companyId: string): Promise<any[]>;
   getTimeEntryById(companyId: string, id: string): Promise<any | undefined>;
   createTimeEntry(companyId: string, entry: any): Promise<any>;
@@ -323,6 +334,8 @@ export const emptyDb = () => ({
   echeanceColumns: [],
   echeanceStatuses: [],
   echeanceStatusOptions: [],
+  // Calendrier des jours fériés — référence seule, n'affecte pas le pointage.
+  publicHolidays: [],
   orders: [],
   settingsByCompany: [],
   platformSettings: defaultPlatformSettings(),

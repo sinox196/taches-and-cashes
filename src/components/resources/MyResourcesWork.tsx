@@ -176,8 +176,15 @@ export const MyResourcesWork: React.FC = () => {
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:border-gray-400">
+            {/* La recherche est un filtre de plus, pas un bandeau à part : sur
+                un écran étroit, un `flex-wrap` ordinaire renvoyait le champ de
+                recherche (large, `w-64`) seul sur sa propre ligne au-dessus
+                des `<select>`, qui eux se réarrangeaient en dessous — ça se
+                lisait comme deux barres distinctes. `flex-nowrap
+                overflow-x-auto` en fait une seule rangée qui défile
+                latéralement, comme la barre d'onglets RH juste au-dessus. */}
+            <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
+              <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:border-gray-400 shrink-0">
                 <Search className="w-3.5 h-3.5 text-gray-400 ml-2.5 shrink-0" />
                 <input
                   value={historySearch}
@@ -190,7 +197,7 @@ export const MyResourcesWork: React.FC = () => {
               <select
                 value={clientFilter}
                 onChange={e => { setClientFilter(e.target.value); historyPage.setPage(1); }}
-                className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+                className="shrink-0 bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
               >
                 <option value="">Tous les clients</option>
                 {clientOptions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -198,7 +205,7 @@ export const MyResourcesWork: React.FC = () => {
               <select
                 value={userFilter}
                 onChange={e => { setUserFilter(e.target.value); historyPage.setPage(1); }}
-                className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+                className="shrink-0 bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
               >
                 <option value="">Tous les collaborateurs</option>
                 {userOptions.map(u => <option key={u} value={u}>{u}</option>)}
@@ -206,7 +213,7 @@ export const MyResourcesWork: React.FC = () => {
               <select
                 value={procedureFilter}
                 onChange={e => { setProcedureFilter(e.target.value); historyPage.setPage(1); }}
-                className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+                className="shrink-0 bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
               >
                 <option value="">Toutes les procédures</option>
                 {procedureOptions.map(p => <option key={p} value={p}>{p}</option>)}

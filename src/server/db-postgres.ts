@@ -81,6 +81,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   echeance_columns: { desc: false },
   echeance_statuses: { desc: false },
   echeance_status_options: { desc: false },
+  public_holidays: { desc: false },
   orders: { desc: true },
 };
 
@@ -117,6 +118,7 @@ const TABLE_FOR: Record<string, string> = {
   echeanceColumns: 'echeance_columns',
   echeanceStatuses: 'echeance_statuses',
   echeanceStatusOptions: 'echeance_status_options',
+  publicHolidays: 'public_holidays',
   orders: 'orders',
 };
 
@@ -362,6 +364,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const echeanceColumns = tenantCollection('echeance_columns');
   const echeanceStatuses = tenantCollection('echeance_statuses');
   const echeanceStatusOptions = tenantCollection('echeance_status_options');
+  const publicHolidays = tenantCollection('public_holidays');
 
   const db: Database = {
     // Case-insensitive: a self-serve signup's username is its email
@@ -759,6 +762,11 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     createEcheanceStatusOption: echeanceStatusOptions.create,
     updateEcheanceStatusOption: echeanceStatusOptions.update,
     deleteEcheanceStatusOption: echeanceStatusOptions.remove,
+
+    getAllPublicHolidays: publicHolidays.all,
+    createPublicHoliday: publicHolidays.create,
+    updatePublicHoliday: publicHolidays.update,
+    deletePublicHoliday: publicHolidays.remove,
 
     getAllOrders: orders.all,
     createOrder: orders.create,

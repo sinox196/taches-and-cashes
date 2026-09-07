@@ -7,12 +7,13 @@ import { AbsencesTab } from './AbsencesTab';
 import { LoansTab } from './LoansTab';
 import { AdvancesTab } from './AdvancesTab';
 import { AttendanceTab } from './AttendanceTab';
+import { HolidaysTab } from './HolidaysTab';
 import { LeaveBalance } from '../../types';
 
 export const HRManagement: React.FC = () => {
   const { hasPermission, token } = useAuth();
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'leaves' | 'absences' | 'loans' | 'advances' | 'attendance'>('leaves');
+  const [activeTab, setActiveTab] = useState<'leaves' | 'absences' | 'loans' | 'advances' | 'attendance' | 'holidays'>('leaves');
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
 
   const loadBalance = () => {
@@ -118,6 +119,12 @@ export const HRManagement: React.FC = () => {
           >
             Avances
           </button>
+          <button
+            onClick={() => setActiveTab('holidays')}
+            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'holidays' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Jours fériés
+          </button>
         </div>
 
         {/* Ne défile plus lui-même : chaque onglet fait défiler son tableau et
@@ -129,7 +136,8 @@ export const HRManagement: React.FC = () => {
             : activeTab === 'absences' ? <AbsencesTab />
             : activeTab === 'attendance' ? <AttendanceTab />
             : activeTab === 'loans' ? <LoansTab />
-            : <AdvancesTab />}
+            : activeTab === 'advances' ? <AdvancesTab />
+            : <HolidaysTab />}
         </div>
       </div>
     </main>
