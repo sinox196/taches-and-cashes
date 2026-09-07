@@ -857,7 +857,7 @@ export default function App() {
         ) : activeNav === 'HR' && hasPermission('VIEW_HR') ? (
           <HRManagement />
         ) : activeNav === 'Time Tracking' ? (
-          <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
+          <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col sm:min-h-0 space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
             
             
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">

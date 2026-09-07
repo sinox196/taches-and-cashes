@@ -157,7 +157,7 @@ export const TaskSubviews: React.FC<{
   ];
 
   return (
-    <>
+    <div className="flex flex-col sm:flex-1 sm:min-h-0">
       {/* Défile latéralement plutôt que de passer à la ligne : trois libellés
           ne tiennent pas dans la largeur d'un téléphone, comme la barre des
           onglets RH et celle des Ressources métier. */}
@@ -185,26 +185,28 @@ export const TaskSubviews: React.FC<{
         ))}
       </div>
 
-      {tab === 'chrono' ? children : tab === 'delegatedByMe' ? (
-        <DelegatedByMeList rows={delegated} />
-      ) : (
-        <div className="flex flex-col gap-4">
-          {error && (
-            <div className="p-2.5 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
-              {error}
-            </div>
-          )}
-          <AssignmentList
-            rows={tab === 'planned' ? planned : assigned}
-            kind={tab === 'planned' ? 'planned' : 'assigned'}
-            startingId={startingId}
-            cancelingId={cancelingId}
-            onStart={start}
-            onCancel={cancel}
-          />
-        </div>
-      )}
-    </>
+      <div className="flex flex-col sm:flex-1 sm:min-h-0">
+        {tab === 'chrono' ? children : tab === 'delegatedByMe' ? (
+          <DelegatedByMeList rows={delegated} />
+        ) : (
+          <div className="flex flex-col gap-4">
+            {error && (
+              <div className="p-2.5 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
+                {error}
+              </div>
+            )}
+            <AssignmentList
+              rows={tab === 'planned' ? planned : assigned}
+              kind={tab === 'planned' ? 'planned' : 'assigned'}
+              startingId={startingId}
+              cancelingId={cancelingId}
+              onStart={start}
+              onCancel={cancel}
+            />
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -319,6 +321,16 @@ const AssignmentList: React.FC<{
  * demandé ce filtre-là sur cette liste). La barre reste **toujours visible**,
  * même sur une page unique, même règle que le Brouillard de caisse et les
  * onglets RH : une barre qui apparaît et disparaît fait sauter la liste.
+ *
+ * **La liste défile dans son propre cadre, la barre ne défile jamais hors
+ * champ.** Un premier jet laissait la carte grandir avec son contenu et
+ * comptait sur le défilement de la page pour atteindre « Suivant » — sur 15
+ * lignes ça marchait, mais c'est exactement le piège `sticky bottom-0` que
+ * les onglets RH documentent déjà : la barre était bien toujours rendue,
+ * jamais toujours *visible*. La chaîne `sm:flex-1 sm:min-h-0` remonte
+ * jusqu'à `TaskSubviews` et jusqu'au `<main>` de la page Tâches dans
+ * App.tsx, pour que ce soit le cadre `overflow-auto` interne qui défile —
+ * pas la colonne de contenu de l'application.
  */
 const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
   const [userFilter, setUserFilter] = useState('');
@@ -367,50 +379,58 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-4 sm:p-5">
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="w-48">
-          <SearchableSelect value={userFilter} onChange={setUserFilterAndReset} options={userOptions} placeholder="Tous les collaborateurs" size="sm" />
-        </div>
-        <div className="w-44">
-          <SearchableSelect value={missionFilter} onChange={setMissionFilterAndReset} options={missionOptions} placeholder="Toutes les missions" size="sm" />
-        </div>
-        <div className="w-52">
-          <SearchableSelect value={typeFilter} onChange={setTypeFilterAndReset} options={typeOptions} placeholder="Tous les types de tâche" size="sm" />
-        </div>
-        <div className="w-44">
-          <SearchableSelect value={statusFilter} onChange={setStatusFilterAndReset} options={statusOptions} placeholder="Tous les statuts" size="sm" />
-        </div>
-      </div>
-      {filtered.length === 0 ? (
-        <p className="text-[12.5px] text-gray-400 italic text-center py-6">Aucune tâche ne correspond à ces filtres.</p>
-      ) : (
-      <div className="divide-y divide-gray-100">
-        {pager.pageRows.map(a => (
-          <div key={a.id} className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 py-3 first:pt-0 last:pb-0">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[13.5px] font-semibold text-gray-900">{a.pole}</span>
-                {a.taskType && (
-                  <span className="text-[10.5px] text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">{a.taskType}</span>
-                )}
-                <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${DELEGATED_STATUS_STYLE[a.status] || DELEGATED_STATUS_STYLE.PENDING}`}>
-                  {DELEGATED_STATUS_LABEL[a.status] || a.status}
-                </span>
-              </div>
-              {a.client && <div className="text-[12px] text-gray-500 mt-0.5">{a.client}</div>}
-              {a.description && (
-                <div className="text-[12px] text-gray-400 italic mt-0.5" title={a.description}>{a.description}</div>
-              )}
-              <div className="text-[11px] text-gray-400 mt-1">Assignée à {a.assignedToName}</div>
-            </div>
+    <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden flex flex-col sm:flex-1 sm:min-h-0">
+      <div className="p-4 flex flex-col sm:flex-1 sm:min-h-0">
+        <div className="flex flex-wrap items-center gap-2 mb-4 shrink-0">
+          <div className="w-48">
+            <SearchableSelect value={userFilter} onChange={setUserFilterAndReset} options={userOptions} placeholder="Tous les collaborateurs" size="sm" />
           </div>
-        ))}
+          <div className="w-44">
+            <SearchableSelect value={missionFilter} onChange={setMissionFilterAndReset} options={missionOptions} placeholder="Toutes les missions" size="sm" />
+          </div>
+          <div className="w-52">
+            <SearchableSelect value={typeFilter} onChange={setTypeFilterAndReset} options={typeOptions} placeholder="Tous les types de tâche" size="sm" />
+          </div>
+          <div className="w-44">
+            <SearchableSelect value={statusFilter} onChange={setStatusFilterAndReset} options={statusOptions} placeholder="Tous les statuts" size="sm" />
+          </div>
+        </div>
+        {/* Défile dans son propre cadre plutôt que d'étirer la carte : c'est
+            ce qui laisse la barre de pagination ci-dessous atteignable sans
+            faire défiler toute la page — même piège que documenté pour les
+            onglets RH et le Brouillard de caisse. */}
+        <div className="overflow-auto flex-1 min-h-0 sm:min-h-[260px]">
+          {filtered.length === 0 ? (
+            <p className="text-[12.5px] text-gray-400 italic text-center py-6">Aucune tâche ne correspond à ces filtres.</p>
+          ) : (
+          <div className="divide-y divide-gray-100">
+            {pager.pageRows.map(a => (
+              <div key={a.id} className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 py-3 first:pt-0 last:pb-0">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[13.5px] font-semibold text-gray-900">{a.pole}</span>
+                    {a.taskType && (
+                      <span className="text-[10.5px] text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">{a.taskType}</span>
+                    )}
+                    <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${DELEGATED_STATUS_STYLE[a.status] || DELEGATED_STATUS_STYLE.PENDING}`}>
+                      {DELEGATED_STATUS_LABEL[a.status] || a.status}
+                    </span>
+                  </div>
+                  {a.client && <div className="text-[12px] text-gray-500 mt-0.5">{a.client}</div>}
+                  {a.description && (
+                    <div className="text-[12px] text-gray-400 italic mt-0.5" title={a.description}>{a.description}</div>
+                  )}
+                  <div className="text-[11px] text-gray-400 mt-1">Assignée à {a.assignedToName}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          )}
+        </div>
+        {/* Toujours visible, même sur une seule page — même règle que le
+            Brouillard de caisse et les onglets RH. */}
+        <PaginationBar page={pager} unit="tâches déléguées" />
       </div>
-      )}
-      {/* Toujours visible, même sur une seule page — même règle que le
-          Brouillard de caisse et les onglets RH. */}
-      <PaginationBar page={pager} unit="tâches déléguées" />
     </div>
   );
 };
