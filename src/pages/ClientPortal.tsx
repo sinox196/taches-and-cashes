@@ -3,11 +3,13 @@ import { Logo } from '../components/Logo';
 import { NotificationBell } from '../components/NotificationBell';
 import { ChatPage } from '../components/chat/ChatPage';
 import { InvoicePreview } from '../components/cash/InvoicePreview';
+import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { useAuth } from '../context/AuthContext';
 import { formatCostTND } from '../utils/formatters';
+import { paymentModeLabel, isCashMode } from '../constants/paymentModes';
 import {
   LogOut, FileText, ClipboardCheck, FolderCheck, MessageCircle,
-  AlertTriangle, CheckCircle2, Loader2, Menu, X,
+  AlertTriangle, CheckCircle2, Loader2, Menu, X, Wallet,
 } from 'lucide-react';
 
 /**
@@ -32,13 +34,19 @@ interface Summary {
 
 interface StatementLine {
   kind: 'FACTURE' | 'ENCAISSEMENT';
-  /** Présent uniquement sur une ligne FACTURE — la ligne se clique alors pour ouvrir le document. */
+  /**
+   * Présent sur une ligne FACTURE (ouvre le document) et sur une ligne
+   * ENCAISSEMENT qui vient réellement d'une fiche/du brouillard (ouvre le
+   * détail du règlement) — absent sur le montant hérité en simple nombre,
+   * qui n'a pas d'id à rouvrir.
+   */
   id?: string;
   date: string;
   label: string;
   reference: string;
   dueDate?: string | null;
   paymentMethod?: string;
+  bankAccount?: string;
   debit: number;
   credit: number;
   solde: number;
@@ -96,6 +104,11 @@ export const ClientPortal: React.FC = () => {
   const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
   const [openInvoice, setOpenInvoice] = useState<any | null>(null);
   const [invoiceError, setInvoiceError] = useState('');
+
+  // Règlement ouvert depuis le relevé — déjà entièrement dans la ligne
+  // (contrairement à une facture, un règlement n'a pas de document séparé à
+  // charger), donc pas de round-trip réseau ici.
+  const [openReglement, setOpenReglement] = useState<StatementLine | null>(null);
 
   const get = useCallback(async (path: string) => {
     const res = await fetch(`/api/portal/${path}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -226,7 +239,9 @@ export const ClientPortal: React.FC = () => {
                 <p className="text-[12.5px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{invoiceError}</p>
               )}
 
-              {tab === 'statement' && <StatementView statement={statement} onOpenInvoice={setOpenInvoiceId} />}
+              {tab === 'statement' && (
+                <StatementView statement={statement} onOpenInvoice={setOpenInvoiceId} onOpenReglement={setOpenReglement} />
+              )}
               {tab === 'tasks' && <TasksView tasks={tasks} />}
               {tab === 'deliverables' && <DeliverablesView deliverables={deliverables} />}
             </>
@@ -240,6 +255,10 @@ export const ClientPortal: React.FC = () => {
           onClose={() => setOpenInvoiceId(null)}
           companyEndpoint="/api/portal/company"
         />
+      )}
+
+      {openReglement && (
+        <ReglementDetailModal reglement={openReglement} onClose={() => setOpenReglement(null)} />
       )}
     </div>
   );
@@ -260,11 +279,23 @@ const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <p className="py-10 text-center text-[13px] text-gray-500">{children}</p>
 );
 
+/** Une ligne cliquable ouvre soit une facture, soit le détail d'un règlement — jamais les deux. */
+const lineClickHandler = (
+  l: StatementLine,
+  onOpenInvoice: (id: string) => void,
+  onOpenReglement: (l: StatementLine) => void,
+): (() => void) | undefined => {
+  if (l.kind === 'FACTURE' && l.id) return () => onOpenInvoice(l.id!);
+  if (l.kind === 'ENCAISSEMENT' && l.id) return () => onOpenReglement(l);
+  return undefined;
+};
+
 /** Relevé de compte : une ligne par facture ou règlement, avec le solde qui court. */
 const StatementView: React.FC<{
   statement: { soldeAnterieur: number; lines: StatementLine[]; soldeGlobal: number } | null;
   onOpenInvoice: (id: string) => void;
-}> = ({ statement, onOpenInvoice }) => {
+  onOpenReglement: (l: StatementLine) => void;
+}> = ({ statement, onOpenInvoice, onOpenReglement }) => {
   if (!statement) return null;
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -293,16 +324,18 @@ const StatementView: React.FC<{
             </tr>
             {statement.lines.length === 0 ? (
               <tr><td colSpan={5}><Empty>Aucun mouvement enregistré.</Empty></td></tr>
-            ) : statement.lines.map((l, i) => (
+            ) : statement.lines.map((l, i) => {
+              const onClick = lineClickHandler(l, onOpenInvoice, onOpenReglement);
+              return (
               <tr
                 key={i}
-                onClick={l.kind === 'FACTURE' && l.id ? () => onOpenInvoice(l.id!) : undefined}
-                className={`hover:bg-gray-50 ${l.kind === 'FACTURE' && l.id ? 'cursor-pointer' : ''}`}
+                onClick={onClick}
+                className={`hover:bg-gray-50 ${onClick ? 'cursor-pointer' : ''}`}
               >
                 <td className="px-5 py-2.5 whitespace-nowrap text-gray-700">{fdate(l.date)}</td>
                 <td className="px-5 py-2.5">
-                  <span className={l.kind === 'FACTURE' && l.id ? 'text-navy font-medium hover:underline' : 'text-gray-900'}>{l.label}</span>
-                  {l.paymentMethod && <span className="ml-2 text-[11px] text-gray-400">{l.paymentMethod}</span>}
+                  <span className={onClick ? 'text-navy font-medium hover:underline' : 'text-gray-900'}>{l.label}</span>
+                  {l.paymentMethod && <span className="ml-2 text-[11px] text-gray-400">{paymentModeLabel(l.paymentMethod)}</span>}
                   {l.kind === 'FACTURE' && l.dueDate && (
                     <span className="ml-2 text-[11px] text-gray-400">échéance {fdate(l.dueDate)}</span>
                   )}
@@ -311,7 +344,8 @@ const StatementView: React.FC<{
                 <td className="px-5 py-2.5 text-right font-mono text-emerald-700">{l.credit ? formatCostTND(l.credit) : '—'}</td>
                 <td className="px-5 py-2.5 text-right font-mono font-semibold text-gray-900">{formatCostTND(l.solde)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
           <tfoot>
             <tr className="bg-gray-100 border-t border-gray-200">
@@ -329,14 +363,16 @@ const StatementView: React.FC<{
         </div>
         {statement.lines.length === 0 ? (
           <Empty>Aucun mouvement enregistré.</Empty>
-        ) : statement.lines.map((l, i) => (
+        ) : statement.lines.map((l, i) => {
+          const onClick = lineClickHandler(l, onOpenInvoice, onOpenReglement);
+          return (
           <div
             key={i}
-            onClick={l.kind === 'FACTURE' && l.id ? () => onOpenInvoice(l.id!) : undefined}
-            className={`border border-gray-200 rounded-lg p-3 ${l.kind === 'FACTURE' && l.id ? 'cursor-pointer' : ''}`}
+            onClick={onClick}
+            className={`border border-gray-200 rounded-lg p-3 ${onClick ? 'cursor-pointer' : ''}`}
           >
             <div className="flex items-baseline justify-between gap-2 mb-1.5">
-              <span className={`text-[13px] font-semibold truncate ${l.kind === 'FACTURE' && l.id ? 'text-navy' : 'text-gray-900'}`}>{l.label}</span>
+              <span className={`text-[13px] font-semibold truncate ${onClick ? 'text-navy' : 'text-gray-900'}`}>{l.label}</span>
               <span className="text-[12px] text-gray-500 shrink-0">{fdate(l.date)}</span>
             </div>
             <div className="flex items-center justify-between text-[12.5px]">
@@ -346,7 +382,8 @@ const StatementView: React.FC<{
               <span className="font-mono font-semibold text-gray-900">{formatCostTND(l.solde)}</span>
             </div>
           </div>
-        ))}
+          );
+        })}
         <div className="flex justify-between text-[13px] font-bold px-1 pt-2 border-t border-gray-200">
           <span>Solde à payer</span>
           <span className="font-mono">{formatCostTND(statement.soldeGlobal)}</span>
@@ -355,6 +392,54 @@ const StatementView: React.FC<{
     </div>
   );
 };
+
+/**
+ * Détail d'un règlement, ouvert depuis une ligne ENCAISSEMENT du relevé —
+ * les mêmes champs que Règlements clients côté Cash (objet, mode, compte
+ * bancaire, référence, montant), pas de round-trip réseau puisque
+ * `/api/portal/statement` les porte déjà tous dans la ligne.
+ */
+const ReglementDetailModal: React.FC<{ reglement: StatementLine; onClose: () => void }> = ({ reglement, onClose }) => {
+  useEscapeToClose(onClose);
+  const cash = isCashMode(reglement.paymentMethod);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <Wallet className="w-4 h-4" />
+            </span>
+            <div>
+              <h2 className="text-[14px] font-bold text-gray-900">Règlement reçu</h2>
+              <p className="text-[11.5px] text-gray-500">{fdate(reglement.date)}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 space-y-3 text-[13px]">
+          <Row label="Objet du règlement" value={reglement.label} />
+          <Row label="Mode de règlement" value={paymentModeLabel(reglement.paymentMethod) || 'Espèce'} />
+          {!cash && <Row label="Compte bancaire" value={reglement.bankAccount || '—'} />}
+          <Row label="Référence" value={reglement.reference || '—'} />
+          <div className="flex justify-between items-center pt-3 border-t border-gray-100">
+            <span className="text-gray-500 font-medium">Montant</span>
+            <span className="font-mono font-bold text-[16px] text-emerald-700">{formatCostTND(reglement.credit)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="flex justify-between gap-3">
+    <span className="text-gray-500 shrink-0">{label}</span>
+    <span className="text-gray-900 font-medium text-right truncate">{value}</span>
+  </div>
+);
 
 /** Travaux réalisés — avancement uniquement, jamais le temps passé ni le coût. */
 const TasksView: React.FC<{ tasks: PortalTask[] }> = ({ tasks }) => (

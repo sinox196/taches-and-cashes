@@ -1494,7 +1494,7 @@ export const ClientsManagement: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {hasPermission('MANAGE_USERS') && (
+                {hasPermission('ACCESS_CLIENT_PORTAL') && (
                   <button
                     onClick={() => handleOpenClientSpace(viewingClient.id)}
                     disabled={impersonateLoadingId === viewingClient.id}

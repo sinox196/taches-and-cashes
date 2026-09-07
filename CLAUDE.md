@@ -670,6 +670,33 @@ que porte déjà chaque facture reçue, donc rien de plus n'y est exposé.
 `InvoicePreview` accepte un `companyEndpoint` (par défaut `/api/cash/company`)
 pour ce second cas plutôt que de dupliquer le composant.
 
+**Une ligne « ENCAISSEMENT » du relevé s'ouvre au clic elle aussi**, sur les
+mêmes champs que Règlements clients côté Cash (objet du règlement, mode de
+règlement, compte bancaire, référence, montant) — contrairement à une facture,
+un règlement n'a pas de document séparé à charger : `/api/portal/statement`
+porte déjà tout ce qu'il faut sur chaque ligne (`portalEncaissementsFor()`
+renvoie l'objet complet, seule une partie était forwardée dans la ligne avant
+ce correctif), donc `ReglementDetailModal` dans ClientPortal.tsx s'ouvre sans
+round-trip réseau. Seul le montant hérité en simple nombre (voir plus haut)
+n'a pas d'id réel à rouvrir et reste non cliquable.
+
+**L'accès « Espace client » est sa propre permission**
+(`ACCESS_CLIENT_PORTAL`, groupe Clients), pas un sous-effet de `MANAGE_USERS` :
+un cabinet qui veut déléguer l'ouverture du portail — sans donner accès à la
+gestion complète des comptes — le peut. Gardée aux deux bouts comme tout le
+reste : `hasPermission('ACCESS_CLIENT_PORTAL')` sur le bouton
+(`ClientsManagement.tsx`) et `requirePermission('ACCESS_CLIENT_PORTAL')` sur
+`POST /api/clients/:id/impersonate`, plus une entrée dans `PERMISSION_MODULE`
+(`plans.ts`) — sans elle une offre restreinte l'aurait refusée par défaut à
+tout le monde, liste blanche oblige.
+
+**Les libellés de permissions sont en français, sans suffixe anglais.**
+`VIEW`/`EDIT`/`DELETE` s'affichaient « Voir (VIEW) », « Modifier (EDIT) »,
+« Supprimer (DELETE) » dans `PERMISSIONS_GROUPED` — un reliquat du nom
+technique de la permission collé au libellé. Le nom technique (`id`) reste
+inchangé pour ne pas invalider les permissions déjà enregistrées sur des
+comptes existants ; seul le `label` affiché a changé.
+
 **Les conversations de groupe** ([GroupModal.tsx](src/components/chat/GroupModal.tsx), routes `/api/messages/groups*` et `/api/messages/group/:id`) vivent dans le même module que les messages directs : un groupe est un nom plus une liste de membres, et un message de groupe porte `groupId` au lieu de `toUserId`. Une seule route d'envoi pour les deux — la validation, la diffusion SSE et la notification poussée sont identiques, et les dédoubler aurait fait deux endroits à corriger.
 
 **La lecture d'un message de groupe se note dans `readBy`** (un tableau d'ids), pas dans `readAt` : un message direct a un lecteur, un message de groupe en a N, et les compresser dans un seul horodatage aurait fait passer le fil pour lu dès que le premier membre l'ouvre. Sous Postgres l'ajout se fait en JSONB (`|| to_jsonb(...)`) plutôt qu'en lisant puis réécrivant la ligne, pour que deux membres qui ouvrent le fil au même instant ne s'effacent pas l'un l'autre. L'auteur naît dans `readBy` de son propre message, sinon il se compterait dans ses propres non-lus. La double coche n'apparaît **que** sur un fil direct : dans un groupe « lu » n'a pas de réponse unique.

@@ -258,7 +258,7 @@ export const PERMISSION_MODULE: Record<string, PlanModule> = {
 
   VIEW_CLIENTS: 'Clients', CREATE_CLIENTS: 'Clients', EDIT_CLIENTS: 'Clients',
   DELETE_CLIENTS: 'Clients', MANAGE_CLIENT_FIELDS: 'Clients',
-  VIEW_CLIENT_FINANCIALS: 'Clients',
+  VIEW_CLIENT_FINANCIALS: 'Clients', ACCESS_CLIENT_PORTAL: 'Clients',
 
   VIEW_CASH: 'Cash', MANAGE_CASH: 'Cash',
 

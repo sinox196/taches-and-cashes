@@ -15,9 +15,9 @@ const PERMISSIONS_GROUPED = [
   {
     group: 'Pointage',
     permissions: [
-      { id: 'VIEW', label: 'Voir (VIEW)', desc: 'Peut consulter le suivi du temps' },
-      { id: 'EDIT', label: 'Modifier (EDIT)', desc: 'Peut modifier le suivi du temps' },
-      { id: 'DELETE', label: 'Supprimer (DELETE)', desc: 'Peut supprimer des données du suivi du temps' },
+      { id: 'VIEW', label: 'Voir', desc: 'Peut consulter le suivi du temps' },
+      { id: 'EDIT', label: 'Modifier', desc: 'Peut modifier le suivi du temps' },
+      { id: 'DELETE', label: 'Supprimer', desc: 'Peut supprimer des données du suivi du temps' },
       { id: 'MANAGE_SERVICES', label: 'Gérer missions & types de tâches', desc: 'Peut ajouter, modifier et supprimer les missions et leurs types de tâches' },
       { id: 'ASSIGN_TASKS', label: 'Assigner des tâches', desc: 'Peut assigner une mission et un type de tâche à un collaborateur' },
     ]
@@ -31,6 +31,7 @@ const PERMISSIONS_GROUPED = [
       { id: 'DELETE_CLIENTS', label: 'Supprimer clients', desc: 'Peut archiver/supprimer des clients' },
       { id: 'MANAGE_CLIENT_FIELDS', label: 'Gérer champs', desc: 'Peut gérer les champs personnalisés' },
       { id: 'VIEW_CLIENT_FINANCIALS', label: 'Voir totaux financiers', desc: 'Peut voir les colonnes Solde antérieur, Montant de facture, Encaissements et Reste à payer sur la liste des clients, ainsi que la barre "Total Général". Sans cette permission, ces chiffres ne sont pas envoyés au navigateur.' },
+      { id: 'ACCESS_CLIENT_PORTAL', label: 'Espace client', desc: "Peut ouvrir l'espace client (portail) d'un dossier depuis sa fiche, sans connaître son mot de passe." },
     ]
   },
   {

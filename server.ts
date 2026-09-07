@@ -3172,7 +3172,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * comptable…), le premier sert. Journalisé en console, même esprit que la
    * suppression d'entreprise : une bascule d'identité se garde en mémoire.
    */
-  app.post('/api/clients/:id/impersonate', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
+  app.post('/api/clients/:id/impersonate', authenticate, requirePermission('ACCESS_CLIENT_PORTAL'), async (req: any, res: any) => {
     try {
       const clientId = parseInt(req.params.id, 10);
       const client = await db.getClientById(req.user.companyId, clientId);
@@ -5446,7 +5446,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         kind: 'FACTURE' | 'ENCAISSEMENT';
         id?: string;
         date: string; label: string; reference: string;
-        dueDate?: string | null; paymentMethod?: string;
+        dueDate?: string | null; paymentMethod?: string; bankAccount?: string;
         debit: number; credit: number; currency: string;
       };
       const lines: StatementLine[] = invoices.map((inv: any): StatementLine => ({
@@ -5461,10 +5461,15 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         currency: inv.currency || 'TND',
       })).concat(encaissements.map((e: any): StatementLine => ({
         kind: 'ENCAISSEMENT',
+        // Présent pour tout encaissement sauf le montant hérité en simple
+        // nombre (voir `portalEncaissementsFor`) — cette ligne-là n'a pas
+        // d'id réel côté brouillard/fiche et n'ouvre donc pas de détail.
+        id: e.id && e.id !== 'legacy-enc' ? String(e.id) : undefined,
         date: String(e.date || '').slice(0, 10),
         label: e.note || 'Règlement reçu',
         reference: e.reference || '',
         paymentMethod: e.paymentMethod || '',
+        bankAccount: e.bankAccount || '',
         debit: 0,
         credit: round3(num(Number(e.amount), 0)),
         currency: 'TND',
