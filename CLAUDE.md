@@ -24,7 +24,7 @@ There is **no test runner and no test suite** — don't invent test commands. `n
 
 Both `bun.lock` and `package-lock.json` exist; npm is the working path.
 
-Seeded logins (created on first boot, see [database.ts:52-99](src/server/database.ts#L52-L99)): `admin` / `admin123` (ADMIN) and `collab` / `collab123` (COLLABORATOR).
+Seeded logins (created on first boot, see [database.ts:52-99](src/server/database.ts#L52-L99)): `admin` / `admin123` (ADMIN) and `collab` / `collab123` (COLLABORATOR). [Login.tsx](src/pages/Login.tsx) used to print both right under the form for convenience — removed at the user's request, since a production deployment shows the exact same screen and printing working credentials on a public login page is a real credential leak, not a demo convenience.
 
 ## Architecture
 
@@ -550,6 +550,28 @@ sans I, O, 0 ni 1 — le code se dicte au téléphone.
 Le lien est construit côté serveur depuis l'origine réellement appelée : codé
 en dur il serait faux en local comme sur un domaine personnalisé.
 
+**L'écran de parrainage met désormais le code en avant, pas le lien** — à la
+demande de l'utilisateur. [ReferralPage.tsx](src/components/ReferralPage.tsx)
+affiche un grand code en police mono avec un bouton « Copier », et n'affiche
+plus le champ `link` du tout (le serveur continue de le calculer et de le
+servir dans `GET /api/referral` — un lien `/?ref=CODE` reste valide pour qui
+en reçoit un, la page n'en montre juste plus). C'est ce que l'alphabet sans
+I/O/0/1 documentait déjà comme raison d'être (« le code se dicte au
+téléphone ») sans que l'écran le suivait jusqu'ici : un code se donne aussi
+bien à l'oral qu'à l'écrit, un lien non.
+
+**Le formulaire d'inscription porte un champ « Code de parrainage »
+saisissable à la main**, plutôt que de ne lire le code que dans l'URL
+d'arrivée (`/?ref=CODE`). [RequestAccessModal.tsx](src/components/landing/RequestAccessModal.tsx)
+pré-remplit `referralCodeInput` depuis cette URL quand il y en a une (le
+geste par lien continue de marcher tel quel), mais le champ reste éditable :
+un parrain qui a donné son code au téléphone n'a jamais eu de lien à suivre.
+Le bandeau annonçant la remise se déclenche sur le champ (`referralCodeInput`),
+pas sur la seule présence du paramètre d'URL — la remise s'annonce dès qu'un
+code est renseigné, peu importe comment il y est arrivé. Rien ne change côté
+serveur : `POST /api/signup` acceptait déjà `referralCode` dans le corps de
+la requête, normalisé et validé de la même façon quelle que soit sa source.
+
 Un code inconnu **n'échoue pas** l'inscription (un lien tronqué en route ne doit
 pas coûter un client), et l'écriture de la ligne de parrainage se fait *après*
 la création de l'entreprise, dans un `try/catch` : un parrainage perdu ne fait
@@ -697,6 +719,51 @@ de grille d'échéances semée ; lui montrer l'onglet serait une carte
 éternellement vide sans qu'aucun message n'explique pourquoi. La garde évite
 aussi l'appel réseau correspondant quand l'onglet n'est de toute façon pas
 montré, une requête de plus par chargement pour rien.
+
+**Le client est notifié de quatre événements sur son propre dossier** —
+échéance modifiée, facture émise, item de livrable coché, tâche terminée —
+via le même mécanisme `notify()`/`notifications` que le reste de l'app, pas
+un chemin à part. `portalUserIdsFor(companyId, clientId)` (server.ts, juste
+après `notify()`) résout le ou les comptes `CLIENT` rattachés à un dossier —
+plusieurs si le gérant et son comptable en ont chacun un — et chaque
+déclencheur y notifie tous. Les quatre types (`PORTAL_ECHEANCE`,
+`PORTAL_INVOICE`, `PORTAL_DELIVERABLE`, `PORTAL_TASK_DONE`) ne partent
+jamais que vers un compte `CLIENT` :
+
+- **Échéance** — `PUT /api/echeance-statuses`, via `notifyEcheanceChange()`.
+  Seul un statut posé à une valeur **non vide** notifie ; un effacement
+  (retour à « Vide ») est une correction interne, pas une nouvelle à
+  transmettre.
+- **Facture** — `notifyPortalInvoice()`, appelée à la fois par la création
+  directe (`POST /api/invoices`) et par l'émission d'un brouillon
+  (`POST /api/invoices/:id/issue`), puisque les deux font naître un document
+  au même sens. La garde est `countsAsBilled(inv)` — le même filtre que
+  `/api/portal/statement` — pour qu'un client ne soit jamais notifié d'un
+  document qui n'apparaît de toute façon pas dans son relevé (un brouillon,
+  ou un « autre document non facturable »).
+- **Livrable** — `PUT /api/client-resource-items/:id`, uniquement sur la
+  transition `false → true` (cocher un item déjà coché, ou le décocher, ne
+  renvoie rien : ce n'est pas un progrès à signaler).
+- **Travaux** — `PUT /api/time-entries/:id`, uniquement sur la transition
+  `existing.statut !== 'COMPLETED' && req.body.statut === 'COMPLETED'` —
+  le même garde-fou qui pose déjà `heureFin` juste au-dessus dans cette
+  route, pour qu'une tâche qui reste `COMPLETED` d'un PUT à l'autre ne
+  renvoie pas une seconde notification.
+
+Chacun résout le dossier via `clientId` (jamais un nom de client texte
+libre, qu'aucun compte portail ne peut porter) et n'aboutit à rien si le
+dossier n'a pas de compte `CLIENT` — silencieusement, ce n'est pas une
+erreur. **`NotificationBell.tsx`** porte les quatre types dans `TYPE_META`/
+`TOAST_VARIANT` comme tout le reste, et **`PUSH_NAV_FOR_TYPE`** côté
+serveur pour le Web Push. Leur `nav` désigne un onglet du **portail**
+(`Echeances`/`Statement`/`Deliverables`/`Tasks`), jamais une section du
+back-office comme les autres entrées de ces tables — `ClientPortal.tsx`
+traduit via `PORTAL_NAV_TO_TAB` avant d'appeler `setTab()`. Cette table a
+aussi corrigé un bug latent : `onNavigate` y était câblé en dur sur
+`() => setTab('messages')`, donc n'importe quelle notification (même une
+tâche assignée) atterrissait sur Messages — invisible tant qu'aucun type
+de notification n'atteignait un compte client, ce qui n'était le cas
+d'aucun avant ces quatre-là.
 
 **Une ligne « Facture » du relevé s'ouvre au clic** et affiche le document
 complet, réutilisant [InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)

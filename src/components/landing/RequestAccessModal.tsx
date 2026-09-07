@@ -55,13 +55,17 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
   const [error, setError] = useState('');
 
   /**
-   * Le code de parrainage présent dans l'URL d'arrivée. Lu ici uniquement
-   * pour *annoncer* la remise : la valeur envoyée au serveur est relue au
-   * moment de l'envoi (voir plus bas), et c'est le serveur qui décide si le
-   * code vaut quelque chose — un code inconnu ou un parrain sans abonnement
-   * actif n'accorde rien, sans faire échouer l'inscription.
+   * Le code de parrainage : pré-rempli depuis l'URL d'arrivée (`/?ref=CODE`)
+   * quand il y en a un, mais **saisissable à la main** — un parrain le donne
+   * aussi bien au téléphone qu'en lien (voir `referralCodeFor` côté serveur :
+   * l'alphabet exclut I/O/0/1 précisément pour ça). C'est le serveur qui
+   * décide si le code vaut quelque chose au moment de l'envoi ; un code
+   * inconnu ou un parrain sans abonnement actif n'accorde rien, sans faire
+   * échouer l'inscription.
    */
-  const invitedByCode = new URLSearchParams(window.location.search).get('ref') || '';
+  const [referralCodeInput, setReferralCodeInput] = useState(
+    () => new URLSearchParams(window.location.search).get('ref') || '',
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,11 +85,7 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
           body: JSON.stringify({
             companyName, contactName, contactEmail, phone, password, confirmPassword,
             plan: PLAN_CODES[plan], website, secteur,
-            // Code de parrainage porté par l'URL d'arrivée (`/?ref=CODE`).
-            // Lu au moment de l'envoi plutôt que mémorisé au montage : le
-            // visiteur peut ouvrir la page, réfléchir, puis s'inscrire — la
-            // recherche est toujours dans la barre d'adresse.
-            referralCode: new URLSearchParams(window.location.search).get('ref') || '',
+            referralCode: referralCodeInput.trim(),
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -160,9 +160,9 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
               </p>
             )}
 
-            {isSignup && invitedByCode && (
+            {isSignup && referralCodeInput.trim() && (
               <p className="text-[12.5px] text-[#00857C] bg-[#E3F7F5] rounded-lg px-3 py-2.5 leading-relaxed font-medium">
-                Bienvenue ! Grâce à votre lien d'invitation, bénéficiez de{' '}
+                Avec ce code de parrainage, bénéficiez de{' '}
                 <strong>{REFERRAL_DISCOUNT_PERCENT} % de réduction</strong> sur votre premier abonnement au moment
                 du paiement.
               </p>
@@ -291,6 +291,19 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
                   rows={3}
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent resize-none"
                   placeholder="Nombre d'utilisateurs, besoins particuliers…"
+                />
+              </div>
+            )}
+
+            {isSignup && (
+              <div>
+                <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Code de parrainage (facultatif)</label>
+                <input
+                  value={referralCodeInput}
+                  onChange={e => setReferralCodeInput(e.target.value.toUpperCase())}
+                  maxLength={16}
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] font-mono uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                  placeholder="Ex. 8EJSTCTP"
                 />
               </div>
             )}

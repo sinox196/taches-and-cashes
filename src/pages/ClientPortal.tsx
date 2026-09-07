@@ -91,6 +91,24 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'messages', label: 'Messages', icon: MessageCircle },
 ];
 
+/**
+ * Où `NotificationBell` envoie le clic, traduit vers l'onglet du portail —
+ * `TYPE_META`/`PUSH_NAV_FOR_TYPE` désignent la destination par ces mêmes
+ * chaînes côté serveur (`Echeances`/`Statement`/`Deliverables`/`Tasks`), qui
+ * n'existent que pour les quatre types de notification réservés à un compte
+ * CLIENT. `Messages` couvre à la fois le type back-office par défaut
+ * (`Dashboard`, absent d'ici, donc le repli) et le clic sur un contact aux
+ * messages non lus, qui appelait déjà `onNavigate('Messages')` — c'était
+ * jusqu'ici la seule destination que ce callback savait atteindre.
+ */
+const PORTAL_NAV_TO_TAB: Record<string, Tab> = {
+  Echeances: 'echeances',
+  Statement: 'statement',
+  Deliverables: 'deliverables',
+  Tasks: 'tasks',
+  Messages: 'messages',
+};
+
 const MONTH_NAMES = [
   'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
@@ -218,7 +236,7 @@ export const ClientPortal: React.FC = () => {
             <p className="text-[14px] font-semibold leading-tight truncate">{summary?.client.name || 'Espace client'}</p>
             <p className="text-[11px] text-white/60 leading-tight">Espace client</p>
           </div>
-          <NotificationBell onNavigate={() => setTab('messages')} />
+          <NotificationBell onNavigate={section => setTab(PORTAL_NAV_TO_TAB[section] || 'messages')} />
           <button
             onClick={() => logout()}
             title="Se déconnecter"

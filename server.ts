@@ -4363,6 +4363,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         createdAt: new Date().toISOString(),
       });
 
+      await notifyPortalInvoice(req.user.companyId, invoice);
       res.status(201).json(invoice);
     } catch (error) {
       console.error(error);
@@ -4489,16 +4490,35 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         number = wanted;
       }
 
-      res.json(await db.updateInvoice(req.user.companyId, existing.id, {
+      const issued = await db.updateInvoice(req.user.companyId, existing.id, {
         status: 'ISSUED',
         number,
         issuedAt: new Date().toISOString(),
-      }));
+      });
+      await notifyPortalInvoice(req.user.companyId, issued);
+      res.json(issued);
     } catch (error) {
       console.error('Issue invoice error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
+
+  /**
+   * Prévient le client qu'un document le concernant vient de naître —
+   * exactement les documents que `/api/portal/statement` lui montre
+   * (`countsAsBilled`), jamais un brouillon ni un « autre document (non
+   * facturable) » qui n'apparaîtrait de toute façon pas dans son relevé.
+   * Appelée à la fois par la création directe et par `/issue`, qui font
+   * toutes deux naître un document au sens de cette règle.
+   */
+  async function notifyPortalInvoice(companyId: string, invoice: any) {
+    if (!countsAsBilled(invoice)) return;
+    const portalIds = await portalUserIdsFor(companyId, invoice.clientId);
+    for (const uid of portalIds) {
+      await notify(companyId, uid, 'PORTAL_INVOICE', 'Nouvelle facture',
+        `Le document n° ${invoice.number} vous a été adressé.`);
+    }
+  }
 
   /**
    * Transformer un autre document en facture légale.
@@ -6546,6 +6566,20 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       }
 
       const updated = await db.updateTimeEntry(req.user.companyId, entryId, updates);
+
+      // Le client n'apprend qu'une tâche est terminée que quand elle l'est
+      // réellement à cet instant — pas à chaque PUT qui la garde COMPLETED
+      // (une correction ultérieure ne renvoie pas une seconde notification).
+      if (req.body.statut === 'COMPLETED' && existing.statut !== 'COMPLETED') {
+        const portalIds = await portalUserIdsFor(req.user.companyId, existing.clientId);
+        if (portalIds.length > 0) {
+          const libelle = existing.description || existing.taskType || existing.pole || 'Un travail';
+          for (const uid of portalIds) {
+            await notify(req.user.companyId, uid, 'PORTAL_TASK_DONE', 'Travail terminé', `« ${libelle} » a été marqué terminé.`);
+          }
+        }
+      }
+
       // GET /api/time-entries and the SSE broadcast both fold the live elapsed
       // stretch into `dureeSeconds` before responding — this is the one PUT
       // response that didn't. A write carrying only `overtimeAckCycle` (the 2h
@@ -6605,6 +6639,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     LOAN_DECISION: 'HR',
     ADVANCE_REQUEST: 'HR',
     ADVANCE_DECISION: 'HR',
+    // Ces quatre-là ne partent jamais que vers un compte CLIENT — la
+    // destination est un onglet du portail, pas une section du back-office.
+    PORTAL_ECHEANCE: 'Echeances',
+    PORTAL_INVOICE: 'Statement',
+    PORTAL_DELIVERABLE: 'Deliverables',
+    PORTAL_TASK_DONE: 'Tasks',
   };
 
   /**
@@ -6644,6 +6684,22 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         }
       })().catch((error) => console.error('[push] notify() fan-out failed:', error));
     }
+  }
+
+  /**
+   * Les comptes portail rattachés à un dossier client — plusieurs si le
+   * gérant et son comptable ont chacun un compte, aucun si le dossier n'a
+   * jamais eu de compte client ou si `clientId` est `null` (client texte
+   * libre, sans dossier réel à rattacher). `function` déclarée comme
+   * `notify()`, pour la même raison : appelée bien avant sa propre
+   * définition dans le corps de `startServer()`.
+   */
+  async function portalUserIdsFor(companyId: string, clientId: number | string | null | undefined): Promise<number[]> {
+    if (clientId == null) return [];
+    const users = await db.getAllUsers(companyId);
+    return users
+      .filter((u: any) => u.role === CLIENT_ROLE && Number(u.clientId) === Number(clientId))
+      .map((u: any) => u.id);
   }
 
   const NOTIFICATIONS_PAGE_SIZE = 50;
@@ -7144,14 +7200,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const item = allStatuses.find((s: any) => s.id === req.params.id);
       if (!item) return res.status(404).json({ error: 'Not found' });
 
-      if (done) {
-        const instance = await db.getClientResourceInstanceById(req.user.companyId, item.instanceId);
-        if (instance?.isSequential) {
-          const blocked = allStatuses.some((s: any) =>
-            s.instanceId === item.instanceId && s.sortOrder < item.sortOrder && !s.done,
-          );
-          if (blocked) return res.status(409).json({ error: 'Les étapes précédentes doivent être résolues d\'abord.' });
-        }
+      const instance = await db.getClientResourceInstanceById(req.user.companyId, item.instanceId);
+      if (done && instance?.isSequential) {
+        const blocked = allStatuses.some((s: any) =>
+          s.instanceId === item.instanceId && s.sortOrder < item.sortOrder && !s.done,
+        );
+        if (blocked) return res.status(409).json({ error: 'Les étapes précédentes doivent être résolues d\'abord.' });
       }
 
       const updated = await db.updateClientResourceItemStatus(req.user.companyId, req.params.id, {
@@ -7159,6 +7213,17 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         completedAt: done ? new Date().toISOString() : null,
         completedBy: done ? req.user.id : null,
       });
+
+      // Un item qui se coche est ce que le client attend de voir bouger ; le
+      // décocher est une correction interne, pas une nouvelle à lui pousser.
+      if (done && !item.done && instance) {
+        const portalIds = await portalUserIdsFor(req.user.companyId, instance.clientId);
+        for (const uid of portalIds) {
+          await notify(req.user.companyId, uid, 'PORTAL_DELIVERABLE', 'Livrable mis à jour',
+            `« ${item.label} » a été coché dans votre livrable « ${instance.name} ».`);
+        }
+      }
+
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -7485,16 +7550,34 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         .find((s: any) => s.clientId === Number(clientId) && s.columnId === columnId);
       if (existing) {
         const updated = await db.updateEcheanceStatus(req.user.companyId, existing.id, { status: normalizedStatus });
+        await notifyEcheanceChange(req.user.companyId, Number(clientId), columnId, normalizedStatus);
         return res.json(updated);
       }
       const created = await db.createEcheanceStatus(req.user.companyId, {
         id: genId('ecs'), clientId: Number(clientId), columnId, status: normalizedStatus,
       });
+      await notifyEcheanceChange(req.user.companyId, Number(clientId), columnId, normalizedStatus);
       res.status(201).json(created);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
+
+  /**
+   * Prévient le client d'un changement réel sur SA ligne — jamais d'un
+   * retour à vide, qui n'est pas une information à lui transmettre (un
+   * effacement se lit comme une correction interne, pas un événement).
+   */
+  async function notifyEcheanceChange(companyId: string, clientId: number, columnId: string, status: string | null) {
+    if (!status) return;
+    const portalIds = await portalUserIdsFor(companyId, clientId);
+    if (portalIds.length === 0) return;
+    const column = (await db.getAllEcheanceColumns(companyId)).find((c: any) => c.id === columnId);
+    for (const uid of portalIds) {
+      await notify(companyId, uid, 'PORTAL_ECHEANCE', 'Échéance mise à jour',
+        `« ${column?.label || 'Une échéance'} » est maintenant « ${status} ».`);
+    }
+  }
 
   // The status vocabulary itself — admin-editable rather than a hardcoded
   // list, so the cabinet can rename, recolor, or drop a value without a code

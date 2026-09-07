@@ -34,7 +34,6 @@ interface ReferralData {
   /** L'abonnement est actif : le parrainage est ouvert. */
   eligible: boolean;
   code: string;
-  link: string;
   rewardDays: number;
   discountPercent: number;
   creditMonths: number;
@@ -67,12 +66,11 @@ export const ReferralPage: React.FC = () => {
   const copy = async () => {
     if (!data) return;
     try {
-      await navigator.clipboard.writeText(data.link);
+      await navigator.clipboard.writeText(data.code);
     } catch {
       // navigator.clipboard exige un contexte sécurisé (https ou localhost) —
-      // absent, on retombe sur la sélection manuelle plutôt que d'échouer en
-      // silence : l'input est en lecture seule, pas désactivé, donc le lien
-      // reste sélectionnable et copiable à la main.
+      // rien à retomber en manuel ici (le code n'est plus dans un champ
+      // sélectionnable), donc le bouton ne se marque simplement pas "Copié".
       return;
     }
     setCopied(true);
@@ -108,16 +106,19 @@ export const ReferralPage: React.FC = () => {
           Parrainez vos confrères. Gagnez de l&rsquo;argent. 💰
         </h1>
         <p className="text-[12.5px] text-gray-500 mt-1.5 leading-relaxed max-w-[70ch]">
-          Partagez votre lien de parrainage avec vos confrères : ils bénéficient de {data.discountPercent} % de
-          réduction sur leur abonnement, et vous gagnez une commission équivalente à 1 mois d&rsquo;abonnement pour
-          chaque nouveau client qui s&rsquo;abonne grâce à vous.
+          Donnez votre code de parrainage à vos confrères — au téléphone ou par écrit, ils le saisissent à
+          l&rsquo;inscription : ils bénéficient de {data.discountPercent} % de réduction sur leur abonnement, et
+          vous gagnez une commission équivalente à 1 mois d&rsquo;abonnement pour chaque nouveau client qui
+          s&rsquo;abonne grâce à vous.
         </p>
         <p className="text-[12.5px] font-semibold text-turquoise mt-1">Plus vous parrainez, plus vous gagnez !</p>
       </div>
 
-      {/* Le lien : la seule chose que l'utilisateur vient chercher ici — sauf
+      {/* Le code : la seule chose que l'utilisateur vient chercher ici — sauf
           si son propre abonnement n'est pas actif, auquel cas il n'y en a
-          pas, et le dire vaut mieux que montrer un lien sans valeur. */}
+          pas, et le dire vaut mieux que montrer un code sans valeur. Plus de
+          lien affiché : un code se donne aussi bien au téléphone qu'à
+          l'écrit, et l'alphabet (sans I/O/0/1) est fait pour ça. */}
       {!data.eligible ? (
         <div className="bg-white border border-gray-200 rounded-xl p-5 flex items-start gap-3">
           <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
@@ -128,38 +129,37 @@ export const ReferralPage: React.FC = () => {
               Le parrainage s&rsquo;active avec votre abonnement
             </p>
             <p className="text-[12.5px] text-gray-500 mt-1 leading-relaxed">
-              Dès que votre abonnement est actif, votre lien de parrainage est automatiquement créé. Partagez-le
-              avec vos confrères : ils bénéficient de {data.discountPercent} % de réduction et vous gagnez une
+              Dès que votre abonnement est actif, votre code de parrainage est automatiquement créé. Donnez-le à
+              vos confrères : ils bénéficient de {data.discountPercent} % de réduction et vous gagnez une
               commission équivalente à 1 mois d&rsquo;abonnement pour chaque nouvelle souscription.
             </p>
           </div>
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-4">
             <div className="w-9 h-9 rounded-full bg-turquoise/10 flex items-center justify-center shrink-0">
               <Gift className="w-4.5 h-4.5 text-turquoise" />
             </div>
             <div>
-              <p className="text-[14px] font-semibold text-gray-900 leading-tight">Votre lien d'invitation</p>
-              <p className="text-[12px] text-gray-500 leading-tight">Code : <span className="font-mono font-semibold text-gray-700">{data.code}</span></p>
+              <p className="text-[14px] font-semibold text-gray-900 leading-tight">Votre code de parrainage</p>
+              <p className="text-[12px] text-gray-500 leading-tight">
+                Donnez-le à vos confrères — ils le saisissent à l&rsquo;inscription.
+              </p>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              readOnly
-              value={data.link}
-              onFocus={e => e.currentTarget.select()}
-              className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-[13px] font-mono bg-gray-50 text-gray-700"
-            />
+          <div className="flex items-center gap-3">
+            <span className="flex-1 text-center py-3 border border-dashed border-gray-300 rounded-lg text-[22px] font-mono font-extrabold tracking-[0.15em] text-navy bg-gray-50">
+              {data.code}
+            </span>
             <button
               onClick={copy}
-              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-colors shrink-0 ${
+              className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-[13px] font-semibold transition-colors shrink-0 ${
                 copied ? 'bg-emerald-600 text-white' : 'bg-navy text-white hover:bg-navy-hover'
               }`}
             >
-              {copied ? <><Check className="w-4 h-4" /> Copié</> : <><Copy className="w-4 h-4" /> Copier le lien</>}
+              {copied ? <><Check className="w-4 h-4" /> Copié</> : <><Copy className="w-4 h-4" /> Copier</>}
             </button>
           </div>
         </div>
@@ -183,7 +183,7 @@ export const ReferralPage: React.FC = () => {
         </div>
         {data.referrals.length === 0 ? (
           <p className="py-10 text-center text-[13px] text-gray-500">
-            Personne ne s'est encore inscrit avec votre lien.
+            Personne ne s'est encore inscrit avec votre code.
           </p>
         ) : (
           <ul className="divide-y divide-gray-100">

@@ -236,14 +236,6 @@ export const Login: React.FC<LoginProps> = ({ onBack }) => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between mt-2">
-              <div className="text-[12px] text-gray-500">
-                <p>Demo accounts:</p>
-                <p><strong className="text-gray-700">admin</strong> / admin123</p>
-                <p><strong className="text-gray-700">collab</strong> / collab123</p>
-              </div>
-            </div>
-
             <div>
               <button
                 type="submit"
