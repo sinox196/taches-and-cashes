@@ -3,6 +3,7 @@ import { Search, X, Loader2, Plus, FileCheck2, ListChecks, History, Briefcase } 
 import { useAuth } from '../../context/AuthContext';
 import { AssignResourceModal } from './AssignResourceModal';
 import { ResourceInstanceModal } from './ResourceInstanceModal';
+import { SearchableSelect, type SearchableOption } from '../SearchableSelect';
 import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
 import { ExportButton } from '../ExportButton';
 import { friendlyError } from '../../utils/errors';
@@ -31,9 +32,6 @@ interface HistoryRow {
   userId: number | null;
   userName: string;
 }
-
-/** Repliage des accents pour la recherche, comme le reste de l'app. */
-const foldAccents = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const HISTORY_PAGE_SIZE = 15;
 
@@ -106,7 +104,6 @@ export const MyResourcesWork: React.FC = () => {
   const [clientFilter, setClientFilter] = useState('');
   const [userFilter, setUserFilter] = useState('');
   const [procedureFilter, setProcedureFilter] = useState('');
-  const [historySearch, setHistorySearch] = useState('');
 
   const loadHistory = async () => {
     setIsLoadingHistory(true);
@@ -131,23 +128,22 @@ export const MyResourcesWork: React.FC = () => {
   // Options des trois filtres dérivées des lignes reçues — jamais un second
   // appel au fichier clients complet, qui à l'échelle du cabinet ne se
   // charge jamais en entier : ces listes ne portent que ce qui a
-  // effectivement une instance en cours.
+  // effectivement une instance en cours. Chacune porte une option « Tous… »
+  // en tête (id vide) : c'est elle qui remet le filtre à zéro, cherchable au
+  // même titre qu'une valeur réelle plutôt qu'un geste à part.
   const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-  const clientOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.clientName)), [historyRows]);
-  const userOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.userName)), [historyRows]);
-  const procedureOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.name)), [historyRows]);
+  const withAllOption = (label: string, values: string[]): SearchableOption[] =>
+    [{ id: '', label }, ...uniqueSorted(values).map(v => ({ id: v, label: v }))];
+  const clientOptions = useMemo(() => withAllOption('Tous les clients', historyRows.map(r => r.clientName)), [historyRows]);
+  const userOptions = useMemo(() => withAllOption('Tous les collaborateurs', historyRows.map(r => r.userName)), [historyRows]);
+  const procedureOptions = useMemo(() => withAllOption('Toutes les procédures', historyRows.map(r => r.name)), [historyRows]);
 
-  const historyTerm = foldAccents(historySearch.trim());
   const historyFilteredBase = useMemo(
     () => historyRows.filter(r =>
       (!clientFilter || r.clientName === clientFilter)
       && (!userFilter || r.userName === userFilter)
-      && (!procedureFilter || r.name === procedureFilter)
-      && (!historyTerm
-        || foldAccents(r.clientName).includes(historyTerm)
-        || foldAccents(r.name).includes(historyTerm)
-        || foldAccents(r.userName).includes(historyTerm))),
-    [historyRows, clientFilter, userFilter, procedureFilter, historyTerm],
+      && (!procedureFilter || r.name === procedureFilter)),
+    [historyRows, clientFilter, userFilter, procedureFilter],
   );
 
   const historyPage = usePeriodPage<HistoryRow>(historyFilteredBase, r => r.createdAt, HISTORY_PAGE_SIZE);
@@ -176,48 +172,41 @@ export const MyResourcesWork: React.FC = () => {
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            {/* La recherche est un filtre de plus, pas un bandeau à part : sur
-                un écran étroit, un `flex-wrap` ordinaire renvoyait le champ de
-                recherche (large, `w-64`) seul sur sa propre ligne au-dessus
-                des `<select>`, qui eux se réarrangeaient en dessous — ça se
-                lisait comme deux barres distinctes. `flex-nowrap
-                overflow-x-auto` en fait une seule rangée qui défile
-                latéralement, comme la barre d'onglets RH juste au-dessus. */}
-            <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
-              <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:border-gray-400 shrink-0">
-                <Search className="w-3.5 h-3.5 text-gray-400 ml-2.5 shrink-0" />
-                <input
-                  value={historySearch}
-                  onChange={e => { setHistorySearch(e.target.value); historyPage.setPage(1); }}
-                  placeholder="Rechercher client, procédure, collaborateur…"
-                  className="px-2 py-2 text-[12.5px] text-gray-800 focus:outline-none bg-transparent w-64"
+            {/* Chaque filtre est cherchable — taper une lettre suggère plutôt
+                que de dérouler une longue liste — donc il n'y a plus de champ
+                de recherche à part qui obligeait la rangée à défiler sur un
+                écran étroit : trois `SearchableSelect` de largeur fixe se
+                réarrangent normalement avec `flex-wrap`, comme le reste de
+                l'app. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <PeriodFilter page={historyPage} />
+              <div className="w-44">
+                <SearchableSelect
+                  value={clientFilter}
+                  onChange={v => { setClientFilter(v); historyPage.setPage(1); }}
+                  options={clientOptions}
+                  placeholder="Tous les clients"
+                  size="sm"
                 />
               </div>
-              <PeriodFilter page={historyPage} />
-              <select
-                value={clientFilter}
-                onChange={e => { setClientFilter(e.target.value); historyPage.setPage(1); }}
-                className="shrink-0 bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
-              >
-                <option value="">Tous les clients</option>
-                {clientOptions.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <select
-                value={userFilter}
-                onChange={e => { setUserFilter(e.target.value); historyPage.setPage(1); }}
-                className="shrink-0 bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
-              >
-                <option value="">Tous les collaborateurs</option>
-                {userOptions.map(u => <option key={u} value={u}>{u}</option>)}
-              </select>
-              <select
-                value={procedureFilter}
-                onChange={e => { setProcedureFilter(e.target.value); historyPage.setPage(1); }}
-                className="shrink-0 bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
-              >
-                <option value="">Toutes les procédures</option>
-                {procedureOptions.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <div className="w-48">
+                <SearchableSelect
+                  value={userFilter}
+                  onChange={v => { setUserFilter(v); historyPage.setPage(1); }}
+                  options={userOptions}
+                  placeholder="Tous les collaborateurs"
+                  size="sm"
+                />
+              </div>
+              <div className="w-52">
+                <SearchableSelect
+                  value={procedureFilter}
+                  onChange={v => { setProcedureFilter(v); historyPage.setPage(1); }}
+                  options={procedureOptions}
+                  placeholder="Toutes les procédures"
+                  size="sm"
+                />
+              </div>
             </div>
             <ExportButton
               fileName="historique-procedures"
