@@ -122,6 +122,35 @@ export const ClientsManagement: React.FC = () => {
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
+
+  /**
+   * Ajoute une valeur pour CE client sur une colonne — nouvelle, ou déjà
+   * portée par d'autres clients mais absente d'ici (créé avant elle, ou
+   * jamais renseigné pour ce dossier). Un seul chemin pour les deux cas :
+   * cliquer une suggestion ou taper un nom entièrement nouveau finissent
+   * tous les deux ici.
+   */
+  const addCustomFieldToClient = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setFormData(prev => ({ ...prev, customFields: { ...(prev.customFields || {}), [trimmed]: '' } }));
+    setNewFieldName('');
+  };
+
+  const foldAccents = (v: string) => v.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+  /**
+   * Colonnes déjà connues (via `GET /api/clients/fields`) que ce client ne
+   * porte pas encore — c'est précisément ce qu'on ne « retrouve pas » en
+   * tapant son nom de mémoire : une colonne existante mais jamais posée sur
+   * cette fiche n'apparaît nulle part ailleurs dans son formulaire.
+   */
+  const fieldSuggestions = newFieldName.trim()
+    ? availableFields
+        .filter(f => !(f in (formData.customFields || {})))
+        .filter(f => foldAccents(f).includes(foldAccents(newFieldName.trim())))
+        .slice(0, 6)
+    : [];
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [sortField, setSortField] = useState<string>('name');
@@ -498,6 +527,12 @@ export const ClientsManagement: React.FC = () => {
           setClients([...clients, data]);
         }
         setIsModalOpen(false);
+        // Un champ personnalisé peut être né sur cette fiche à l'instant
+        // (nouveau nom tapé, ou premier client à porter une colonne
+        // existante ailleurs) — sans ce rafraîchissement, le sélecteur
+        // « Colonnes » restait sur la liste chargée au montage de l'écran et
+        // ne proposait la colonne qu'après un rechargement complet de la page.
+        fetchAvailableFields();
       } else {
         const err = await res.json();
         setFormError(err.error || 'Une erreur est survenue');
@@ -1342,49 +1377,56 @@ export const ClientsManagement: React.FC = () => {
                   </div>
                   
                   {hasPermission('MANAGE_CLIENT_FIELDS') && (
-                  <div className="flex gap-2 mb-4">
-                    <input
-                      type="text"
-                      value={newFieldName}
-                      onChange={e => setNewFieldName(e.target.value)}
-                      placeholder="Nom du nouveau champ..."
-                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-[12px] focus:ring-1 focus:ring-navy"
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (newFieldName.trim()) {
-                            setFormData({
-                              ...formData,
-                              customFields: {
-                                ...(formData.customFields || {}),
-                                [newFieldName.trim()]: ''
-                              }
-                            });
-                            setNewFieldName('');
-                          }
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (newFieldName.trim() !== '') {
-                          setFormData({
-                            ...formData,
-                            customFields: {
-                              ...(formData.customFields || {}),
-                              [newFieldName.trim()]: ''
+                  <div className="mb-4">
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          value={newFieldName}
+                          onChange={e => setNewFieldName(e.target.value)}
+                          placeholder="Nom du nouveau champ..."
+                          className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-[12px] focus:ring-1 focus:ring-navy"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              addCustomFieldToClient(newFieldName);
                             }
-                          });
-                          setNewFieldName('');
-                        }
-                      }}
-                      disabled={!newFieldName.trim()}
-                      className="text-[12px] font-medium text-navy bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Ajouter
-                    </button>
+                          }}
+                        />
+                        {/* Une colonne déjà utilisée par d'autres clients mais
+                            absente de celui-ci (créé avant elle, ou jamais
+                            renseigné) — retaper son nom à la main risque une
+                            faute de frappe qui en crée une seconde, quasi
+                            identique. La suggestion permet de reprendre la
+                            clé exacte plutôt que de la deviner. */}
+                        {fieldSuggestions.length > 0 && (
+                          <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                            <p className="px-3 pt-1.5 pb-1 text-[10.5px] font-semibold text-gray-400 uppercase tracking-wide">
+                              Colonne existante
+                            </p>
+                            {fieldSuggestions.map(f => (
+                              <button
+                                key={f}
+                                type="button"
+                                onClick={() => addCustomFieldToClient(f)}
+                                className="w-full text-left px-3 py-1.5 text-[12.5px] text-gray-700 hover:bg-gray-50"
+                              >
+                                {f}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addCustomFieldToClient(newFieldName)}
+                        disabled={!newFieldName.trim()}
+                        className="text-[12px] font-medium text-navy bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Ajouter
+                      </button>
+                    </div>
                   </div>
                   )}
                   
