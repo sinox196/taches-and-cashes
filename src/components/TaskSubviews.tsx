@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Timer, CalendarClock, ClipboardCheck, Play, Loader, X, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
+import { SearchableSelect, type SearchableOption } from './SearchableSelect';
 
 const PRIORITY_STYLE: Record<string, string> = {
   BASSE: 'bg-gray-100 text-gray-500',
@@ -301,8 +302,42 @@ const AssignmentList: React.FC<{
  * client, le type de tâche et la description ; le nom de l'assignataire
  * s'ajoute par nécessité — une liste de délégations sans dire à qui n'aide
  * personne.
+ *
+ * **Quatre filtres cherchables** (collaborateur, mission, type de tâche,
+ * statut), même idiome que l'Historique de Ressources métier : chacun est un
+ * `SearchableSelect` plutôt qu'un `<select>` natif ou un champ de recherche à
+ * part — taper la première lettre suggère, cliquer sélectionne — avec une
+ * option « Tous… » en tête qui remet le filtre à zéro. Les options sont
+ * dérivées des lignes déjà reçues, jamais un second appel réseau.
  */
 const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const [userFilter, setUserFilter] = useState('');
+  const [missionFilter, setMissionFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const withAllOption = (label: string, values: (string | undefined)[]): SearchableOption[] => [
+    { id: '', label },
+    ...Array.from(new Set(values.filter((v): v is string => !!v))).sort((a, b) => a.localeCompare(b)).map(v => ({ id: v, label: v })),
+  ];
+  const userOptions = useMemo(() => withAllOption('Tous les collaborateurs', rows.map(r => r.assignedToName)), [rows]);
+  const missionOptions = useMemo(() => withAllOption('Toutes les missions', rows.map(r => r.pole)), [rows]);
+  const typeOptions = useMemo(() => withAllOption('Tous les types de tâche', rows.map(r => r.taskType)), [rows]);
+  const statusOptions = useMemo(() => [
+    { id: '', label: 'Tous les statuts' },
+    ...Array.from(new Set<string>(rows.map(r => r.status).filter(Boolean)))
+      .map(s => ({ id: s, label: DELEGATED_STATUS_LABEL[s] || s })),
+  ], [rows]);
+
+  const filtered = useMemo(
+    () => rows.filter(a =>
+      (!userFilter || a.assignedToName === userFilter)
+      && (!missionFilter || a.pole === missionFilter)
+      && (!typeFilter || a.taskType === typeFilter)
+      && (!statusFilter || a.status === statusFilter)),
+    [rows, userFilter, missionFilter, typeFilter, statusFilter],
+  );
+
   if (rows.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-10 text-center">
@@ -316,8 +351,25 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-4 sm:p-5">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="w-48">
+          <SearchableSelect value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="Tous les collaborateurs" size="sm" />
+        </div>
+        <div className="w-44">
+          <SearchableSelect value={missionFilter} onChange={setMissionFilter} options={missionOptions} placeholder="Toutes les missions" size="sm" />
+        </div>
+        <div className="w-52">
+          <SearchableSelect value={typeFilter} onChange={setTypeFilter} options={typeOptions} placeholder="Tous les types de tâche" size="sm" />
+        </div>
+        <div className="w-44">
+          <SearchableSelect value={statusFilter} onChange={setStatusFilter} options={statusOptions} placeholder="Tous les statuts" size="sm" />
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="text-[12.5px] text-gray-400 italic text-center py-6">Aucune tâche ne correspond à ces filtres.</p>
+      ) : (
       <div className="divide-y divide-gray-100">
-        {rows.map(a => (
+        {filtered.map(a => (
           <div key={a.id} className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 py-3 first:pt-0 last:pb-0">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -338,6 +390,7 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 };
