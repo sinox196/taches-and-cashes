@@ -434,11 +434,8 @@ export const UsersManagement: React.FC = () => {
             <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         ) : (
-          // Five columns, one of them a bag of permission chips: it does not
-          // fit a phone, so it scrolls sideways instead of being clipped by
-          // the card's own overflow-hidden.
           <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[760px]">
+          <table className="w-full text-left border-collapse min-w-[560px]">
             <thead>
               <tr className="bg-[#F9FAFB] border-b border-gray-200">
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -449,9 +446,6 @@ export const UsersManagement: React.FC = () => {
                 </th>
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   {teamTab === 'clients' ? 'Dossier client' : 'Rôle'}
-                </th>
-                <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  Permissions
                 </th>
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right">
                   Actions
@@ -478,21 +472,6 @@ export const UsersManagement: React.FC = () => {
                       </span>
                     )}
                   </td>
-                  <td className="px-5 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {user.role === 'ADMIN' ? (
-                        <span className="text-[11px] text-gray-500 italic">Accès complet</span>
-                      ) : user.permissions.length > 0 ? (
-                        user.permissions.map(p => (
-                          <span key={p} className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-medium border border-gray-200">
-                            {p}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-[11px] text-gray-400 italic">Aucune</span>
-                      )}
-                    </div>
-                  </td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <button
@@ -513,7 +492,7 @@ export const UsersManagement: React.FC = () => {
               ))}
               {visibleUsers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-gray-500 text-[13px]">
+                  <td colSpan={4} className="px-5 py-8 text-center text-gray-500 text-[13px]">
                     {userSearch.trim()
                       ? 'Aucun utilisateur ne correspond à cette recherche.'
                       : teamTab === 'clients' ? 'Aucun compte client pour le moment.' : 'Aucun utilisateur trouvé.'}
