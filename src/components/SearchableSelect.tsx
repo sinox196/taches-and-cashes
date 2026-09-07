@@ -62,29 +62,57 @@ export const SearchableSelect: React.FC<Props> = ({
   const [query, setQuery] = useState('');
   const boxRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // État, pas seulement un ref : il faut savoir *au moment où le panneau
+  // apparaît vraiment dans le DOM* pour y accrocher le ResizeObserver
+  // ci-dessous. Un `useEffect` gardé sur `open` seul se déclenche dans le
+  // même cycle que le calcul initial — avant que `pos` ne soit posé et donc
+  // avant que le panneau existe — et ne se redéclenche jamais une fois qu'il
+  // apparaît, puisque `open` ne change plus entre-temps.
+  const [panelEl, setPanelEl] = useState<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
 
   /**
    * Position du panneau, en coordonnées écran. Recalculée à l'ouverture puis à
    * chaque défilement ou redimensionnement : en `position: fixed`, un panneau
    * qui ne suit pas son champ se décroche dès que la page bouge.
+   *
+   * `PANEL_MAX` n'est qu'une estimation pour le tout premier calcul, avant
+   * que le panneau existe dans le DOM pour qu'on puisse le mesurer — une
+   * mission à trente-deux types la remplit à peu près, mais une qui n'en a
+   * que deux ou trois rend un panneau bien plus court. Une fois monté, sa
+   * vraie hauteur (`panelRef`) remplace l'estimation : sans ce recalage, un
+   * panneau ouvert vers le haut mais plus court que prévu laissait un grand
+   * vide entre lui et le champ, et se lisait comme s'il s'était ouvert tout
+   * en haut de l'écran au lieu de juste au-dessus du champ.
    */
   const place = () => {
     const r = boxRef.current?.getBoundingClientRect();
     if (!r) return;
     const width = Math.max(r.width, 240);
     const PANEL_MAX = 320;
+    const panelH = panelRef.current?.getBoundingClientRect().height || PANEL_MAX;
     // Bascule vers le haut quand le bas de la fenêtre est trop proche, plutôt
     // que de déborder hors de l'écran.
-    const openUp = r.bottom + PANEL_MAX > window.innerHeight && r.top > PANEL_MAX;
+    const openUp = r.bottom + panelH > window.innerHeight && r.top > panelH;
     setPos({
       left: Math.min(Math.max(8, r.left), window.innerWidth - width - 8),
-      top: openUp ? r.top - 4 - PANEL_MAX : r.bottom + 4,
+      top: openUp ? r.top - 4 - panelH : r.bottom + 4,
       width,
     });
   };
 
   useLayoutEffect(() => { if (open) place(); }, [open]);
+
+  // Le premier passage ci-dessus estime la hauteur avant que le panneau
+  // existe. Dès qu'il est vraiment monté (`panelEl` passe de `null` à
+  // l'élément), on le remesure pour de vrai — `ResizeObserver` prévient
+  // aussi si la recherche change ensuite le nombre de résultats affichés.
+  useEffect(() => {
+    if (!open || !panelEl) return;
+    const ro = new ResizeObserver(() => place());
+    ro.observe(panelEl);
+    return () => ro.disconnect();
+  }, [open, panelEl]);
 
   useEffect(() => {
     if (!open) return;
@@ -146,7 +174,7 @@ export const SearchableSelect: React.FC<Props> = ({
 
       {open && !disabled && pos && createPortal(
         <div
-          ref={panelRef}
+          ref={el => { panelRef.current = el; setPanelEl(el); }}
           style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 9999 }}
           className="bg-white border border-gray-200 rounded-lg shadow-lg">
           <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-100">
