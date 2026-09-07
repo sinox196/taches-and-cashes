@@ -628,6 +628,20 @@ paramètre : il n'y a aucun `?clientId=` à falsifier.
 - `/api/portal/deliverables` — les modèles affectés au dossier, leur
   avancement et leurs items, jamais qui y a passé du temps.
 
+**Une ligne « Facture » du relevé s'ouvre au clic** et affiche le document
+complet, réutilisant [InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)
+— le même rendu que Cash, boutons Télécharger PDF / Imprimer compris, mais
+sans `onEdit`/`onDelete` (jamais passés depuis le portail : un client ne
+modifie ni ne supprime ses propres factures). Deux routes le rendent possible
+sans emprunter les routes Cash, gardées par `VIEW_CASH`/`MANAGE_CASH` qu'un
+compte `CLIENT` n'a pas : `GET /api/portal/invoices/:id` revérifie
+l'appartenance au dossier via `portalInvoicesFor` — la même liste blanche que
+le relevé — plutôt que de faire confiance à l'id de la requête, et
+`GET /api/portal/company` rend le bloc émetteur (identité, RIB, signature)
+que porte déjà chaque facture reçue, donc rien de plus n'y est exposé.
+`InvoicePreview` accepte un `companyEndpoint` (par défaut `/api/cash/company`)
+pour ce second cas plutôt que de dupliquer le composant.
+
 **Les conversations de groupe** ([GroupModal.tsx](src/components/chat/GroupModal.tsx), routes `/api/messages/groups*` et `/api/messages/group/:id`) vivent dans le même module que les messages directs : un groupe est un nom plus une liste de membres, et un message de groupe porte `groupId` au lieu de `toUserId`. Une seule route d'envoi pour les deux — la validation, la diffusion SSE et la notification poussée sont identiques, et les dédoubler aurait fait deux endroits à corriger.
 
 **La lecture d'un message de groupe se note dans `readBy`** (un tableau d'ids), pas dans `readAt` : un message direct a un lecteur, un message de groupe en a N, et les compresser dans un seul horodatage aurait fait passer le fil pour lu dès que le premier membre l'ouvre. Sous Postgres l'ajout se fait en JSONB (`|| to_jsonb(...)`) plutôt qu'en lisant puis réécrivant la ligne, pour que deux membres qui ouvrent le fil au même instant ne s'effacent pas l'un l'autre. L'auteur naît dans `readBy` de son propre message, sinon il se compterait dans ses propres non-lus. La double coche n'apparaît **que** sur un fil direct : dans un groupe « lu » n'a pas de réponse unique.

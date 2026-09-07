@@ -41,10 +41,17 @@ interface InvoicePreviewProps {
   /** Present only when the viewer may modify documents. */
   onEdit?: (invoice: any) => void;
   onDelete?: (invoice: any) => void;
+  /**
+   * Route to fetch the issuer block from — `/api/cash/company` by default.
+   * Le portail client n'a pas `VIEW_CASH` et lit le même bloc depuis
+   * `/api/portal/company`, qui revérifie l'appartenance au dossier plutôt
+   * que la permission Cash.
+   */
+  companyEndpoint?: string;
 }
 
 /** The issued document, laid out as described in the cahier des charges. */
-export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose, onEdit, onDelete }) => {
+export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose, onEdit, onDelete, companyEndpoint = '/api/cash/company' }) => {
   useEscapeToClose(onClose);
   const { token } = useAuth();
   const suspended = invoice.vatRegime === 'SUSPENSION';
@@ -61,12 +68,12 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
   const [block, setBlock] = useState<CompanyBlock | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/cash/company', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(companyEndpoint, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => (res.ok ? res.json() : null))
       .then(body => { if (!cancelled && body) setBlock(body); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, companyEndpoint]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm overflow-y-auto print:static print:bg-white print:p-0">

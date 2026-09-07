@@ -5359,12 +5359,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
       type StatementLine = {
         kind: 'FACTURE' | 'ENCAISSEMENT';
+        id?: string;
         date: string; label: string; reference: string;
         dueDate?: string | null; paymentMethod?: string;
         debit: number; credit: number; currency: string;
       };
       const lines: StatementLine[] = invoices.map((inv: any): StatementLine => ({
         kind: 'FACTURE',
+        id: inv.id,
         date: String(inv.issueDate || '').slice(0, 10),
         label: `Facture n° ${inv.number || inv.reference || '—'}`,
         reference: inv.number || inv.reference || '',
@@ -5401,6 +5403,43 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         lines: withBalance,
         soldeGlobal: running,
       });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Le détail d'une facture du relevé, pour l'afficher au client au clic sur
+   * sa ligne — le même document que `InvoicePreview` sait déjà rendre, aucune
+   * donnée de plus n'y figure (pas de temps, pas de coût interne). L'appartenance
+   * se revérifie ici plutôt que de faire confiance à l'id passé en paramètre :
+   * `portalInvoicesFor` est la même liste blanche que le relevé, donc un id qui
+   * n'y figure pas — une facture d'un autre dossier — est un 404, pas la facture.
+   */
+  app.get('/api/portal/invoices/:id', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+      const invoices = await portalInvoicesFor(req.user.companyId, client);
+      const invoice = invoices.find((inv: any) => String(inv.id) === String(req.params.id));
+      if (!invoice) return res.status(404).json({ error: 'Facture introuvable.' });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Le bloc émetteur (identité, RIB, signature) que porte chaque facture — déjà
+   * imprimé sur tout document reçu par le client, donc rien de plus n'est
+   * exposé ici que ce qu'il a déjà en pièce jointe. Sert `InvoicePreview` côté
+   * portail, qui n'a pas `VIEW_CASH` pour appeler `/api/cash/company`.
+   */
+  app.get('/api/portal/company', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+      res.json(companyBlock(await db.getSettings(req.user.companyId)));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

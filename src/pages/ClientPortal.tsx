@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Logo } from '../components/Logo';
 import { NotificationBell } from '../components/NotificationBell';
 import { ChatPage } from '../components/chat/ChatPage';
+import { InvoicePreview } from '../components/cash/InvoicePreview';
 import { useAuth } from '../context/AuthContext';
 import { formatCostTND } from '../utils/formatters';
 import {
@@ -31,6 +32,8 @@ interface Summary {
 
 interface StatementLine {
   kind: 'FACTURE' | 'ENCAISSEMENT';
+  /** Présent uniquement sur une ligne FACTURE — la ligne se clique alors pour ouvrir le document. */
+  id?: string;
   date: string;
   label: string;
   reference: string;
@@ -88,6 +91,12 @@ export const ClientPortal: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Facture ouverte depuis le relevé — chargée à la demande, pas embarquée
+  // dans chaque ligne du relevé.
+  const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
+  const [openInvoice, setOpenInvoice] = useState<any | null>(null);
+  const [invoiceError, setInvoiceError] = useState('');
+
   const get = useCallback(async (path: string) => {
     const res = await fetch(`/api/portal/${path}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -96,6 +105,16 @@ export const ClientPortal: React.FC = () => {
     }
     return res.json();
   }, [token]);
+
+  useEffect(() => {
+    if (!openInvoiceId) { setOpenInvoice(null); return; }
+    let cancelled = false;
+    setInvoiceError('');
+    get(`invoices/${openInvoiceId}`)
+      .then(inv => { if (!cancelled) setOpenInvoice(inv); })
+      .catch(e => { if (!cancelled) { setInvoiceError(e.message || 'Erreur de chargement.'); setOpenInvoiceId(null); } });
+    return () => { cancelled = true; };
+  }, [openInvoiceId, get]);
 
   useEffect(() => {
     if (!token) return;
@@ -203,13 +222,25 @@ export const ClientPortal: React.FC = () => {
                 </div>
               )}
 
-              {tab === 'statement' && <StatementView statement={statement} />}
+              {invoiceError && (
+                <p className="text-[12.5px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{invoiceError}</p>
+              )}
+
+              {tab === 'statement' && <StatementView statement={statement} onOpenInvoice={setOpenInvoiceId} />}
               {tab === 'tasks' && <TasksView tasks={tasks} />}
               {tab === 'deliverables' && <DeliverablesView deliverables={deliverables} />}
             </>
           )}
         </main>
       </div>
+
+      {openInvoice && (
+        <InvoicePreview
+          invoice={openInvoice}
+          onClose={() => setOpenInvoiceId(null)}
+          companyEndpoint="/api/portal/company"
+        />
+      )}
     </div>
   );
 };
@@ -230,7 +261,10 @@ const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 /** Relevé de compte : une ligne par facture ou règlement, avec le solde qui court. */
-const StatementView: React.FC<{ statement: { soldeAnterieur: number; lines: StatementLine[]; soldeGlobal: number } | null }> = ({ statement }) => {
+const StatementView: React.FC<{
+  statement: { soldeAnterieur: number; lines: StatementLine[]; soldeGlobal: number } | null;
+  onOpenInvoice: (id: string) => void;
+}> = ({ statement, onOpenInvoice }) => {
   if (!statement) return null;
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -260,10 +294,14 @@ const StatementView: React.FC<{ statement: { soldeAnterieur: number; lines: Stat
             {statement.lines.length === 0 ? (
               <tr><td colSpan={5}><Empty>Aucun mouvement enregistré.</Empty></td></tr>
             ) : statement.lines.map((l, i) => (
-              <tr key={i} className="hover:bg-gray-50">
+              <tr
+                key={i}
+                onClick={l.kind === 'FACTURE' && l.id ? () => onOpenInvoice(l.id!) : undefined}
+                className={`hover:bg-gray-50 ${l.kind === 'FACTURE' && l.id ? 'cursor-pointer' : ''}`}
+              >
                 <td className="px-5 py-2.5 whitespace-nowrap text-gray-700">{fdate(l.date)}</td>
                 <td className="px-5 py-2.5">
-                  <span className="text-gray-900">{l.label}</span>
+                  <span className={l.kind === 'FACTURE' && l.id ? 'text-navy font-medium hover:underline' : 'text-gray-900'}>{l.label}</span>
                   {l.paymentMethod && <span className="ml-2 text-[11px] text-gray-400">{l.paymentMethod}</span>}
                   {l.kind === 'FACTURE' && l.dueDate && (
                     <span className="ml-2 text-[11px] text-gray-400">échéance {fdate(l.dueDate)}</span>
@@ -292,9 +330,13 @@ const StatementView: React.FC<{ statement: { soldeAnterieur: number; lines: Stat
         {statement.lines.length === 0 ? (
           <Empty>Aucun mouvement enregistré.</Empty>
         ) : statement.lines.map((l, i) => (
-          <div key={i} className="border border-gray-200 rounded-lg p-3">
+          <div
+            key={i}
+            onClick={l.kind === 'FACTURE' && l.id ? () => onOpenInvoice(l.id!) : undefined}
+            className={`border border-gray-200 rounded-lg p-3 ${l.kind === 'FACTURE' && l.id ? 'cursor-pointer' : ''}`}
+          >
             <div className="flex items-baseline justify-between gap-2 mb-1.5">
-              <span className="text-[13px] font-semibold text-gray-900 truncate">{l.label}</span>
+              <span className={`text-[13px] font-semibold truncate ${l.kind === 'FACTURE' && l.id ? 'text-navy' : 'text-gray-900'}`}>{l.label}</span>
               <span className="text-[12px] text-gray-500 shrink-0">{fdate(l.date)}</span>
             </div>
             <div className="flex items-center justify-between text-[12.5px]">
