@@ -5372,9 +5372,28 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       })
       .sort((a: any, b: any) => String(a.issueDate || '').localeCompare(String(b.issueDate || '')));
 
-  /** Tous les encaissements du dossier : ceux saisis sur la fiche et ceux venus du brouillard. */
+  /**
+   * Tous les encaissements du dossier : ceux saisis sur la fiche et ceux venus du brouillard.
+   *
+   * `normalizeEncaissements()` rend `[]` pour la forme héritée d'un
+   * `client.encaissements` en simple nombre (un client jamais rouvert depuis
+   * que la liste datée existe) — c'est ce que lit `sumEncaissements()` côté
+   * back-office, donc la carte Clients affiche le bon total pendant que le
+   * portail, construit sur ce tableau, comptait ce même client à zéro. Un
+   * montant hérité est donc récupéré ici comme une ligne à part, sans date
+   * connue (`date: ''`, qui se trie avant toute date réelle et que `fdate()`
+   * côté client rend « — » plutôt qu'une date inventée) — même principe que
+   * `normalizeBalance()` : on récupère la forme ancienne, on ne l'invente pas.
+   */
   const portalEncaissementsFor = async (companyId: string, client: any) => {
     const manual = normalizeEncaissements(client.encaissements).map((e: any) => ({ ...e, source: 'MANUEL' }));
+    const legacyRaw = client?.encaissements;
+    if (!Array.isArray(legacyRaw)) {
+      const legacyAmount = round3(num(Number(legacyRaw), 0));
+      if (legacyAmount > 0) {
+        manual.push({ id: 'legacy-enc', amount: legacyAmount, date: '', note: 'Règlement (historique)', source: 'MANUEL' });
+      }
+    }
     const fromJournal = journalFor(
       journalEncaissementsByClient(await db.getAllCashJournalEntries(companyId)),
       client,

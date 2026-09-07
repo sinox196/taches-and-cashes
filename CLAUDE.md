@@ -627,6 +627,22 @@ paramètre : il n'y a aucun `?clientId=` à falsifier.
   sortent des mêmes helpers que la page Clients (`countsAsBilled`,
   `journalEncaissementsByClient`, `sumEncaissements`) : le solde annoncé au
   client et celui du back-office ne peuvent pas diverger.
+
+  **Ça ne tenait pas pour un `client.encaissements` hérité en simple
+  nombre.** Un client jamais rouvert depuis que ce champ est devenu une liste
+  datée le garde tel quel (« round-trip untouché » — voir plus haut) ;
+  `sumEncaissements()`, côté back-office, le somme quand même. Mais
+  `portalEncaissementsFor()` construisait sa liste avec `normalizeEncaissements()`,
+  qui rend `[]` pour tout ce qui n'est pas déjà un tableau — un montant hérité
+  disparaissait donc silencieusement, et le portail affichait « Total
+  encaissé : 0 TND » pendant que la page Clients montrait le vrai total pour
+  le même dossier. `portalEncaissementsFor()` récupère maintenant ce montant
+  comme une ligne à part (`date: ''`, triée avant toute date réelle — `fdate()`
+  côté client la rend « — » plutôt que d'inventer une date), au lieu de le
+  laisser tomber : même principe que `normalizeBalance()`, on récupère la
+  forme ancienne plutôt que de la deviner ou de la perdre. `/api/portal/summary`
+  et `/api/portal/statement` partagent tous deux `portalEncaissementsFor()`,
+  donc le correctif s'applique aux deux d'un coup.
 - `/api/portal/tasks` — l'avancement **sans temps ni coût**. Le filtrage est
   dans la réponse, pas dans l'interface : masquer une colonne côté navigateur
   laisserait `dureeSeconds`/`hourlyRate`/`cost` partir dans le JSON. Les champs
