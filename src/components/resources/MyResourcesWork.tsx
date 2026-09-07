@@ -1,18 +1,43 @@
-import React, { useEffect, useState } from 'react';
-import { Search, X, Loader2, Plus, FileCheck2, ListChecks } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Search, X, Loader2, Plus, FileCheck2, ListChecks, History, Briefcase } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { AssignResourceModal } from './AssignResourceModal';
 import { ResourceInstanceModal } from './ResourceInstanceModal';
+import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
+import { ExportButton } from '../ExportButton';
+import { friendlyError } from '../../utils/errors';
+
+interface HistoryRow {
+  id: string;
+  clientId: number;
+  clientName: string;
+  name: string;
+  type: string;
+  status: string;
+  total: number;
+  resolved: number;
+  createdAt: string;
+  userId: number | null;
+  userName: string;
+}
+
+const HISTORY_PAGE_SIZE = 15;
 
 /**
  * The simple, non-admin flow: choisir un client, choisir un modèle, cocher
  * les documents — nothing else on screen. Replaces the earlier "Suivi &
  * Ressources" section that lived inside the Clients page's detail panel:
  * one place to work a client's checklists instead of two.
+ *
+ * A côté, un second sous-onglet **Historique** : toutes les instances en
+ * cours, tous clients confondus, avec filtres et pagination — ce que « Mon
+ * travail » ne peut pas montrer puisqu'il ne charge qu'un client à la fois.
  */
 export const MyResourcesWork: React.FC = () => {
   const { token } = useAuth();
   const authHeaders = { Authorization: `Bearer ${token}` };
+
+  const [subView, setSubView] = useState<'work' | 'history'>('work');
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientResults, setClientResults] = useState<any[]>([]);
@@ -59,8 +84,172 @@ export const MyResourcesWork: React.FC = () => {
 
   useEffect(() => { if (client) load(client.id); }, [client]);
 
+  // --- Historique : toutes les instances, tous clients, filtrable et paginé ---
+  const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [clientFilter, setClientFilter] = useState('');
+  const [userFilter, setUserFilter] = useState('');
+  const [procedureFilter, setProcedureFilter] = useState('');
+
+  const loadHistory = async () => {
+    setIsLoadingHistory(true);
+    setHistoryError('');
+    try {
+      const res = await fetch('/api/client-resources/history', { headers: authHeaders });
+      if (!res.ok) throw new Error();
+      const body = await res.json();
+      if (Array.isArray(body)) setHistoryRows(body);
+    } catch (e) {
+      setHistoryError(friendlyError(e, "Impossible de charger l'historique."));
+    } finally {
+      setIsLoadingHistory(false);
+      setHistoryLoaded(true);
+    }
+  };
+
+  // Chargé une seule fois, à la première visite de l'onglet — pas à chaque
+  // bascule entre « Mon travail » et « Historique ».
+  useEffect(() => { if (subView === 'history' && !historyLoaded) loadHistory(); }, [subView, historyLoaded]);
+
+  // Options des trois filtres dérivées des lignes reçues — jamais un second
+  // appel au fichier clients complet, qui à l'échelle du cabinet ne se
+  // charge jamais en entier : ces listes ne portent que ce qui a
+  // effectivement une instance en cours.
+  const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+  const clientOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.clientName)), [historyRows]);
+  const userOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.userName)), [historyRows]);
+  const procedureOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.name)), [historyRows]);
+
+  const historyFilteredBase = useMemo(
+    () => historyRows.filter(r =>
+      (!clientFilter || r.clientName === clientFilter)
+      && (!userFilter || r.userName === userFilter)
+      && (!procedureFilter || r.name === procedureFilter)),
+    [historyRows, clientFilter, userFilter, procedureFilter],
+  );
+
+  const historyPage = usePeriodPage<HistoryRow>(historyFilteredBase, r => r.createdAt, HISTORY_PAGE_SIZE);
+
   return (
     <div className="space-y-5">
+      <div className="flex rounded-lg border border-gray-200 overflow-hidden w-fit">
+        <button
+          onClick={() => setSubView('work')}
+          className={`px-3 py-2 text-[12.5px] font-medium flex items-center gap-1.5 ${subView === 'work' ? 'bg-navy text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+        >
+          <Briefcase className="w-3.5 h-3.5" /> Mon travail
+        </button>
+        <button
+          onClick={() => setSubView('history')}
+          className={`px-3 py-2 text-[12.5px] font-medium flex items-center gap-1.5 border-l border-gray-200 ${subView === 'history' ? 'bg-navy text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+        >
+          <History className="w-3.5 h-3.5" /> Historique
+        </button>
+      </div>
+
+      {subView === 'history' ? (
+        <div className="space-y-3">
+          {historyError && (
+            <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">{historyError}</div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <PeriodFilter page={historyPage} />
+              <select
+                value={clientFilter}
+                onChange={e => { setClientFilter(e.target.value); historyPage.setPage(1); }}
+                className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+              >
+                <option value="">Tous les clients</option>
+                {clientOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select
+                value={userFilter}
+                onChange={e => { setUserFilter(e.target.value); historyPage.setPage(1); }}
+                className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+              >
+                <option value="">Tous les collaborateurs</option>
+                {userOptions.map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+              <select
+                value={procedureFilter}
+                onChange={e => { setProcedureFilter(e.target.value); historyPage.setPage(1); }}
+                className="bg-white border border-gray-300 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer"
+              >
+                <option value="">Toutes les procédures</option>
+                {procedureOptions.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <ExportButton
+              fileName="historique-procedures"
+              rows={historyPage.filtered}
+              columns={[
+                { header: 'Date', value: (r: HistoryRow) => r.createdAt.slice(0, 10).split('-').reverse().join('/') },
+                { header: 'Client', value: (r: HistoryRow) => r.clientName },
+                { header: 'Procédure', value: (r: HistoryRow) => r.name },
+                { header: 'Utilisateur', value: (r: HistoryRow) => r.userName },
+                { header: 'Progression', value: (r: HistoryRow) => `${r.resolved}/${r.total}` },
+              ]}
+            />
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col">
+            {isLoadingHistory ? (
+              <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+            ) : historyPage.filtered.length === 0 ? (
+              <div className="p-10 text-center">
+                <History className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+                <p className="text-[13px] text-gray-500">Aucune procédure ne correspond à ces filtres.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-[13px]">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Client</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Procédure</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Utilisateur</th>
+                      <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Progression</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {historyPage.pageRows.map(r => {
+                      const pct = r.total ? Math.round((r.resolved / r.total) * 100) : 0;
+                      return (
+                        <tr key={r.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{r.createdAt.slice(0, 10).split('-').reverse().join('/')}</td>
+                          <td className="px-4 py-2.5 text-gray-900 font-medium">{r.clientName}</td>
+                          <td className="px-4 py-2.5 text-gray-700 flex items-center gap-1.5">
+                            {r.type === 'procedure' ? <ListChecks className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <FileCheck2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+                            <span className="truncate">{r.name}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-600">{r.userName}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center justify-end gap-2">
+                              <span className="text-gray-500 text-[12px] shrink-0">{r.resolved}/{r.total}</span>
+                              <div className="w-20 h-1.5 rounded-full bg-gray-100 overflow-hidden shrink-0">
+                                <div className={`h-full rounded-full ${pct === 100 ? 'bg-emerald-500' : 'bg-turquoise'}`} style={{ width: `${pct}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {/* Toujours visible, même sur une seule page — même règle que le
+                Brouillard de caisse et les onglets RH. */}
+            <PaginationBar page={historyPage} unit="procédures" />
+          </div>
+        </div>
+      ) : (
+      <>
       <div className="relative max-w-sm">
         <label className="text-[11px] font-semibold text-gray-400 block mb-1.5">Client</label>
         {client ? (
@@ -166,6 +355,8 @@ export const MyResourcesWork: React.FC = () => {
           onClose={() => setOpenInstance(null)}
           onChanged={() => client && load(client.id)}
         />
+      )}
+      </>
       )}
     </div>
   );

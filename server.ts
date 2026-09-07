@@ -7056,6 +7056,69 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   });
 
   /**
+   * Historique des procédures en cours, tous clients confondus — l'onglet
+   * « Mes procédures en cours » l'ouvre en plus de son flux par client, avec
+   * ses propres filtres (client, collaborateur, procédure, année, mois) et sa
+   * pagination, contrairement à `/api/resources/portfolio` juste en dessous
+   * qui est un résumé pour le tableau de bord et réservé à `DASHBOARD_ROLES`.
+   * Ouverte à `VIEW_RESOURCES` comme le reste de l'onglet, donc un simple
+   * collaborateur la voit aussi.
+   *
+   * **Une instance dont le responsable est ADMIN n'apparaît qu'à un
+   * administrateur** — même règle que `visibleEntriesFor()` pour le pointage :
+   * le travail d'un administrateur n'est pas montré aux autres. Le
+   * « responsable » est `assignedTo` s'il est renseigné, sinon `createdBy`
+   * (une instance affectée sans destinataire précis reste rattachée à qui
+   * l'a créée) — c'est aussi ce nom qui s'affiche comme « utilisateur » et
+   * ce qui alimente le filtre par collaborateur.
+   */
+  app.get('/api/client-resources/history', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
+    try {
+      const [instances, statuses, clients, users] = await Promise.all([
+        db.getAllClientResourceInstances(req.user.companyId),
+        db.getAllClientResourceItemStatuses(req.user.companyId),
+        db.getAllClients(req.user.companyId),
+        db.getAllUsers(req.user.companyId),
+      ]);
+      const clientsById = new Map(clients.map((c: any) => [c.id, c]));
+      const usersById = new Map(users.map((u: any) => [u.id, u]));
+      const statusesByInstance = new Map<string, any[]>();
+      for (const s of statuses) {
+        if (!statusesByInstance.has(s.instanceId)) statusesByInstance.set(s.instanceId, []);
+        statusesByInstance.get(s.instanceId)!.push(s);
+      }
+
+      const viewerIsAdmin = req.user.role === 'ADMIN';
+      const rows = instances
+        .map((i: any) => {
+          const items = statusesByInstance.get(i.id) ?? [];
+          const responsibleId = i.assignedTo ?? i.createdBy ?? null;
+          const responsible = responsibleId != null ? usersById.get(responsibleId) : null;
+          return {
+            id: i.id,
+            clientId: i.clientId,
+            clientName: (clientsById.get(i.clientId) as any)?.name ?? 'Client supprimé',
+            name: i.name,
+            type: i.type,
+            status: i.status,
+            total: items.length,
+            resolved: items.filter((x: any) => x.done).length,
+            createdAt: i.createdAt,
+            userId: responsibleId,
+            userName: responsible?.fullName || responsible?.username || 'Non attribué',
+            userRole: responsible?.role || null,
+          };
+        })
+        .filter((row: any) => viewerIsAdmin || row.userRole !== 'ADMIN')
+        .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * Admin-dashboard summary — per-client progress on documents/procédures,
    * separate from Pointage. Aggregates only (resolved/total counts), never
    * the item lists themselves, same "nothing unbounded crosses the wire"
