@@ -30,6 +30,14 @@ interface ClientBreakdownProps {
    * serveur : la ligne visée est donc exactement celle du bloc d'origine.
    */
   focusClient?: { key: string; name: string; nonce: number } | null;
+  /**
+   * Repliée par défaut — contrôlée depuis `AdminDashboard.tsx`, parce que
+   * `focusClient` (déclenché depuis Rentabilité ou une alerte) doit pouvoir
+   * la déplier lui-même avant de faire défiler l'écran jusqu'à la ligne
+   * visée.
+   */
+  open: boolean;
+  onToggle: () => void;
 }
 
 const STATUS_META: Record<string, { label: string; className: string; Icon: React.ElementType }> = {
@@ -54,7 +62,7 @@ const StatusBadge: React.FC<{ statut: string }> = ({ statut }) => {
  * it, and which tasks were done. A table rather than a chart — several measures
  * per row plus a drill-down is tabular work, not a magnitude comparison.
  */
-export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filters, focusClient }) => {
+export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filters, focusClient, open, onToggle }) => {
   const { user, token } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -160,7 +168,12 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full px-6 py-4 border-b border-gray-100 flex items-center gap-2.5 text-left hover:bg-gray-50/60 transition-colors"
+      >
+        {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
         <div>
           <h2 className="text-[14px] font-bold text-gray-900 flex items-center gap-2">
             <Briefcase className="w-4 h-4 text-gray-400" />
@@ -173,6 +186,11 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
             Coût, intervenants et tâches réalisées — selon les filtres appliqués.
           </p>
         </div>
+      </button>
+
+      {open && (
+      <>
+      <div className="px-6 py-3 border-b border-gray-100 flex justify-end">
         <div className="relative shrink-0">
           <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
@@ -430,6 +448,8 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
         <div className="px-6 py-8 text-center text-[13px] text-gray-400 italic">
           Aucun client ne correspond à « {search} ».
         </div>
+      )}
+      </>
       )}
     </div>
   );

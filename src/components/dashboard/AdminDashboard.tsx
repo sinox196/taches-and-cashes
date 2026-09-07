@@ -99,6 +99,18 @@ export const AdminDashboard: React.FC = () => {
   // écrit dans les mêmes startDate/endDate que le reste, donc choisir un mois
   // ou toucher une date le désélectionne — il ne cherche pas à refléter une
   // plage quelconque, pas plus que le filtre par mois.
+  // Le raccourci le plus fin des trois (jour, puis mois, puis année) : il
+  // écrit dans les mêmes startDate/endDate, donc toucher une date ou choisir
+  // un mois/une année le désélectionne aussi silencieusement que les deux
+  // autres se désélectionnent entre eux.
+  const applyTodayFilter = () => {
+    const today = toLocalDateString(new Date());
+    setStartDate(today);
+    setEndDate(today);
+    setMonthFilter('');
+    setYearFilter('');
+  };
+
   const [yearFilter, setYearFilter] = useState('');
   const yearOptions = React.useMemo(() => {
     const current = new Date().getFullYear();
@@ -130,8 +142,19 @@ export const AdminDashboard: React.FC = () => {
   const [tasksModalInitialSearch, setTasksModalInitialSearch] = useState('');
   /** Client à déplier dans « Activité par client », demandé depuis un autre bloc. */
   const [focusClient, setFocusClient] = useState<{ key: string; name: string; nonce: number } | null>(null);
+
+  // Trois cartes repliées par défaut mais atteintes par un raccourci d'écran
+  // (l'ExecutiveBar, une alerte, une ligne de rentabilité) : l'état vit ici
+  // plutôt que dans chaque carte, pour que ces raccourcis puissent la
+  // déplier eux-mêmes avant de faire défiler l'écran jusqu'à elle — sinon le
+  // clic amènerait sur un en-tête replié, vide de tout contenu.
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [rentabiliteOpen, setRentabiliteOpen] = useState(false);
+  const [activiteClientOpen, setActiviteClientOpen] = useState(false);
+
   const focusOnClient = (key: string, name: string) => {
     setFocusClient({ key, name, nonce: Date.now() });
+    setActiviteClientOpen(true);
     document.getElementById('dashboard-activite-client')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -235,6 +258,15 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
+            <button
+              type="button"
+              onClick={applyTodayFilter}
+              title="Filtrer sur aujourd'hui"
+              className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors w-full sm:w-auto"
+            >
+              Aujourd'hui
+            </button>
+
             <select
               value={monthFilter}
               onChange={e => applyMonthFilter(e.target.value)}
@@ -286,21 +318,32 @@ export const AdminDashboard: React.FC = () => {
             <ExecutiveBar
               data={exec.executive}
               financialsFiltered={exec.financialsFiltered}
-              onAlertsClick={() => document.getElementById('dashboard-alertes')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              onClientsClick={() => document.getElementById('dashboard-rentabilite')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              onAlertsClick={() => {
+                setAlertsOpen(true);
+                document.getElementById('dashboard-alertes')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              onClientsClick={() => {
+                setRentabiliteOpen(true);
+                document.getElementById('dashboard-rentabilite')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
             />
 
             <div id="dashboard-alertes" className="scroll-mt-4">
               <AlertsPanel
                 alerts={exec.alerts}
                 total={exec.alertsTotal}
+                open={alertsOpen}
+                onToggle={() => setAlertsOpen(o => !o)}
                 onOpen={a => {
                   // On descend vers l'entité concernée plutôt que d'ouvrir une
                   // fenêtre de plus : le contexte de filtre reste visible.
                   if (a.entity === 'client') {
                     const row = exec.clients?.find((c: any) => c.clientId === a.entityId);
                     if (row) focusOnClient(row.key, row.name);
-                    else document.getElementById('dashboard-rentabilite')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    else {
+                      setRentabiliteOpen(true);
+                      document.getElementById('dashboard-rentabilite')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
                   } else if (a.entity === 'user' && a.entityId != null) {
                     const emp = stats?.employeeStats?.find((e: any) => e.id === a.entityId);
                     if (emp) setSelectedEmployee(emp);
@@ -320,6 +363,8 @@ export const AdminDashboard: React.FC = () => {
                   <ClientProfitability
                     clients={exec.clients}
                     onOpenClient={(key, name) => focusOnClient(key, name)}
+                    open={rentabiliteOpen}
+                    onToggle={() => setRentabiliteOpen(o => !o)}
                   />
                 </div>
                 {exec.concentration && <ConcentrationCard data={exec.concentration} />}
@@ -351,6 +396,8 @@ export const AdminDashboard: React.FC = () => {
             <ClientBreakdown
               clients={stats.clientStats}
               focusClient={focusClient}
+              open={activiteClientOpen}
+              onToggle={() => setActiviteClientOpen(o => !o)}
               filters={{
                 startDate,
                 endDate,

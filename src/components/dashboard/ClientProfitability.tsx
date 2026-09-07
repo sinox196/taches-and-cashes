@@ -60,6 +60,14 @@ interface Props {
   clients: ClientRow[];
   /** Ouvre le détail de ce client dans « Activité par client ». */
   onOpenClient?: (key: string, name: string) => void;
+  /**
+   * Repliée par défaut — contrôlée depuis `AdminDashboard.tsx`, parce que
+   * les raccourcis qui pointent ici (l'`ExecutiveBar`, une alerte sans ligne
+   * trouvée dans « Activité par client ») doivent pouvoir la déplier
+   * eux-mêmes avant de faire défiler l'écran jusqu'à elle.
+   */
+  open: boolean;
+  onToggle: () => void;
 }
 
 /**
@@ -90,7 +98,7 @@ const fieldRaw = (r: ClientRow, field: SortField): number | string | null => {
   }
 };
 
-export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient }) => {
+export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient, open, onToggle }) => {
   const [query, setQuery] = useState('');
   const [hideUnbilled, setHideUnbilled] = useState(false);
   // Marge croissante par défaut : le client le plus problématique en premier —
@@ -166,7 +174,12 @@ export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient }) 
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
-      <div className="px-4 sm:px-5 py-4 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full px-4 sm:px-5 py-4 border-b border-gray-100 flex items-center gap-2.5 text-left hover:bg-gray-50/60 transition-colors"
+      >
+        {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
         <div>
           <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide">
             Rentabilité du portefeuille
@@ -175,21 +188,24 @@ export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient }) 
             Honoraires facturés comparés au coût du temps consommé, client par client.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          <div className="relative flex-1 min-w-[150px] lg:flex-none">
-            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Filtrer un client…"
-              className="pl-8 pr-3 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full lg:w-48"
-            />
-          </div>
-          <label className="flex items-center gap-1.5 text-[11.5px] text-gray-600 shrink-0 cursor-pointer">
-            <input type="checkbox" checked={hideUnbilled} onChange={e => setHideUnbilled(e.target.checked)} />
-            Masquer les non facturés
-          </label>
+      </button>
+
+      {open && (
+      <>
+      <div className="px-4 sm:px-5 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[150px] lg:flex-none">
+          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Filtrer un client…"
+            className="pl-8 pr-3 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full lg:w-48"
+          />
         </div>
+        <label className="flex items-center gap-1.5 text-[11.5px] text-gray-600 shrink-0 cursor-pointer">
+          <input type="checkbox" checked={hideUnbilled} onChange={e => setHideUnbilled(e.target.checked)} />
+          Masquer les non facturés
+        </label>
       </div>
 
       {scatter.length > 1 && (
@@ -354,6 +370,8 @@ export const ClientProfitability: React.FC<Props> = ({ clients, onOpenClient }) 
             </tfoot>
           </table>
         </div>
+      )}
+      </>
       )}
     </div>
   );

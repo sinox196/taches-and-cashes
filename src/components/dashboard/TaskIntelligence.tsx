@@ -56,6 +56,11 @@ const fieldRaw = (r: MissionRow, field: SortField): number | string | undefined 
  * consommé » — pas un outil de tarification.
  */
 export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
+  // Repliée par défaut — aucun raccourci d'écran ne pointe directement ici
+  // (contrairement à « Ce qui demande une décision » ou « Rentabilité du
+  // portefeuille »), donc l'état reste local plutôt que remonté à
+  // AdminDashboard.tsx.
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('heures');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -116,7 +121,12 @@ export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
-      <div className="px-4 sm:px-5 py-4 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full px-4 sm:px-5 py-4 border-b border-gray-100 flex items-center gap-2.5 text-left hover:bg-gray-50/60 transition-colors"
+      >
+        {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
         <div>
           <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide">
             Missions &amp; types de tâche
@@ -125,16 +135,19 @@ export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
             Où part le temps consommé — heures et coût employeur, pas une rentabilité (rien ne relie une tâche à une facture).
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          <div className="relative flex-1 min-w-[150px] lg:flex-none">
-            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Filtrer une mission…"
-              className="pl-8 pr-3 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full lg:w-48"
-            />
-          </div>
+      </button>
+
+      {open && (
+      <>
+      <div className="px-4 sm:px-5 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[150px] lg:flex-none">
+          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Filtrer une mission…"
+            className="pl-8 pr-3 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 w-full lg:w-48"
+          />
         </div>
       </div>
 
@@ -250,6 +263,8 @@ export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
             </tfoot>
           </table>
         </div>
+      )}
+      </>
       )}
     </div>
   );

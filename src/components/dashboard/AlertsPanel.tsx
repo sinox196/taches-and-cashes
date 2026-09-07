@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertOctagon, AlertTriangle, Info, ArrowRight } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, Info, ArrowRight, ChevronDown, ChevronRight } from 'lucide-react';
 
 export interface DashboardAlert {
   key: string;
@@ -39,6 +39,15 @@ interface AlertsPanelProps {
   total: number;
   /** Ouvre le détail de l'entité concernée — client ou collaborateur. */
   onOpen?: (alert: DashboardAlert) => void;
+  /**
+   * Repliée par défaut — contrôlée depuis `AdminDashboard.tsx` plutôt que
+   * gérée en interne, parce que le raccourci « Ce qui demande une décision »
+   * de l'`ExecutiveBar` doit pouvoir la déplier lui-même avant de faire
+   * défiler l'écran jusqu'à elle : sans ça le clic amènerait sur un en-tête
+   * replié, vide de tout contenu.
+   */
+  open: boolean;
+  onToggle: () => void;
 }
 
 /**
@@ -51,14 +60,19 @@ interface AlertsPanelProps {
  * permanence finit par ne plus être lu du tout, et l'alerte qui compte se perd
  * avec lui.
  */
-export const AlertsPanel: React.FC<AlertsPanelProps> = ({ alerts, total, onOpen }) => {
+export const AlertsPanel: React.FC<AlertsPanelProps> = ({ alerts, total, onOpen, open, onToggle }) => {
   if (!alerts || alerts.length === 0) return null;
 
   const criticals = alerts.filter(a => a.level === 'CRITIQUE').length;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
-      <div className="px-4 sm:px-5 py-3.5 border-b border-gray-100 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full px-4 sm:px-5 py-3.5 border-b border-gray-100 flex flex-wrap items-center gap-x-3 gap-y-1 text-left hover:bg-gray-50/60 transition-colors"
+      >
+        {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
         <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide">
           Ce qui demande une décision
         </h2>
@@ -70,8 +84,9 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ alerts, total, onOpen 
         <span className="text-[11px] text-gray-400 ml-auto">
           {total > alerts.length ? `${alerts.length} sur ${total}` : `${total} au total`}
         </span>
-      </div>
+      </button>
 
+      {open && (
       <ul className="divide-y divide-gray-50">
         {alerts.map(a => {
           const meta = LEVEL[a.level] ?? LEVEL.INFO;
@@ -105,6 +120,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({ alerts, total, onOpen 
           );
         })}
       </ul>
+      )}
     </div>
   );
 };

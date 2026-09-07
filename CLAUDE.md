@@ -964,6 +964,36 @@ Le per-client breakdown ([ClientBreakdown.tsx](src/components/dashboard/ClientBr
 
 Ce chiffre peut désormais diverger de celui de la page Clients — et c'est assumé : les deux répondent à des questions différentes (« combien reste dû au total, depuis toujours » contre « combien a été facturé et encaissé net sur cette période »), pas à la même. Le filtre **client** continue de s'appliquer normalement par-dessus — restreindre à un ou plusieurs clients ne change pas ce que vaut le solde-période de chacun, seulement combien on en additionne.
 
+**Cinq cartes sont repliées par défaut** — Ce qui demande une décision
+(`AlertsPanel.tsx`), Rentabilité du portefeuille (`ClientProfitability.tsx`),
+Concentration du portefeuille (`ConcentrationCard.tsx`), Missions & types de
+tâche (`TaskIntelligence.tsx`), Activité par client (`ClientBreakdown.tsx`) —
+chacune derrière un chevron dans son propre en-tête (`ChevronRight` replié,
+`ChevronDown` déplié, le même idiome que le sous-toggle « Détail par
+client »/« Détail par mission » que Rentabilité et Missions portaient déjà).
+Aucun `CollapsibleCard` partagé : cinq en-têtes déjà différents (badges,
+recherche, case à cocher) auraient forcé une abstraction avant qu'elle ne
+serve à rien d'autre — chaque carte porte son propre `useState`.
+
+**Trois de ces cinq sont contrôlées depuis `AdminDashboard.tsx`, pas en
+interne** — Ce qui demande une décision, Rentabilité du portefeuille et
+Activité par client, parce que trois raccourcis d'écran pointent directement
+dessus : les liens de l'`ExecutiveBar` (« Ce qui demande une décision »,
+un total de clients en alerte), le clic sur une alerte dont l'entité est un
+client, et `focusOnClient()` (déclenché aussi depuis une ligne de
+Rentabilité). Chacun de ces trois fait défiler l'écran vers un `id` ancre
+(`dashboard-alertes`/`dashboard-rentabilite`/`dashboard-activite-client`) —
+et sans forcer aussi `open` à `true` au même moment, le raccourci amènerait
+sur un en-tête replié, vide de tout contenu : exactement la régression que
+ces trois auraient introduite si l'état était resté local à chaque carte
+comme pour Concentration et Missions, qu'aucun raccourci ne cible.
+
+**Le filtre de dates porte un bouton « Aujourd'hui »**, au même rang que
+« Filtrer par mois »/« Filtrer par année » — le plus fin des trois raccourcis
+(jour, puis mois, puis année), qui écrit dans les mêmes `startDate`/`endDate`
+que les deux autres et se désélectionne donc pareil dès qu'on touche une
+date ou choisit un mois/une année.
+
 ### Task assignments and notifications
 
 An admin (gated on `ASSIGN_TASKS`, not a raw role check — the permission can be delegated the same way `MANAGE_SERVICES`/`ASSIGN_TASKS` etc. already are) hands a mission + type de tâche to a staff member from a button in Pointage ([AssignTaskModal.tsx](src/components/AssignTaskModal.tsx)), which reuses the same client-search-and-mission-cascade UI as [NewTaskCard.tsx](src/components/NewTaskCard.tsx).

@@ -1,5 +1,5 @@
-import React from 'react';
-import { PieChart } from 'lucide-react';
+import React, { useState } from 'react';
+import { PieChart, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface Props {
   data: {
@@ -21,22 +21,35 @@ const nf = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }
  * précis où il faudrait s'inquiéter.
  */
 export const ConcentrationCard: React.FC<Props> = ({ data, seuil = 0.2 }) => {
+  // Repliée par défaut, sans contrôle externe — aucun raccourci d'écran ne
+  // pointe directement ici.
+  const [open, setOpen] = useState(false);
+
   if (!data || !data.top1 || data.total <= 0) return null;
 
   const alerte = data.top1.part > seuil;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
-      <div className="px-4 sm:px-5 py-4 border-b border-gray-100">
-        <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
-          <PieChart className="w-4 h-4 text-gray-400" />
-          Concentration du portefeuille
-        </h2>
-        <p className="text-[11.5px] text-gray-400 mt-0.5">
-          Part des honoraires de la période portée par les plus gros clients.
-        </p>
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full px-4 sm:px-5 py-4 border-b border-gray-100 flex items-center gap-2.5 text-left hover:bg-gray-50/60 transition-colors"
+      >
+        {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
+        <div>
+          <h2 className="text-[13px] font-extrabold text-gray-800 uppercase tracking-wide flex items-center gap-2">
+            <PieChart className="w-4 h-4 text-gray-400" />
+            Concentration du portefeuille
+          </h2>
+          <p className="text-[11.5px] text-gray-400 mt-0.5">
+            Part des honoraires de la période portée par les plus gros clients.
+          </p>
+        </div>
+      </button>
 
+      {open && (
+      <>
       <div className="px-4 sm:px-5 py-4 grid gap-4 sm:grid-cols-2">
         <div className="flex items-baseline gap-2">
           <span className={`text-[24px] font-extrabold tabular-nums leading-none ${alerte ? 'text-late-fg' : 'text-gray-900'}`}>
@@ -80,6 +93,8 @@ export const ConcentrationCard: React.FC<Props> = ({ data, seuil = 0.2 }) => {
           Au-delà de {Math.round(seuil * 100)} %, la perte de ce client serait difficile à absorber.
           C'est un risque stratégique, indépendant de sa rentabilité.
         </p>
+      )}
+      </>
       )}
     </div>
   );
