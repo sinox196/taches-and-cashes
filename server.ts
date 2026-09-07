@@ -822,6 +822,10 @@ async function startServer() {
       // Même raison, même endroit : la fiche entreprise est déjà en main, et
       // la signature court-circuite dès la deuxième requête.
       await seedResourceLibraryFor(company);
+      // Même idiome encore : « un nouveau mois a commencé » se détecte à la
+      // prochaine requête plutôt que via un balayage périodique qui n'existe
+      // pas dans cette application.
+      await maybeSendEcheanceReminder(company);
       next();
     } catch (e) {
       res.status(401).json({ error: 'Invalid token' });
@@ -3477,6 +3481,68 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     })();
 
     resourceSeedInFlight.set(company.id, run);
+    return run;
+  }
+
+  /**
+   * Rappel mensuel aux administrateurs et superviseurs : penser à mettre à
+   * jour la grille des échéances du mois. Même mécanique que les rappels de
+   * tâche planifiée — il n'existe aucun balayage périodique dans cette
+   * application, donc c'est ici, dans `authenticate`, que « un nouveau mois a
+   * commencé » se détecte, à la prochaine requête de n'importe quel compte de
+   * l'entreprise, pas seulement celle d'un administrateur.
+   *
+   * La marque (`echeanceReminderSentMonth`, `YYYY-MM`) vit sur la fiche
+   * entreprise plutôt que sur chaque utilisateur : le rappel part une fois
+   * par mois pour l'entreprise, à tous ses administrateurs/superviseurs à la
+   * fois, pas une fois par personne qui se connecte. Une pose en vol
+   * dédupliquée évite que plusieurs requêtes simultanées au tout début du
+   * mois n'envoient chacune leur propre salve de notifications.
+   */
+  const echeanceReminderInFlight = new Map<string, Promise<void>>();
+  const ECHEANCE_REMINDER_MONTHS = [
+    'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+  ];
+
+  async function maybeSendEcheanceReminder(company: any): Promise<void> {
+    if (!company?.id) return;
+    // Réservé aux secteurs où le module Ressources métier (donc l'écran
+    // Échéances) est visible — en écrire pour les autres serait un rappel
+    // vers un écran qu'ils ne voient pas.
+    if (!companyHasResourcesModule(company.secteur)) return;
+
+    const month = formatDateISO(new Date()).slice(0, 7);
+    if (company.echeanceReminderSentMonth === month) return;
+
+    const inFlight = echeanceReminderInFlight.get(company.id);
+    if (inFlight) return inFlight;
+
+    const run = (async () => {
+      try {
+        const recipients = (await db.getAllUsers(company.id)).filter((u: any) => DASHBOARD_ROLES.includes(u.role));
+        const monthLabel = ECHEANCE_REMINDER_MONTHS[Number(month.slice(5, 7)) - 1];
+        for (const u of recipients) {
+          await notify(
+            company.id,
+            u.id,
+            'ECHEANCE_REMINDER',
+            'Rappel — grille des échéances',
+            `Pensez à mettre à jour la grille des échéances de ${monthLabel}.`,
+          );
+        }
+        // Écrite après coup, comme les autres semis : une exécution
+        // interrompue avant d'avoir notifié tout le monde se rejoue à la
+        // prochaine requête plutôt que de marquer le mois comme fait à tort.
+        await db.updateCompany(company.id, { echeanceReminderSentMonth: month });
+      } catch (e) {
+        console.error('[echeances] rappel mensuel échoué', e);
+      } finally {
+        echeanceReminderInFlight.delete(company.id);
+      }
+    })();
+
+    echeanceReminderInFlight.set(company.id, run);
     return run;
   }
 
@@ -6420,6 +6486,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   const PUSH_NAV_FOR_TYPE: Record<string, string> = {
     TASK_ASSIGNED: 'Dashboard',
     TASK_REMINDER: 'Dashboard',
+    ECHEANCE_REMINDER: 'Ressources',
     LEAVE_REQUEST: 'HR',
     LEAVE_DECISION: 'HR',
     ABSENCE_REQUEST: 'HR',
