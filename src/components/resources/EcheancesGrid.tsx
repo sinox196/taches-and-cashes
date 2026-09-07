@@ -82,7 +82,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
   const [newMonth, setNewMonth] = useState(1);
   const [newLabel, setNewLabel] = useState('');
 
-  const [menu, setMenu] = useState<{ clientId: number; columnId: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ clientId: number; columnId: string; x: number; y: number; allowVocabEdit: boolean } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [addingStatus, setAddingStatus] = useState(false);
   const [newStatusLabel, setNewStatusLabel] = useState('');
@@ -91,9 +91,22 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
   const [editingStatusLabel, setEditingStatusLabel] = useState('');
   const [editingStatusColor, setEditingStatusColor] = useState(DEFAULT_COLOR);
 
-  const openMenu = (clientId: number, columnId: string, rect: DOMRect) => {
+  /**
+   * `allowVocabEdit` n'autorise le crayon/la poubelle du menu (qui touchent
+   * la **valeur** — renommer/supprimer « Oui » pour tout le monde) que
+   * lorsque le menu s'ouvre depuis le Tableau. Depuis « Calendrier par
+   * client », la seule action possible sur une valeur est de la choisir ou de
+   * revenir à « Vide » pour CE client : un crayon/une poubelle à côté d'une
+   * valeur, dans un écran dont tout le reste ne parle que d'un seul client,
+   * se clique en pensant effacer la case de ce client — et supprime en
+   * réalité la valeur pour tous les clients qui la portent (elle redevient
+   * muette partout, tableau compris, jusqu'à être reposée). C'est exactement
+   * le symptôme remonté : « retirer une échéance pour un client la retire
+   * pour tous les clients dans le calendrier ».
+   */
+  const openMenu = (clientId: number, columnId: string, rect: DOMRect, allowVocabEdit: boolean) => {
     if (!canManage) return;
-    setMenu({ clientId, columnId, x: rect.left, y: rect.bottom });
+    setMenu({ clientId, columnId, x: rect.left, y: rect.bottom, allowVocabEdit });
     setAddingStatus(false);
     setEditingStatusId(null);
   };
@@ -315,7 +328,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
   };
 
   const removeStatusOption = async (opt: StatusOption) => {
-    if (!confirm(`Supprimer la valeur "${opt.label}" ? Les cellules déjà réglées sur cette valeur ne seront pas modifiées.`)) return;
+    if (!confirm(`Supprimer la valeur "${opt.label}" pour TOUS les clients ? Elle disparaîtra de la liste et toute case actuellement réglée sur "${opt.label}" — quel que soit le client — s'affichera vide jusqu'à ce qu'on lui remette un statut.`)) return;
     try {
       await fetch(`/api/echeance-status-options/${opt.id}`, { method: 'DELETE', headers: authHeaders });
       await load();
@@ -569,7 +582,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
                     return (
                       <td key={col.id} className="border border-gray-200 p-0.5">
                         <button
-                          onClick={e => openMenu(client.id, col.id, (e.target as HTMLElement).getBoundingClientRect())}
+                          onClick={e => openMenu(client.id, col.id, (e.target as HTMLElement).getBoundingClientRect(), true)}
                           title={status || 'Vide'}
                           className={`w-full h-7 rounded text-[10.5px] font-semibold truncate px-1 ${style.bg} ${style.fg} hover:ring-1 hover:ring-gray-300 transition-shadow`}
                         >
@@ -641,7 +654,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
                       return (
                         <button
                           key={col.id}
-                          onClick={e => openMenu(calendarClient.id, col.id, (e.target as HTMLElement).getBoundingClientRect())}
+                          onClick={e => openMenu(calendarClient.id, col.id, (e.target as HTMLElement).getBoundingClientRect(), false)}
                           className="w-full flex items-stretch justify-between gap-0 border-t border-gray-200 hover:bg-gray-50 text-left"
                         >
                           <span className="flex-1 min-w-0 truncate text-[12.5px] text-gray-700 px-3.5 py-2 border-r border-gray-200">{col.label}</span>
@@ -673,7 +686,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
           </button>
           {sortedStatusOptions.map(opt => (
             <div key={opt.id} className="group flex items-center hover:bg-gray-50">
-              {editingStatusId === opt.id ? (
+              {editingStatusId === opt.id && menu.allowVocabEdit ? (
                 <div className="flex-1 px-3 py-1.5 space-y-1.5">
                   <div className="flex items-center gap-1">
                     <input
@@ -714,20 +727,24 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
                     <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${COLOR_TOKENS[opt.color || DEFAULT_COLOR]?.dot ?? COLOR_TOKENS[DEFAULT_COLOR].dot}`} />
                     <span className="truncate">{opt.label}</span>
                   </button>
-                  <button
-                    onClick={() => startEditStatusOption(opt)}
-                    className="p-1 mr-0.5 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-gray-600 rounded shrink-0"
-                    title="Modifier cette valeur"
-                  >
-                    <Pencil className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => removeStatusOption(opt)}
-                    className="p-1 mr-1.5 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-600 rounded shrink-0"
-                    title="Supprimer cette valeur"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
+                  {menu.allowVocabEdit && (
+                    <>
+                      <button
+                        onClick={() => startEditStatusOption(opt)}
+                        className="p-1 mr-0.5 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-gray-600 rounded shrink-0"
+                        title="Modifier cette valeur"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => removeStatusOption(opt)}
+                        className="p-1 mr-1.5 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-600 rounded shrink-0"
+                        title="Supprimer cette valeur"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>
