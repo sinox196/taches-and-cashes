@@ -74,7 +74,7 @@ const relativeTime = (iso: string) => {
 };
 
 export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }) => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<any[]>([]);
@@ -90,13 +90,47 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
   navigateRef.current = onNavigate;
   const [permission, setPermission] = useState<NotificationPermission>(notificationPermission());
 
-  // Ids already surfaced as an OS toast. Seeded on the first poll rather than
-  // starting empty, so opening the app doesn't replay every unread
-  // notification as a burst of toasts.
+  /**
+   * Ids already surfaced as an OS toast, and the per-contact unread counts
+   * they were compared against — persisted in `localStorage`, scoped by user,
+   * rather than starting empty on every mount.
+   *
+   * Ce n'était pas le cas : un simple `useRef` repart vide à **chaque
+   * rechargement de page**, pas seulement à la toute première ouverture de
+   * l'app. Le code traitait donc chaque rechargement comme un « premier
+   * poll de la session » et avalait silencieusement les messages/notifications
+   * déjà non lus à cet instant — exactement le symptôme remonté : une
+   * notification client → admin qui arrive quand l'onglet était déjà ouvert
+   * en continu, et qui disparaît (sans jamais devenir un toast, juste un
+   * badge) dès que l'admin recharge ou se reconnecte avant le poll suivant.
+   * Ne persister que les ids/compteurs déjà vus laisse la protection
+   * d'origine intacte pour un tout premier login sur cet appareil (rien de
+   * persisté → un seul seed silencieux), tout en laissant un rechargement
+   * ordinaire continuer d'où la session précédente s'était arrêtée.
+   */
+  const notifSeenKey = user ? `notif_seen_${user.id}` : null;
+  const msgSeenKey = user ? `msg_unread_seen_${user.id}` : null;
   const notifiedIds = useRef<Set<string>>(new Set());
   const seededOsNotifications = useRef(false);
   /** Per-contact unread counts, to toast only when a count actually grows. */
   const lastUnreadByContact = useRef<Record<string, number>>({});
+
+  // (Re)charge l'état persisté dès que l'utilisateur (donc la clé) est connu —
+  // au montage initial et si jamais le compte change sans remonter le composant.
+  useEffect(() => {
+    if (!notifSeenKey || !msgSeenKey) return;
+    try {
+      const rawIds = localStorage.getItem(notifSeenKey);
+      notifiedIds.current = new Set(rawIds ? JSON.parse(rawIds) : []);
+      const rawCounts = localStorage.getItem(msgSeenKey);
+      lastUnreadByContact.current = rawCounts ? JSON.parse(rawCounts) : {};
+      seededOsNotifications.current = localStorage.getItem(`${notifSeenKey}_init`) === '1';
+    } catch {
+      notifiedIds.current = new Set();
+      lastUnreadByContact.current = {};
+      seededOsNotifications.current = false;
+    }
+  }, [notifSeenKey, msgSeenKey]);
 
   useEffect(() => { initOsNotifications(); }, []);
 
@@ -168,12 +202,22 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
       const unread = (nextItems?.items ?? []).filter((n: any) => !n.readAt);
       const contactRows = (nextContacts ?? []).filter((c: any) => c.unreadCount > 0);
 
+      // Premier poll **jamais fait sur cet appareil pour ce compte** — pas
+      // simplement le premier depuis le dernier rechargement, `seededOsNotifications`
+      // étant réhydraté depuis `localStorage` ci-dessus. Un rechargement en
+      // cours de session continue donc de comparer contre l'état persisté au
+      // lieu de tout réavaler silencieusement.
       if (!seededOsNotifications.current) {
-        // First poll of the session: record what already exists without
-        // announcing it. Only genuinely new arrivals should interrupt.
         unread.forEach((n: any) => notifiedIds.current.add(String(n.id)));
         (nextContacts ?? []).forEach((c: any) => { lastUnreadByContact.current[String(c.id)] = c.unreadCount || 0; });
         seededOsNotifications.current = true;
+        if (notifSeenKey && msgSeenKey) {
+          try {
+            localStorage.setItem(`${notifSeenKey}_init`, '1');
+            localStorage.setItem(notifSeenKey, JSON.stringify([...notifiedIds.current]));
+            localStorage.setItem(msgSeenKey, JSON.stringify(lastUnreadByContact.current));
+          } catch { /* le pire cas est de retoaster une fois — pas un crash */ }
+        }
         return;
       }
 
@@ -221,10 +265,24 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
       // again later.
       lastUnreadByContact.current = {};
       (nextContacts ?? []).forEach((c: any) => { lastUnreadByContact.current[String(c.id)] = c.unreadCount || 0; });
+
+      // Ne garder que les ids encore présents dans la réponse courante : ceux
+      // qui en sont sortis (lus, expirés) ne seront plus jamais comparés, les
+      // conserver ne ferait que grossir `localStorage` sans fin sur un compte
+      // resté connecté des mois.
+      const currentIds = new Set((nextItems?.items ?? []).map((n: any) => String(n.id)));
+      notifiedIds.current = new Set([...notifiedIds.current].filter(id => currentIds.has(id)));
+
+      if (notifSeenKey && msgSeenKey) {
+        try {
+          localStorage.setItem(notifSeenKey, JSON.stringify([...notifiedIds.current]));
+          localStorage.setItem(msgSeenKey, JSON.stringify(lastUnreadByContact.current));
+        } catch { /* pas grave : au pire un doublon de toast au prochain rechargement */ }
+      }
     } catch {
       /* a missed poll just delays the badge, never worth surfacing */
     }
-  }, [token, showToast]);
+  }, [token, showToast, notifSeenKey, msgSeenKey]);
 
   useEffect(() => {
     refresh();
