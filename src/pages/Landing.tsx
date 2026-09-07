@@ -68,8 +68,15 @@ const TONES: Record<Tone, {
  * même liste que lit le serveur : un prix corrigé ici et pas là-bas produirait
  * une page publique qui annonce un montant et un e-mail de RIB qui en demande
  * un autre. Cette interface ne fait que mettre la liste en forme d'affichage.
+ *
+ * **Le pack Facturation n'y figure plus** — retiré de la page à la demande de
+ * l'utilisateur. Il reste dans `SELLABLE_PLANS` côté serveur (`isSellablePlan`,
+ * la console plateforme) : ce n'est pas une offre retirée comme `FREELANCE`/
+ * `EQUIPE`/`CROISSANCE` (`legacy: true`), qui elles ne se vendent plus du
+ * tout — seule sa carte publique disparaît, l'offre se propose encore
+ * autrement (contact direct).
  */
-const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
+const PLANS: PricingPlan[] = SELLABLE_PLANS.filter(p => p.id !== 'FACTURATION').map(p => ({
   name: p.label,
   tagline: p.tagline,
   // « 0 DT/mois » se lit comme un prix qu'on a oublié de saisir — le pack
@@ -736,7 +743,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               </h1>
               <p className="mt-[18px] text-[16.5px] text-[#5B6472] leading-[1.6]">
                 Les trois packs donnent accès à l'intégralité des vues — tâches, temps, coûts, facturation et trésorerie.
-                L'offre Facturation est un autre produit : la facturation et vos clients, pour un seul utilisateur.
               </p>
             </div>
           </section>

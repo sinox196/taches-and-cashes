@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Logo } from '../components/Logo';
 import { NotificationBell } from '../components/NotificationBell';
 import { ChatPage } from '../components/chat/ChatPage';
@@ -7,8 +7,9 @@ import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { useAuth } from '../context/AuthContext';
 import { formatCostTND } from '../utils/formatters';
 import { paymentModeLabel, isCashMode } from '../constants/paymentModes';
+import { companyHasResourcesModule } from '../constants/secteurs';
 import {
-  LogOut, FileText, ClipboardCheck, FolderCheck, MessageCircle,
+  LogOut, FileText, ClipboardCheck, FolderCheck, CalendarClock, MessageCircle,
   AlertTriangle, CheckCircle2, Loader2, Menu, X, Wallet,
 } from 'lucide-react';
 
@@ -72,14 +73,45 @@ interface Deliverable {
   items: { id: string; label: string; done: boolean }[];
 }
 
-type Tab = 'statement' | 'tasks' | 'deliverables' | 'messages';
+interface EcheanceColumn { id: string; year: number; month: number; label: string; sortOrder: number }
+interface EcheanceStatusCell { columnId: string; status: string | null }
+interface EcheanceStatusOption { id: string; label: string; color?: string }
+interface EcheanceData { columns: EcheanceColumn[]; statuses: EcheanceStatusCell[]; statusOptions: EcheanceStatusOption[] }
+
+type Tab = 'statement' | 'tasks' | 'deliverables' | 'echeances' | 'messages';
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'statement', label: 'Relevé de compte', icon: FileText },
   { id: 'tasks', label: 'Travaux', icon: ClipboardCheck },
   { id: 'deliverables', label: 'Livrables', icon: FolderCheck },
+  // Réservé aux secteurs où Ressources métier existe côté cabinet — même
+  // garde que `companyHasResourcesModule` ailleurs, sinon l'onglet serait
+  // toujours vide pour une entreprise qui n'a jamais eu de grille.
+  { id: 'echeances', label: 'Échéances', icon: CalendarClock },
   { id: 'messages', label: 'Messages', icon: MessageCircle },
 ];
+
+const MONTH_NAMES = [
+  'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+];
+
+/**
+ * Les mêmes clés de couleur que `EcheancesGrid.tsx` (les tokens réservés
+ * `done`/`late`/`run`/`pause`/`admin`/`collab`, jamais un hex inventé ici) —
+ * le portail ne fait que lire la couleur assignée par le cabinet à chaque
+ * valeur, il n'en choisit aucune.
+ */
+const ECHEANCE_COLOR_TOKENS: Record<string, { bg: string; fg: string }> = {
+  done: { bg: 'bg-done-bg', fg: 'text-done-fg' },
+  late: { bg: 'bg-late-bg', fg: 'text-late-fg' },
+  run: { bg: 'bg-run-bg', fg: 'text-run-fg' },
+  pause: { bg: 'bg-pause-bg', fg: 'text-pause-fg' },
+  admin: { bg: 'bg-admin-bg', fg: 'text-admin-fg' },
+  collab: { bg: 'bg-collab-bg', fg: 'text-collab-fg' },
+  gray: { bg: 'bg-gray-50', fg: 'text-gray-400' },
+};
+const ECHEANCE_EMPTY_STYLE = { bg: 'bg-white', fg: 'text-gray-300' };
 
 const fdate = (iso: string) => {
   if (!iso) return '—';
@@ -96,8 +128,15 @@ export const ClientPortal: React.FC = () => {
   const [statement, setStatement] = useState<{ soldeAnterieur: number; lines: StatementLine[]; soldeGlobal: number } | null>(null);
   const [tasks, setTasks] = useState<PortalTask[]>([]);
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
+  const [echeances, setEcheances] = useState<EcheanceData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Même garde que côté back-office : un secteur sans Ressources métier n'a
+  // jamais eu de grille d'échéances à afficher, donc l'onglet ne se propose
+  // même pas plutôt que de rendre une carte toujours vide.
+  const hasEcheances = companyHasResourcesModule(user?.company?.secteur);
+  const visibleTabs = useMemo(() => TABS.filter(t => t.id !== 'echeances' || hasEcheances), [hasEcheances]);
 
   // Facture ouverte depuis le relevé — chargée à la demande, pas embarquée
   // dans chaque ligne du relevé.
@@ -134,11 +173,15 @@ export const ClientPortal: React.FC = () => {
     let cancelled = false;
     (async () => {
       try {
-        const [s, st, t, d] = await Promise.all([
-          get('summary'), get('statement'), get('tasks'), get('deliverables'),
-        ]);
+        const calls = [get('summary'), get('statement'), get('tasks'), get('deliverables')];
+        // Un appel de plus seulement pour un secteur qui a réellement une
+        // grille — pas la peine de le demander pour une entreprise dont
+        // l'onglet n'apparaît de toute façon pas.
+        if (hasEcheances) calls.push(get('echeances'));
+        const [s, st, t, d, ech] = await Promise.all(calls);
         if (cancelled) return;
         setSummary(s); setStatement(st); setTasks(t); setDeliverables(d);
+        if (hasEcheances) setEcheances(ech);
       } catch (e: any) {
         if (!cancelled) setError(e.message || 'Erreur de chargement.');
       } finally {
@@ -146,7 +189,7 @@ export const ClientPortal: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, get]);
+  }, [token, get, hasEcheances]);
 
   // Un compte client que personne n'a rattaché à un dossier : le serveur
   // répond 403 avec sa raison, et l'afficher vaut mieux qu'un portail vide
@@ -194,7 +237,7 @@ export const ClientPortal: React.FC = () => {
 
         {/* Onglets : en ligne dès `sm`, repliés derrière le menu sur téléphone. */}
         <nav className={`${menuOpen ? 'flex' : 'hidden'} sm:flex flex-col sm:flex-row max-w-[1200px] mx-auto px-4 sm:px-6 gap-1 sm:gap-2 pb-2`}>
-          {TABS.map(t => {
+          {visibleTabs.map(t => {
             const Icon = t.icon;
             return (
               <button
@@ -224,9 +267,11 @@ export const ClientPortal: React.FC = () => {
             </div>
           ) : (
             <>
-              {/* Situation financière — visible sur les trois onglets de suivi,
-                  c'est la question que le client se pose en arrivant. */}
-              {summary && (
+              {/* Situation financière — visible sur les onglets de suivi qui en
+                  parlent, c'est la question que le client se pose en
+                  arrivant ; absente sur Échéances, qui ne porte aucun
+                  montant. */}
+              {summary && tab !== 'echeances' && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <StatCard label="Solde antérieur" value={formatCostTND(summary.soldeAnterieur)} />
                   <StatCard label="Total facturé" value={formatCostTND(summary.montantFacture)} />
@@ -244,6 +289,7 @@ export const ClientPortal: React.FC = () => {
               )}
               {tab === 'tasks' && <TasksView tasks={tasks} />}
               {tab === 'deliverables' && <DeliverablesView deliverables={deliverables} />}
+              {tab === 'echeances' && <EcheancesView data={echeances} />}
             </>
           )}
         </main>
@@ -512,3 +558,83 @@ const DeliverablesView: React.FC<{ deliverables: Deliverable[] }> = ({ deliverab
     })}
   </div>
 );
+
+/**
+ * Échéances — la même grille que le back-office (`EcheancesGrid.tsx`), mais
+ * réduite à ce qu'un client a besoin d'en voir : son propre calendrier, en
+ * lecture seule (pas de menu, pas de crayon/poubelle — poser une valeur ou
+ * gérer le vocabulaire reste `MANAGE_RESOURCES`, réservé au cabinet). C'est
+ * le format « Calendrier par client » de l'écran admin, sans la recherche
+ * puisque le client n'a qu'un seul dossier à regarder : le sien.
+ */
+const EcheancesView: React.FC<{ data: EcheanceData | null }> = ({ data }) => {
+  const years = useMemo(() => {
+    const s = new Set<number>((data?.columns || []).map(c => c.year));
+    s.add(new Date().getFullYear());
+    return Array.from(s).sort((a, b) => b - a);
+  }, [data]);
+  const [year, setYear] = useState(() => new Date().getFullYear());
+
+  if (!data) return null;
+
+  const yearColumns = data.columns.filter(c => c.year === year).sort((a, b) => a.sortOrder - b.sortOrder);
+  const monthGroups: { month: number; cols: EcheanceColumn[] }[] = [];
+  for (const c of yearColumns) {
+    const g = monthGroups.find(g => g.month === c.month);
+    if (g) g.cols.push(c); else monthGroups.push({ month: c.month, cols: [c] });
+  }
+  const statusByColumn = new Map<string, string | null>(data.statuses.map(s => [s.columnId, s.status]));
+  const styleFor = (status: string | null) => {
+    if (!status) return ECHEANCE_EMPTY_STYLE;
+    const opt = data.statusOptions.find(o => o.label === status);
+    return ECHEANCE_COLOR_TOKENS[opt?.color || 'gray'] ?? ECHEANCE_COLOR_TOKENS.gray;
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-gray-900">Échéances</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Le suivi mensuel de vos échéances fiscales et sociales.</p>
+        </div>
+        {years.length > 1 && (
+          <select
+            value={year}
+            onChange={e => setYear(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-gray-700"
+          >
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        )}
+      </div>
+
+      {monthGroups.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-xl"><Empty>Aucune échéance définie pour {year}.</Empty></div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {monthGroups.map(g => (
+            <div key={g.month} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-3.5 py-2 bg-gray-50 border-b border-gray-200 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                {MONTH_NAMES[g.month - 1]}
+              </div>
+              <div>
+                {g.cols.map(col => {
+                  const status = statusByColumn.get(col.id) ?? null;
+                  const style = styleFor(status);
+                  return (
+                    <div key={col.id} className="flex items-stretch justify-between gap-0 border-t border-gray-200">
+                      <span className="flex-1 min-w-0 truncate text-[12.5px] text-gray-700 px-3.5 py-2 border-r border-gray-200">{col.label}</span>
+                      <span className={`shrink-0 flex items-center px-2.5 text-[10.5px] font-semibold ${style.bg} ${style.fg}`}>
+                        {status || 'Vide'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};

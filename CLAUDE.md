@@ -383,6 +383,18 @@ trois tons et non deux : `navy` met une offre **en avant** parmi ses pareilles,
 accent sont assombries pour tenir sur ce fond : le gris `#8A93A0` des cartes
 blanches y tombe à 2,6:1.
 
+**Sa carte a été retirée de la page Tarifs, à la demande de l'utilisateur** —
+[Landing.tsx](src/pages/Landing.tsx) filtre `FACTURATION` hors de la liste
+affichée (`SELLABLE_PLANS.filter(p => p.id !== 'FACTURATION')`) avant de la
+mettre en forme de cartes, et le paragraphe d'en-tête qui la présentait
+(« L'offre Facturation est un autre produit… ») a été retiré avec elle. Ce
+n'est **pas** la même chose qu'un `legacy: true` : l'offre reste dans
+`SELLABLE_PLANS` et donc `isSellablePlan` — une inscription qui la demande
+encore (console plateforme, lien direct) fonctionne toujours, seule sa carte
+publique a disparu. Si elle doit redevenir visible sur la page, retirer le
+`.filter()` suffit — ne pas la remarquer `legacy`, qui produirait un tout
+autre comportement (refusée à toute nouvelle inscription).
+
 L'éditeur de document reste capable de se passer du fichier clients : il
 demande `hasPermission('VIEW_CLIENTS')` — qui consulte déjà l'offre — et sans
 lui la raison sociale devient un champ libre au lieu d'un type-ahead (une loupe
@@ -657,6 +669,34 @@ paramètre : il n'y a aucun `?clientId=` à falsifier.
   `COMPLETED` sont servies.
 - `/api/portal/deliverables` — les modèles affectés au dossier, leur
   avancement et leurs items, jamais qui y a passé du temps.
+- `/api/portal/echeances` — le calendrier d'échéances du dossier, en lecture
+  seule. Rend les mêmes colonnes que `GET /api/echeance-columns` et le même
+  vocabulaire de statuts (`statusOptions`, avec sa couleur) que la grille
+  admin — pour que le portail dessine les mêmes pastilles — mais `statuses`
+  n'est filtré qu'aux cellules de **ce** client, jamais celles des autres
+  dossiers. Poser une valeur reste `MANAGE_RESOURCES`, réservé au cabinet :
+  cette route ne sert que la lecture, il n'existe aucune route d'écriture
+  côté portail.
+
+**Un onglet « Échéances » dans le portail** ([ClientPortal.tsx](src/pages/ClientPortal.tsx))
+rend ce calendrier sous la même forme que « Calendrier par client » de
+l'écran admin ([EcheancesGrid.tsx](src/components/resources/EcheancesGrid.tsx))
+— une carte par mois, le libellé de chaque colonne et sa pastille de statut
+— mais sans recherche de client (le portail n'en a qu'un, le sien) ni menu
+au clic sur une cellule (pas de crayon/poubelle, pas de sélection : c'est de
+la lecture). Les couleurs viennent des mêmes tokens réservés que la grille
+admin (`done`/`late`/`run`/`pause`/`admin`/`collab`), dupliqués localement en
+une petite table plutôt qu'importés — le fichier admin n'exporte pas la
+sienne, et sept lignes ne valent pas une extraction partagée.
+
+**L'onglet n'apparaît que pour un secteur qui a Ressources métier** —
+`companyHasResourcesModule(user.company?.secteur)`, la même garde que
+`AuthContext.hasPermission` applique déjà à `VIEW_RESOURCES`/`MANAGE_RESOURCES`
+côté back-office. Un secteur « Autres professions de services » n'a jamais eu
+de grille d'échéances semée ; lui montrer l'onglet serait une carte
+éternellement vide sans qu'aucun message n'explique pourquoi. La garde évite
+aussi l'appel réseau correspondant quand l'onglet n'est de toute façon pas
+montré, une requête de plus par chargement pour rien.
 
 **Une ligne « Facture » du relevé s'ouvre au clic** et affiche le document
 complet, réutilisant [InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)

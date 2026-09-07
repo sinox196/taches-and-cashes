@@ -5664,6 +5664,36 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  /**
+   * Le calendrier d'échéances du dossier, en lecture seule : les mêmes
+   * colonnes que la grille du cabinet (`GET /api/echeance-columns`) et
+   * `statusOptions` (le vocabulaire, avec sa couleur) pour que le portail
+   * dessine les mêmes pastilles que l'écran admin — mais `statuses` n'est
+   * filtré qu'aux cellules de **ce** client, jamais celles des autres
+   * dossiers. Poser une valeur reste `MANAGE_RESOURCES`, réservé au
+   * cabinet : cette route ne sert que la lecture.
+   */
+  app.get('/api/portal/echeances', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+
+      const columns = await db.getAllEcheanceColumns(req.user.companyId);
+      const statuses = await db.getAllEcheanceStatuses(req.user.companyId);
+      const statusOptions = await db.getAllEcheanceStatusOptions(req.user.companyId);
+
+      res.json({
+        columns: columns.map((c: any) => ({ id: c.id, year: c.year, month: c.month, label: c.label, sortOrder: c.sortOrder })),
+        statuses: statuses
+          .filter((s: any) => String(s.clientId) === String(client.id))
+          .map((s: any) => ({ columnId: s.columnId, status: s.status })),
+        statusOptions: statusOptions.map((o: any) => ({ id: o.id, label: o.label, color: o.color })),
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET Leave Balance
   app.get('/api/hr/balance', authenticate, async (req: any, res: any) => {
     try {
