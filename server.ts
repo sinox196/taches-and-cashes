@@ -7110,7 +7110,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const viewerIsAdmin = req.user.role === 'ADMIN';
       const rows = instances
         .map((i: any) => {
-          const items = statusesByInstance.get(i.id) ?? [];
+          const items = (statusesByInstance.get(i.id) ?? []).sort((a: any, b: any) => a.sortOrder - b.sortOrder);
           const responsibleId = i.assignedTo ?? i.createdBy ?? null;
           const responsible = responsibleId != null ? usersById.get(responsibleId) : null;
           return {
@@ -7120,8 +7120,16 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
             name: i.name,
             type: i.type,
             status: i.status,
+            isSequential: !!i.isSequential,
             total: items.length,
             resolved: items.filter((x: any) => x.done).length,
+            // Le détail des items, pas seulement le compte — un clic sur la
+            // ligne ouvre le même `ResourceInstanceModal` que « Mon travail »,
+            // qui a besoin de la liste pour cocher/décocher chaque document.
+            // Toujours borné : au plus quelques dizaines d'items par instance,
+            // le même ordre de grandeur que `/api/client-resources?clientId=`
+            // envoie déjà pour un seul client à la fois.
+            items,
             createdAt: i.createdAt,
             userId: responsibleId,
             userName: responsible?.fullName || responsible?.username || 'Non attribué',

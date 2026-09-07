@@ -7,19 +7,33 @@ import { usePeriodPage, PeriodFilter, PaginationBar } from '../PeriodPager';
 import { ExportButton } from '../ExportButton';
 import { friendlyError } from '../../utils/errors';
 
+interface HistoryItem {
+  id: string;
+  label: string;
+  sortOrder: number;
+  done: boolean;
+  completedAt: string | null;
+}
+
 interface HistoryRow {
   id: string;
   clientId: number;
   clientName: string;
   name: string;
-  type: string;
+  type: 'document_checklist' | 'procedure';
   status: string;
+  isSequential: boolean;
   total: number;
   resolved: number;
+  /** Le détail des documents — cliquer la ligne ouvre le même suivi que « Mon travail ». */
+  items: HistoryItem[];
   createdAt: string;
   userId: number | null;
   userName: string;
 }
+
+/** Repliage des accents pour la recherche, comme le reste de l'app. */
+const foldAccents = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const HISTORY_PAGE_SIZE = 15;
 
@@ -92,6 +106,7 @@ export const MyResourcesWork: React.FC = () => {
   const [clientFilter, setClientFilter] = useState('');
   const [userFilter, setUserFilter] = useState('');
   const [procedureFilter, setProcedureFilter] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
 
   const loadHistory = async () => {
     setIsLoadingHistory(true);
@@ -122,12 +137,17 @@ export const MyResourcesWork: React.FC = () => {
   const userOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.userName)), [historyRows]);
   const procedureOptions = useMemo(() => uniqueSorted(historyRows.map(r => r.name)), [historyRows]);
 
+  const historyTerm = foldAccents(historySearch.trim());
   const historyFilteredBase = useMemo(
     () => historyRows.filter(r =>
       (!clientFilter || r.clientName === clientFilter)
       && (!userFilter || r.userName === userFilter)
-      && (!procedureFilter || r.name === procedureFilter)),
-    [historyRows, clientFilter, userFilter, procedureFilter],
+      && (!procedureFilter || r.name === procedureFilter)
+      && (!historyTerm
+        || foldAccents(r.clientName).includes(historyTerm)
+        || foldAccents(r.name).includes(historyTerm)
+        || foldAccents(r.userName).includes(historyTerm))),
+    [historyRows, clientFilter, userFilter, procedureFilter, historyTerm],
   );
 
   const historyPage = usePeriodPage<HistoryRow>(historyFilteredBase, r => r.createdAt, HISTORY_PAGE_SIZE);
@@ -157,6 +177,15 @@ export const MyResourcesWork: React.FC = () => {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:border-gray-400">
+                <Search className="w-3.5 h-3.5 text-gray-400 ml-2.5 shrink-0" />
+                <input
+                  value={historySearch}
+                  onChange={e => { setHistorySearch(e.target.value); historyPage.setPage(1); }}
+                  placeholder="Rechercher client, procédure, collaborateur…"
+                  className="px-2 py-2 text-[12.5px] text-gray-800 focus:outline-none bg-transparent w-64"
+                />
+              </div>
               <PeriodFilter page={historyPage} />
               <select
                 value={clientFilter}
@@ -220,7 +249,12 @@ export const MyResourcesWork: React.FC = () => {
                     {historyPage.pageRows.map(r => {
                       const pct = r.total ? Math.round((r.resolved / r.total) * 100) : 0;
                       return (
-                        <tr key={r.id} className="hover:bg-gray-50">
+                        <tr
+                          key={r.id}
+                          onClick={() => setOpenInstance(r)}
+                          title="Voir le détail des documents"
+                          className="hover:bg-gray-50 cursor-pointer"
+                        >
                           <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{r.createdAt.slice(0, 10).split('-').reverse().join('/')}</td>
                           <td className="px-4 py-2.5 text-gray-900 font-medium">{r.clientName}</td>
                           <td className="px-4 py-2.5 text-gray-700 flex items-center gap-1.5">
@@ -348,15 +382,17 @@ export const MyResourcesWork: React.FC = () => {
           onAssigned={() => { setAssigning(false); load(client.id); }}
         />
       )}
+      </>
+      )}
 
+      {/* Partagé par les deux sous-vues : une ligne de l'historique ouvre le
+          même suivi document-par-document qu'une carte de « Mon travail ». */}
       {openInstance && (
         <ResourceInstanceModal
           instance={openInstance}
           onClose={() => setOpenInstance(null)}
-          onChanged={() => client && load(client.id)}
+          onChanged={() => { if (subView === 'history') loadHistory(); else if (client) load(client.id); }}
         />
-      )}
-      </>
       )}
     </div>
   );
