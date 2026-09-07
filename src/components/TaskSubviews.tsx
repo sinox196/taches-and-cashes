@@ -3,6 +3,9 @@ import { Timer, CalendarClock, ClipboardCheck, Play, Loader, X, Send } from 'luc
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 import { SearchableSelect, type SearchableOption } from './SearchableSelect';
+import { usePeriodPage, PaginationBar } from './PeriodPager';
+
+const DELEGATED_PAGE_SIZE = 15;
 
 const PRIORITY_STYLE: Record<string, string> = {
   BASSE: 'bg-gray-100 text-gray-500',
@@ -309,6 +312,13 @@ const AssignmentList: React.FC<{
  * part — taper la première lettre suggère, cliquer sélectionne — avec une
  * option « Tous… » en tête qui remet le filtre à zéro. Les options sont
  * dérivées des lignes déjà reçues, jamais un second appel réseau.
+ *
+ * **Paginée à 15 lignes**, via `usePeriodPage`/`PaginationBar` de
+ * [PeriodPager.tsx](PeriodPager.tsx) — réutilisé pour sa seule pagination
+ * (l'année/le mois qu'il sait aussi filtrer ne sont pas rendus ici, rien n'a
+ * demandé ce filtre-là sur cette liste). La barre reste **toujours visible**,
+ * même sur une page unique, même règle que le Brouillard de caisse et les
+ * onglets RH : une barre qui apparaît et disparaît fait sauter la liste.
  */
 const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
   const [userFilter, setUserFilter] = useState('');
@@ -338,6 +348,13 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
     [rows, userFilter, missionFilter, typeFilter, statusFilter],
   );
 
+  const pager = usePeriodPage<any>(filtered, a => a.createdAt, DELEGATED_PAGE_SIZE);
+
+  const setUserFilterAndReset = (v: string) => { setUserFilter(v); pager.setPage(1); };
+  const setMissionFilterAndReset = (v: string) => { setMissionFilter(v); pager.setPage(1); };
+  const setTypeFilterAndReset = (v: string) => { setTypeFilter(v); pager.setPage(1); };
+  const setStatusFilterAndReset = (v: string) => { setStatusFilter(v); pager.setPage(1); };
+
   if (rows.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-10 text-center">
@@ -353,23 +370,23 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
     <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="w-48">
-          <SearchableSelect value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="Tous les collaborateurs" size="sm" />
+          <SearchableSelect value={userFilter} onChange={setUserFilterAndReset} options={userOptions} placeholder="Tous les collaborateurs" size="sm" />
         </div>
         <div className="w-44">
-          <SearchableSelect value={missionFilter} onChange={setMissionFilter} options={missionOptions} placeholder="Toutes les missions" size="sm" />
+          <SearchableSelect value={missionFilter} onChange={setMissionFilterAndReset} options={missionOptions} placeholder="Toutes les missions" size="sm" />
         </div>
         <div className="w-52">
-          <SearchableSelect value={typeFilter} onChange={setTypeFilter} options={typeOptions} placeholder="Tous les types de tâche" size="sm" />
+          <SearchableSelect value={typeFilter} onChange={setTypeFilterAndReset} options={typeOptions} placeholder="Tous les types de tâche" size="sm" />
         </div>
         <div className="w-44">
-          <SearchableSelect value={statusFilter} onChange={setStatusFilter} options={statusOptions} placeholder="Tous les statuts" size="sm" />
+          <SearchableSelect value={statusFilter} onChange={setStatusFilterAndReset} options={statusOptions} placeholder="Tous les statuts" size="sm" />
         </div>
       </div>
       {filtered.length === 0 ? (
         <p className="text-[12.5px] text-gray-400 italic text-center py-6">Aucune tâche ne correspond à ces filtres.</p>
       ) : (
       <div className="divide-y divide-gray-100">
-        {filtered.map(a => (
+        {pager.pageRows.map(a => (
           <div key={a.id} className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 py-3 first:pt-0 last:pb-0">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -391,6 +408,9 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
         ))}
       </div>
       )}
+      {/* Toujours visible, même sur une seule page — même règle que le
+          Brouillard de caisse et les onglets RH. */}
+      <PaginationBar page={pager} unit="tâches déléguées" />
     </div>
   );
 };
