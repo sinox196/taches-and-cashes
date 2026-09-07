@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { roleMeta } from '../../constants/roles';
 import { usePresence } from '../../context/PresenceContext';
 import { PresenceBadge } from '../PresenceBadge';
-import { Loader2, Send, MessageCircle, Check, CheckCheck, ArrowLeft, Users, Plus, Settings2 } from 'lucide-react';
+import { Loader2, Send, MessageCircle, Check, CheckCheck, ArrowLeft, Users, Plus, Settings2, Search } from 'lucide-react';
 import { GroupModal, type ChatGroup } from './GroupModal';
 import { formatTimeTN, civilDateKeyTN } from '../../utils/formatters';
 
@@ -39,6 +39,9 @@ type Selection =
   | { kind: 'group'; group: ChatGroup };
 
 const selectionId = (s: Selection) => (s.kind === 'dm' ? String(s.contact.id) : s.group.id);
+
+/** Repliage des accents pour la recherche, comme le sélecteur d'objet du brouillard. */
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const initials = (name: string) =>
   name
@@ -82,6 +85,7 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [groups, setGroups] = useState<ChatGroup[]>([]);
+  const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Selection | null>(null);
   /** `false` = fermé, `null` = création, objet = modification. */
   const [groupEditor, setGroupEditor] = useState<false | { group: ChatGroup | null }>(false);
@@ -314,6 +318,13 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
     }
   };
 
+  // Recherche par nom — groupes et contacts, accent-repliée comme les autres
+  // recherches de l'app. Le fil ouvert reste affiché même s'il ne matche plus
+  // la saisie en cours : filtrer la conversation qu'on regarde serait surprenant.
+  const q = fold(search.trim());
+  const filteredGroups = q ? groups.filter(g => fold(g.name).includes(q)) : groups;
+  const filteredContacts = q ? contacts.filter(c => fold(c.fullName || c.username).includes(q)) : contacts;
+
   return (
     /**
      * Master-detail, and on a phone the two panes take turns rather than
@@ -347,13 +358,25 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
             </button>
           )}
         </div>
+        <div className="px-3 pt-3 pb-1 border-b border-gray-100">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher un contact ou un groupe…"
+              className="w-full pl-8 pr-3 py-1.5 text-[12.5px] rounded-lg border border-gray-200 outline-none focus:border-gray-400"
+            />
+          </div>
+        </div>
         <div className="flex-1 overflow-y-auto">
-          {groups.length > 0 && (
+          {filteredGroups.length > 0 && (
             <>
               <div className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Users className="w-3 h-3" /> Groupes
               </div>
-              {groups.map(g => {
+              {filteredGroups.map(g => {
                 const isActive = selected?.kind === 'group' && selected.group.id === g.id;
                 return (
                   <button
@@ -396,10 +419,12 @@ export const ChatPage: React.FC<{ onUnreadChange?: (count: number) => void }> = 
             <div className="flex items-center justify-center p-8">
               <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
             </div>
-          ) : contacts.length === 0 ? (
-            <div className="p-4 text-[12px] text-gray-400 text-center">Aucun collègue trouvé</div>
+          ) : filteredContacts.length === 0 ? (
+            <div className="p-4 text-[12px] text-gray-400 text-center">
+              {q ? 'Aucun résultat.' : 'Aucun collègue trouvé'}
+            </div>
           ) : (
-            contacts.map(c => {
+            filteredContacts.map(c => {
               const meta = roleMeta(c.role);
               const isActive = selected?.kind === 'dm' && selected.contact.id === c.id;
               return (

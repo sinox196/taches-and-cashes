@@ -658,6 +658,14 @@ serveur pour un client. Dans le modèle actuel (messages directs à deux) un
 échange entre collaborateurs est déjà hors de portée ; le drapeau est là pour
 que la règle tienne le jour où un fil accueillera plusieurs personnes.
 
+**La liste des conversations se filtre par recherche**, groupes et contacts
+ensemble, avec le même repliage d'accents que le reste de l'app
+([ChatPage.tsx](src/components/chat/ChatPage.tsx)). C'est un filtre purement
+local sur les listes déjà chargées — pas de nouvelle route — puisque
+`GET /api/messages/contacts` et `/groups` rendent déjà tout ce que le compte
+peut voir. Le fil ouvert reste affiché même s'il ne matche plus la saisie en
+cours : filtrer la conversation qu'on regarde serait surprenant.
+
 **Les effets du back-office doivent être éteints à la source.** Un `return`
 anticipé dans le rendu n'empêche pas les `useEffect` de tourner — les hooks
 s'exécutent avant lui, quelle que soit la branche rendue. Le sondage des
