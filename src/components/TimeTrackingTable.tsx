@@ -11,6 +11,7 @@ import {
   Play,
   Pause,
   Square,
+  Calendar,
 } from 'lucide-react';
 import { TimeEntry, TaskStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -61,21 +62,40 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   const [clientFilter, setClientFilter] = useState<string[]>([]);
   const [poleFilter, setPoleFilter] = useState<string[]>([]);
   const [collabFilter, setCollabFilter] = useState<string[]>([]);
+  // Du/Au — same idiom as the dashboard's own range picker, ISO (YYYY-MM-DD)
+  // to match what <input type="date"> emits. Empty means unbounded on that side.
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const uniqueClients = Array.from(new Set(entries.map(e => e.client))).sort((a: string, b: string) => a.localeCompare(b));
   const uniquePoles = Array.from(new Set(entries.map(e => e.pole))).sort((a: string, b: string) => a.localeCompare(b));
   const uniqueCollaborateurs = Array.from(new Set(entries.map(e => e.userName || 'Unknown'))).sort((a: string, b: string) => a.localeCompare(b));
 
+  /**
+   * entry.date is DD/MM/YYYY (server-written display string, see CLAUDE.md
+   * "Date formats are mixed"); rearranged to YYYY-MM-DD it compares correctly
+   * as a plain string against the ISO value a date input already emits —
+   * no `Date` round-trip, so no timezone to get wrong.
+   */
+  const toIsoDateKey = (frDate: string): string => {
+    const [day, month, year] = (frDate || '').split('/');
+    return day && month && year ? `${year}-${month}-${day}` : '';
+  };
+
   // Filter entries based on search & status
   const filteredEntries = entries.filter((item) => {
     const matchesStatus =
       statusFilter === 'ALL' ? true : item.statut === statusFilter;
-      
+
     const matchesClient = clientFilter.length === 0 || clientFilter.includes(item.client);
     const matchesPole = poleFilter.length === 0 || poleFilter.includes(item.pole);
     const matchesCollab = collabFilter.length === 0 || collabFilter.includes(item.userName || 'Unknown');
 
-    return matchesStatus && matchesClient && matchesPole && matchesCollab;
+    const dateKey = toIsoDateKey(item.date);
+    const matchesDateFrom = !dateFrom || (!!dateKey && dateKey >= dateFrom);
+    const matchesDateTo = !dateTo || (!!dateKey && dateKey <= dateTo);
+
+    return matchesStatus && matchesClient && matchesPole && matchesCollab && matchesDateFrom && matchesDateTo;
   });
 
   /** Libellés de statut, partagés par l'affichage et l'export. */
@@ -141,6 +161,33 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
 
         {/* Header Controls: Search & Filter */}
         <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2 min-w-0 w-full sm:w-auto">
+          {/* Date range — Du/Au, same idiom as the dashboard's own range
+              picker. Client-side over whatever's already loaded, like every
+              other filter in this header: a range reaching further back than
+              what's loaded needs "Charger plus" first (see the footer). */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-white px-2.5 py-1.5 rounded-lg border border-gray-300">
+            <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] text-gray-500 font-medium">Du</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="text-[11px] outline-none text-gray-700 bg-transparent min-w-0 w-[104px]"
+              />
+            </div>
+            <span className="text-gray-300 hidden sm:inline">|</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] text-gray-500 font-medium">Au</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="text-[11px] outline-none text-gray-700 bg-transparent min-w-0 w-[104px]"
+              />
+            </div>
+          </div>
+
           {/* Collaborator Filter — searchable, multiple at once */}
           {isAdmin && (
             <MultiSelectFilterDropdown
