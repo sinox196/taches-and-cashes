@@ -3756,9 +3756,21 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     const awayMs = await awayAfterMs(req.user.companyId);
     const reported = Number(req.body?.idleMs);
     const idleMs = Number.isFinite(reported) && reported >= 0 ? Math.min(reported, awayMs * 6) : 0;
-    presence.set(presenceKey(req.user.companyId, req.user.id), {
+    const key = presenceKey(req.user.companyId, req.user.id);
+    const existing = presence.get(key);
+    const lastActivityAt = now - idleMs;
+    presence.set(key, {
       lastSeenAt: now,
-      lastActivityAt: now - idleMs,
+      // Ne recule jamais. Un même compte peut battre depuis plusieurs
+      // onglets — un oublié en arrière-plan à côté de celui qu'on utilise
+      // vraiment — et rien ne garantit que leurs requêtes arrivent dans
+      // l'ordre où elles sont parties. Écraser sans comparer laissait le
+      // battement le plus lent gagner : l'onglet oublié, avec son idle qui
+      // grandit, repassait quelqu'un d'actif à l'instant à « absent » —
+      // exactement le symptôme remonté (« je travaille sur mon poste, mon
+      // statut dit absent »). Ne retenir que la dernière activité *connue*,
+      // jamais une plus ancienne qu'un battement précédent a déjà dépassée.
+      lastActivityAt: existing ? Math.max(existing.lastActivityAt, lastActivityAt) : lastActivityAt,
       // Relu à chaque battement plutôt que mémorisé une fois : quelqu'un qui
       // passe de son poste à son téléphone doit changer d'icône, pas garder
       // celle de sa première connexion de la journée.
