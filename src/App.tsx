@@ -132,6 +132,15 @@ export default function App() {
   const [taskTypesList, setTaskTypesList] = useState<any[]>([]);
   /** Entries that exist server-side, of which the table holds the most recent page. */
   const [totalEntries, setTotalEntries] = useState<number | null>(null);
+  /**
+   * How many of the newest entries `fetchTimeEntries` asks the server for.
+   * Mirrors the server's own `ENTRIES_PAGE_SIZE` (server.ts) as the starting
+   * point; "Charger plus" in TimeTrackingTable raises it in the same
+   * increments, capped at the server's own hard limit of 1000 — a click never
+   * asks for something the route would refuse anyway.
+   */
+  const ENTRIES_PAGE_SIZE = 200;
+  const [entriesLimit, setEntriesLimit] = useState(ENTRIES_PAGE_SIZE);
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   // Sidebar badge: polled as a fallback and updated live by ChatPage's own
@@ -243,11 +252,15 @@ export default function App() {
   });
 
   // The server returns a capped, newest-first page plus the overall total, so a
-  // large history never lands in one payload.
-  const fetchTimeEntries = useCallback(async () => {
+  // large history never lands in one payload. `limitOverride` lets
+  // `loadMoreEntries` ask for a bigger page without waiting for `entriesLimit`
+  // to re-render first — otherwise the very next line would still close over
+  // the stale value.
+  const fetchTimeEntries = useCallback(async (limitOverride?: number) => {
     if (!token) return;
     try {
-      const res = await fetch('/api/time-entries', { headers: { 'Authorization': `Bearer ${token}` } });
+      const limit = limitOverride ?? entriesLimit;
+      const res = await fetch(`/api/time-entries?limit=${limit}`, { headers: { 'Authorization': `Bearer ${token}` } });
       const body = await res.json();
       const rows = Array.isArray(body) ? body : (body.data ?? []);
       setTimeEntries(rows.map(decorate));
@@ -255,7 +268,18 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
-  }, [token]);
+  }, [token, entriesLimit]);
+
+  /**
+   * "Charger plus" in TimeTrackingTable — raises the page size and re-fetches
+   * once, superset of what's already shown, so this alone (unlike the SSE
+   * frame below) can just replace `timeEntries` wholesale.
+   */
+  const loadMoreEntries = useCallback(() => {
+    const newLimit = Math.min(entriesLimit + ENTRIES_PAGE_SIZE, 1000);
+    setEntriesLimit(newLimit);
+    fetchTimeEntries(newLimit);
+  }, [entriesLimit, fetchTimeEntries]);
 
   useEffect(() => {
     if (!token || isClientUser || activeNav !== 'Time Tracking') return;
@@ -282,7 +306,7 @@ export default function App() {
           const data = Array.isArray(payload) ? payload : (payload.data ?? []);
           if (!Array.isArray(payload) && typeof payload.total === 'number') setTotalEntries(payload.total);
           setTimeEntries(prev => {
-            return data.map((serverEntry: any) => {
+            const frame = data.map((serverEntry: any) => {
               if (serverEntry.statut === 'RUNNING') {
                 const local = prev.find(e => e.id === serverEntry.id);
                 // if we already have it running locally, keep our local seconds if it's within a reasonable drift (e.g. 5s) to avoid UI stutter
@@ -294,6 +318,14 @@ export default function App() {
               }
               return decorate(serverEntry);
             });
+            // The broadcast only ever carries the newest ENTRIES_PAGE_SIZE rows
+            // (server.ts). Once "Charger plus" has pulled older ones in, a live
+            // push must not silently drop them again — merge the fresh frame
+            // with whatever's already loaded beyond it instead of replacing
+            // wholesale.
+            const frameIds = new Set(frame.map((e: any) => e.id));
+            const older = prev.filter(e => !frameIds.has(e.id));
+            return [...frame, ...older];
           });
         } catch (e) {
           console.error('SSE Error:', e);
@@ -954,6 +986,7 @@ export default function App() {
                 onSelectAsActive={handleSelectAsActive}
                 onChangeStatus={user?.role === 'ADMIN' ? handleAdminChangeStatus : undefined}
                 totalEntries={totalEntries ?? undefined}
+                onLoadMore={loadMoreEntries}
               />
             )}
             </div>

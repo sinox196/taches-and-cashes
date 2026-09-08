@@ -31,6 +31,8 @@ interface TimeTrackingTableProps {
   onChangeStatus?: (entry: TimeEntry, statut: TaskStatus) => void;
   /** Entries held server-side; the table shows the most recent page of them. */
   totalEntries?: number;
+  /** Pulls in the next page of older entries beyond what's already loaded. */
+  onLoadMore?: () => void;
 }
 
 export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTask?: boolean }> = ({
@@ -41,6 +43,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   onSelectAsActive,
   onChangeStatus,
   totalEntries,
+  onLoadMore,
 }) => {
   const { hasPermission, user } = useAuth();
   const { presenceOf } = usePresence();
@@ -465,12 +468,25 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
 
       {/* Footer info bar */}
       <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 text-[11px] text-gray-500 flex items-center justify-between">
-        <span>
-          Affichage de {filteredEntries.length} sur {entries.length} activités
-          {totalEntries != null && totalEntries > entries.length && (
-            <span className="text-gray-400">
-              {' '}· {totalEntries} au total (les {entries.length} plus récentes sont chargées)
-            </span>
+        <span className="flex items-center gap-2 flex-wrap">
+          <span>
+            Affichage de {filteredEntries.length} sur {entries.length} activités
+            {totalEntries != null && totalEntries > entries.length && (
+              <span className="text-gray-400">
+                {' '}· {totalEntries} au total (les {entries.length} plus récentes sont chargées)
+              </span>
+            )}
+          </span>
+          {/* Only offered while there's genuinely more to fetch — the server
+              caps a single page at 1000, so past that "load more" would just
+              re-request the same page and do nothing. */}
+          {onLoadMore && totalEntries != null && totalEntries > entries.length && entries.length < 1000 && (
+            <button
+              onClick={onLoadMore}
+              className="px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 text-[10.5px] font-bold hover:border-gray-400 hover:bg-gray-50 transition-colors"
+            >
+              Charger plus
+            </button>
           )}
         </span>
         {isAdmin && (
