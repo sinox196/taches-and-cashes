@@ -370,7 +370,6 @@ export const UsersManagement: React.FC = () => {
           rows={visibleUsers}
           columns={teamTab === 'clients' ? [
             { header: 'Utilisateur', value: (u: any) => u.username },
-            { header: 'Dossier client', value: (u: any) => u.clientName ?? '' },
           ] : [
             { header: 'Utilisateur', value: (u: any) => u.username },
             { header: 'Rôle', value: (u: any) => roleMeta(u.role).label },
@@ -444,9 +443,11 @@ export const UsersManagement: React.FC = () => {
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   Statut
                 </th>
-                <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  {teamTab === 'clients' ? 'Dossier client' : 'Rôle'}
-                </th>
+                {teamTab !== 'clients' && (
+                  <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    Rôle
+                  </th>
+                )}
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right">
                   Actions
                 </th>
@@ -462,16 +463,14 @@ export const UsersManagement: React.FC = () => {
                     {(() => { const p = presenceOf(user.id);
                       return <PresenceBadge state={p.state} idleMs={p.idleMs} onLeaveUntil={p.onLeaveUntil} />; })()}
                   </td>
-                  <td className="px-5 py-3">
-                    {teamTab === 'clients' ? (
-                      <span className="text-[13px] text-gray-700">{user.clientName || '—'}</span>
-                    ) : (
+                  {teamTab !== 'clients' && (
+                    <td className="px-5 py-3">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${roleMeta(user.role).badgeClass}`}>
                         {roleMeta(user.role).hasShield && <Shield className="w-3 h-3" />}
                         {roleMeta(user.role).label}
                       </span>
-                    )}
-                  </td>
+                    </td>
+                  )}
                   <td className="px-5 py-3 text-right">
                     <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <button

@@ -638,9 +638,17 @@ sur la même liste déjà chargée (`GET /api/users`) — « Équipe » (tout sa
 `CLIENT_ROLE`) et « Comptes clients » (uniquement `CLIENT_ROLE`), avec un
 compteur sur le second. Les deux populations ne se lisent jamais ensemble :
 noyer une poignée de comptes portail parmi des dizaines de collaborateurs (ou
-l'inverse) ne montre rien d'utile. La colonne « Rôle » devient « Dossier
-client » dans cet onglet — le rôle y est toujours `CLIENT`, donc l'afficher
-répéterait ce que l'onglet dit déjà — et « Nouvel utilisateur » devient
+l'inverse) ne montre rien d'utile. La colonne « Rôle » n'existe pas dans cet
+onglet — le rôle y est toujours `CLIENT`, donc l'afficher répéterait ce que
+l'onglet dit déjà — et le tableau n'affiche que Utilisateur / Statut /
+Actions, `<th>` et `<td>` conditionnés sur `teamTab !== 'clients'` de part et
+d'autre. Elle portait un temps le dossier client rattaché à sa place (« La
+colonne devient Dossier client »), **retirée à la demande de l'utilisateur** :
+le nom d'utilisateur d'un compte client se pré-remplit sur le nom du dossier
+choisi (voir plus bas), donc la colonne Utilisateur porte déjà quasiment
+toujours la même information. `user.clientName` reste lu ailleurs — il
+pré-remplit le sélecteur de dossier à l'édition — ce n'est que la colonne du
+tableau qui a disparu, pas le champ. « Nouvel utilisateur » devient
 « Nouveau compte client », qui ouvre le formulaire avec `Rôle` déjà sur
 `Client`. Une recherche par nom d'utilisateur filtre les deux onglets.
 
