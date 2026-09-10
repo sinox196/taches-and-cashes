@@ -365,6 +365,35 @@ export const ClientsManagement: React.FC = () => {
     }
   };
 
+  /**
+   * Pour « Exporter » — le fichier clients n'est jamais chargé en entier côté
+   * client (voir Scale constraints), donc `filteredClients` n'est que la page
+   * affichée. Les mêmes filtres que `fetchClients`, mais sans `page` : la
+   * route retombe alors sur sa réponse « tableau brut », non tronquée. Un
+   * aller-retour de plus au clic sur Exporter, pas un chargement permanent.
+   */
+  const fetchAllFilteredClients = async (): Promise<Client[]> => {
+    const combinedFilters = { ...activeFilters };
+    if (statusFilter !== 'ALL') {
+      combinedFilters.status = statusFilter;
+    }
+    const params = new URLSearchParams({
+      q: searchTerm,
+      sortField,
+      sortDir,
+      filters: JSON.stringify(combinedFilters),
+    });
+    if (selectedClients.length > 0) {
+      params.set('clientIds', selectedClients.map(c => c.id).join(','));
+    }
+    const res = await fetch(`/api/clients?${params.toString()}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : (data.data ?? []);
+  };
+
   const handleAddFilter = () => {
     if (!filterKey || (!filterValue.trim() && !['status', 'type'].includes(filterKey))) return;
     setActiveFilters(prev => ({ ...prev, [filterKey]: filterValue }));
@@ -603,12 +632,14 @@ export const ClientsManagement: React.FC = () => {
           />
 
           <div className="flex gap-2 relative">
-            {/* Exporte la page affichée, filtres compris. Les colonnes du
-                ledger ne sortent que si l'utilisateur a le droit de les voir :
-                le serveur ne les lui envoie même pas. */}
+            {/* Exporte tous les clients correspondant aux filtres en cours,
+                pas seulement la page affichée (fetchAllFilteredClients ci-
+                dessus). Les colonnes du ledger ne sortent que si l'utilisateur
+                a le droit de les voir : le serveur ne les lui envoie même pas. */}
             <ExportButton
               fileName="clients"
               rows={filteredClients}
+              fetchAllRows={fetchAllFilteredClients}
               columns={[
                 { header: 'Client / Nom', value: (c: Client) => c.name },
                 { header: 'Type', value: (c: Client) => (c.type === 'Company' ? 'Entreprise' : 'Particulier') },

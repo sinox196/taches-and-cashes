@@ -126,6 +126,38 @@ export const CashManagement: React.FC = () => {
   }, [search, page, kindFilter]);
 
   /**
+   * Pour « Exporter » — `invoices` ne porte que la page affichée (pagination
+   * serveur, comme Clients). La route plafonne `limit` à 500 par appel
+   * (server.ts), donc on boucle par tranches de 500 jusqu'à avoir tout ce que
+   * `total` annonce, plutôt que de supposer qu'un seul appel suffit — même
+   * raisonnement que « Charger plus » sur le Suivi des tâches de l'équipe.
+   */
+  const fetchAllFilteredInvoices = async (): Promise<any[]> => {
+    const q = search.trim();
+    const kind = kindFilter;
+    const CHUNK = 500;
+    let offset = 0;
+    let all: any[] = [];
+    // Bornée par le total annoncé par le premier appel, pour ne jamais
+    // boucler indéfiniment si la réponse venait à changer entre deux appels.
+    let total = Infinity;
+    while (offset < total) {
+      const res = await fetch(
+        `/api/invoices?limit=${CHUNK}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ''}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`,
+        { headers: authHeaders },
+      );
+      if (!res.ok) break;
+      const body = await res.json();
+      const chunk = body.data ?? [];
+      if (chunk.length === 0) break;
+      all = all.concat(chunk);
+      total = typeof body.total === 'number' ? body.total : all.length;
+      offset += CHUNK;
+    }
+    return all;
+  };
+
+  /**
    * Émettre un brouillon : c'est le serveur qui lui attribue son numéro, à ce
    * moment-là et pas avant. Un autre document doit fournir sa référence libre.
    */
@@ -240,6 +272,7 @@ export const CashManagement: React.FC = () => {
           <ExportButton
             fileName="factures"
             rows={invoices}
+            fetchAllRows={fetchAllFilteredInvoices}
             columns={[
               { header: 'Numéro', value: (i: any) => displayNumber(i) },
               { header: 'Statut', value: (i: any) => (i.status === 'DRAFT' ? 'Brouillon' : 'Émis') },
