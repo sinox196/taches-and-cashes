@@ -9,10 +9,10 @@ interface PausedTasksListProps {
 
 export const PausedTasksList: React.FC<PausedTasksListProps> = ({ entries, onResume }) => {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 border-t-[3px] border-t-amber-700 shadow-sm overflow-hidden">
-      <div className="px-5 py-3 border-b border-amber-100 bg-amber-50/60 flex items-center gap-2">
-        <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-        <h3 className="text-[12px] font-bold text-amber-800 uppercase tracking-wide">Tâches en pause</h3>
+    <div className="bg-white rounded-xl border border-gray-200 border-t-[3px] border-t-sky-600 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 border-b border-sky-100 bg-sky-50/60 flex items-center gap-2">
+        <div className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></div>
+        <h3 className="text-[12px] font-bold text-sky-800 uppercase tracking-wide">Tâches en pause</h3>
       </div>
       <div className="divide-y divide-gray-50">
         {entries.map((entry) => (
@@ -38,7 +38,7 @@ export const PausedTasksList: React.FC<PausedTasksListProps> = ({ entries, onRes
               </div>
               
               <button
-                className="w-10 h-10 rounded-full bg-amber-500 text-white flex items-center justify-center group-hover:bg-amber-600 transition-colors"
+                className="w-10 h-10 rounded-full bg-sky-500 text-white flex items-center justify-center group-hover:bg-sky-600 transition-colors"
                 title="Reprendre"
               >
                 <Play className="w-4 h-4 fill-current ml-0.5" />
