@@ -448,16 +448,19 @@ export const ClientPayments: React.FC = () => {
                 </>
               )}
             </tbody>
+            {/* En vert, et non plus le même gris clair que l'en-tête juste
+                au-dessus : le total se confondait avec le tableau qu'il
+                résume. */}
             {!isLoading && filtered.length > 0 && (
               <tfoot className="sticky bottom-0">
-                <tr className="bg-[#F9FAFB] border-t border-gray-200 text-[12px] font-bold text-gray-900">
+                <tr className="bg-emerald-50 border-t-2 border-emerald-200 text-[12px] font-bold text-emerald-900">
                   <td colSpan={6} className="px-3 py-2.5">
                     Total des règlements
-                    <span className="ml-2 font-medium text-gray-500">
+                    <span className="ml-2 font-medium text-emerald-700">
                       (dont {money(totals.caisse)} en caisse)
                     </span>
                   </td>
-                  <td className="px-3 py-2.5 text-right font-mono">{money(totals.all)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono text-emerald-900">{money(totals.all)}</td>
                   <td />
                 </tr>
               </tfoot>

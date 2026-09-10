@@ -265,15 +265,15 @@ export const AttendanceTab: React.FC = () => {
 
       <div className="hidden sm:block sm:overflow-auto sm:flex-1 sm:min-h-[260px] border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50 sticky top-0">
+          <thead className="bg-orange-50 sticky top-0">
             <tr>
-              {isTeamViewer && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employé</th>}
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Heure entrée</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Heure sortie</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Durée de pause</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Durée de présence</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ponctualité</th>
+              {isTeamViewer && <th className="px-6 py-3 text-left text-xs font-medium text-orange-700 uppercase tracking-wider">Employé</th>}
+              <th className="px-6 py-3 text-left text-xs font-medium text-orange-700 uppercase tracking-wider">Date</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-orange-700 uppercase tracking-wider">Heure entrée</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-orange-700 uppercase tracking-wider">Heure sortie</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-orange-700 uppercase tracking-wider">Durée de pause</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-orange-700 uppercase tracking-wider">Durée de présence</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-orange-700 uppercase tracking-wider">Ponctualité</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">

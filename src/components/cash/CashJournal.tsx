@@ -356,11 +356,17 @@ export const CashJournal: React.FC = () => {
                     <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right sticky right-0 bg-gray-50 border-l border-gray-200">Solde</th>
                     <th className="px-3 py-2.5" />
                   </tr>
-                  <tr className="bg-white border-b-2 border-gray-200 font-bold text-[12px]">
-                    <td className="px-3 py-2 text-gray-700" colSpan={4}>Total général</td>
+                  {/* En violet, et non plus blanc comme le corps du tableau
+                      juste en dessous : le total se lisait comme une ligne de
+                      plus dans la liste au lieu du résumé qui la surplombe.
+                      Entrée/sortie gardent leurs couleurs de sens (vert/rouge,
+                      argent qui entre ou qui sort) — seule la ligne elle-même
+                      change d'habit. */}
+                  <tr className="bg-violet-50 border-b-2 border-violet-200 font-bold text-[12px]">
+                    <td className="px-3 py-2 text-violet-900" colSpan={4}>Total général</td>
                     <td className="px-3 py-2 text-right font-mono text-done-fg">{money(totals.entree)}</td>
                     <td className="px-3 py-2 text-right font-mono text-late-fg">{money(totals.sortie)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-gray-900 sticky right-0 bg-white border-l border-gray-200">{money(totals.entree - totals.sortie)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-violet-900 sticky right-0 bg-violet-50 border-l border-violet-200">{money(totals.entree - totals.sortie)}</td>
                     <td />
                   </tr>
                 </thead>

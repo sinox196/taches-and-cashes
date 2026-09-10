@@ -31,6 +31,19 @@ const DELEGATED_STATUS_LABEL: Record<string, string> = {
 type Tab = 'chrono' | 'planned' | 'assigned' | 'delegatedByMe';
 
 /**
+ * Une couleur par sous-vue — le chrono, ce qu'on s'est planifié, ce qu'on
+ * vous a délégué, ce que vous avez délégué à d'autres — reprise sur l'onglet
+ * actif et sur la carte qu'il affiche, pour qu'un coup d'œil dise sous quel
+ * onglet on se trouve sans avoir à relire son libellé.
+ */
+const TAB_COLOR: Record<Tab, { border: string; text: string; badgeActive: string; badgeIdle: string; cardBorder: string; caption: string }> = {
+  chrono:         { border: 'border-sky-600',     text: 'text-sky-700',     badgeActive: 'bg-sky-600 text-white',     badgeIdle: 'bg-sky-50 text-sky-600',       cardBorder: 'border-l-sky-400',     caption: 'text-sky-700' },
+  planned:        { border: 'border-amber-600',   text: 'text-amber-700',   badgeActive: 'bg-amber-600 text-white',   badgeIdle: 'bg-amber-50 text-amber-600',   cardBorder: 'border-l-amber-400',   caption: 'text-amber-700' },
+  assigned:       { border: 'border-violet-600',  text: 'text-violet-700',  badgeActive: 'bg-violet-600 text-white',  badgeIdle: 'bg-violet-50 text-violet-600', cardBorder: 'border-l-violet-400',  caption: 'text-violet-700' },
+  delegatedByMe:  { border: 'border-emerald-600', text: 'text-emerald-700', badgeActive: 'bg-emerald-600 text-white', badgeIdle: 'bg-emerald-50 text-emerald-600', cardBorder: 'border-l-emerald-400', caption: 'text-emerald-700' },
+};
+
+/**
  * Les trois sous-vues de **Tâches** : le chrono, les tâches qu'on s'est
  * planifiées, celles qu'on vous a assignées.
  *
@@ -187,32 +200,34 @@ export const TaskSubviews: React.FC<{
           ne tiennent pas dans la largeur d'un téléphone, comme la barre des
           onglets RH et celle des Ressources métier. */}
       <div className="flex gap-1 border-b border-gray-200 overflow-x-auto shrink-0">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-3.5 py-2.5 text-[13px] font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors shrink-0 whitespace-nowrap ${
-              tab === t.id ? 'border-amber-700 text-amber-700' : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            <t.icon className="w-3.5 h-3.5" />
-            {t.label}
-            {/* Le compteur ne s'affiche qu'à partir de 1 : un « 0 » permanent
-                sur deux onglets sur trois n'apprend rien et fait du bruit. */}
-            {!!t.count && (
-              <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.5 ${
-                tab === t.id ? 'bg-amber-700 text-white' : 'bg-blue-50 text-blue-600'
-              }`}>
-                {t.count}
-              </span>
-            )}
-          </button>
-        ))}
+        {TABS.map(t => {
+          const c = TAB_COLOR[t.id];
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-3.5 py-2.5 text-[13px] font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors shrink-0 whitespace-nowrap ${
+                active ? `${c.border} ${c.text}` : 'border-transparent text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              <t.icon className="w-3.5 h-3.5" />
+              {t.label}
+              {/* Le compteur ne s'affiche qu'à partir de 1 : un « 0 » permanent
+                  sur deux onglets sur trois n'apprend rien et fait du bruit. */}
+              {!!t.count && (
+                <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.5 ${active ? c.badgeActive : c.badgeIdle}`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex flex-col sm:flex-1 sm:min-h-0">
         {tab === 'chrono' ? children : tab === 'delegatedByMe' ? (
-          <DelegatedByMeList rows={delegated} />
+          <DelegatedByMeList rows={delegated} color={TAB_COLOR.delegatedByMe} />
         ) : (
           <div className="flex flex-col gap-4">
             {error && (
@@ -223,6 +238,7 @@ export const TaskSubviews: React.FC<{
             <AssignmentList
               rows={tab === 'planned' ? planned : assigned}
               kind={tab === 'planned' ? 'planned' : 'assigned'}
+              color={TAB_COLOR[tab === 'planned' ? 'planned' : 'assigned']}
               startingId={startingId}
               cancelingId={cancelingId}
               onStart={start}
@@ -249,14 +265,15 @@ const EMPTY: Record<'planned' | 'assigned', { title: string; hint: string }> = {
 const AssignmentList: React.FC<{
   rows: any[];
   kind: 'planned' | 'assigned';
+  color: typeof TAB_COLOR[Tab];
   startingId: string | null;
   cancelingId: string | null;
   onStart: (id: string) => void;
   onCancel: (id: string) => void;
-}> = ({ rows, kind, startingId, cancelingId, onStart, onCancel }) => {
+}> = ({ rows, kind, color, startingId, cancelingId, onStart, onCancel }) => {
   if (rows.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-10 text-center">
+      <div className={`bg-white rounded-xl border border-gray-200 border-l-4 ${color.cardBorder} shadow-xs p-10 text-center`}>
         <p className="text-[13px] font-medium text-gray-600">{EMPTY[kind].title}</p>
         <p className="text-[12px] text-gray-400 mt-1 max-w-[46ch] mx-auto leading-relaxed">{EMPTY[kind].hint}</p>
       </div>
@@ -264,8 +281,8 @@ const AssignmentList: React.FC<{
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-4 sm:p-5">
-      <p className="text-[11.5px] text-gray-500 mb-3">
+    <div className={`bg-white rounded-xl border border-gray-200 border-l-4 ${color.cardBorder} shadow-xs p-4 sm:p-5`}>
+      <p className={`text-[11.5px] font-medium mb-3 ${color.caption}`}>
         En attente de démarrage — une fois lancée, la tâche rejoint votre chrono.
       </p>
       <div className="divide-y divide-gray-100">
@@ -357,7 +374,7 @@ const AssignmentList: React.FC<{
  * App.tsx, pour que ce soit le cadre `overflow-auto` interne qui défile —
  * pas la colonne de contenu de l'application.
  */
-const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
+const DelegatedByMeList: React.FC<{ rows: any[]; color: typeof TAB_COLOR[Tab] }> = ({ rows, color }) => {
   const [userFilter, setUserFilter] = useState('');
   const [missionFilter, setMissionFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -394,7 +411,7 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
 
   if (rows.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-10 text-center">
+      <div className={`bg-white rounded-xl border border-gray-200 border-l-4 ${color.cardBorder} shadow-xs p-10 text-center`}>
         <p className="text-[13px] font-medium text-gray-600">Vous n'avez délégué aucune tâche.</p>
         <p className="text-[12px] text-gray-400 mt-1 max-w-[46ch] mx-auto leading-relaxed">
           Utilisez « Déléguer une tâche » ci-dessus. Vous verrez ici son statut, du démarrage à sa fin.
@@ -404,7 +421,7 @@ const DelegatedByMeList: React.FC<{ rows: any[] }> = ({ rows }) => {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden flex flex-col sm:flex-1 sm:min-h-0">
+    <div className={`bg-white rounded-xl border border-gray-200 border-l-4 ${color.cardBorder} shadow-xs overflow-hidden flex flex-col sm:flex-1 sm:min-h-0`}>
       <div className="p-4 flex flex-col sm:flex-1 sm:min-h-0">
         <div className="flex flex-wrap items-center gap-2 mb-4 shrink-0">
           <div className="w-48">
