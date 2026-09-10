@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Mail, LayoutDashboard, Timer, ListChecks, Building2, FileText, Wallet,
   CalendarCheck, FolderKanban, Users, MessageSquare, Globe, Gift, ArrowRight,
-  Compass,
+  Compass, Clock, AlertTriangle, ArrowDown,
 } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
@@ -789,18 +789,70 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
           {/* NOTRE HISTOIRE & CONSTAT */}
           <section className="py-20 px-6 sm:px-10 bg-white">
-            <div className="max-w-[760px] mx-auto">
-              <Reveal>
-                <div className="inline-flex px-3.5 py-1.5 bg-[#F2F4F7] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Notre histoire</div>
-                <h2 className="mt-[18px] text-[24px] sm:text-[28px] font-extrabold text-navy tracking-[-0.01em]">Pourquoi nous avons créé Tâches &amp; Cash ?</h2>
-              </Reveal>
-              <Reveal delay={90}>
-                <div className="mt-6 space-y-4 text-[15.5px] leading-[1.75] text-[#3D4655]">
-                  <p>Dans beaucoup de cabinets et d'entreprises de services, un constat s'impose : savoir ce qu'on facture est facile, mais savoir ce que chaque dossier coûte réellement est souvent un casse-tête.</p>
-                  <p>Entre les feuilles de calcul dispersées, les heures oubliées, la gestion administrative lourde (échéances, congés, relances) et la pression des délais, les équipes perdent un temps précieux et la direction manque de visibilité sur ses marges.</p>
-                  <p>C'est pour répondre à ce besoin du terrain que Tâches &amp; Cash est né : une plateforme SaaS unifiée qui relie la gestion opérationnelle quotidienne à la performance financière.</p>
+            <div className="max-w-[1200px] mx-auto flex gap-16 items-center flex-wrap-reverse">
+              {/* Le constat en image : des outils épars qui flottent chacun
+                  de leur côté, puis la réponse — nette, posée, à jour en
+                  direct (le point qui bat, le même idiome que la carte
+                  « Nouvelle tâche assignée » du hero). Aucune animation
+                  nouvelle : les trois flottements, le halo qui respire et le
+                  point qui pulse sont ceux déjà utilisés pour la maquette du
+                  hero et le bandeau CTA. */}
+              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 300 }} className="w-full">
+                <div className="relative bg-[#F2F4F7] rounded-[20px] px-6 py-10 sm:px-10 sm:py-12 overflow-hidden">
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute w-[260px] h-[260px] rounded-full animate-[landingBreathe_7s_ease-in-out_infinite]"
+                    style={{ background: 'radial-gradient(circle, rgba(0,179,166,0.16), rgba(0,179,166,0) 70%)', top: '14%', left: '50%', transform: 'translateX(-50%)' }}
+                  />
+                  <div className="relative flex flex-wrap justify-center gap-3">
+                    <div className="w-[132px] bg-white rounded-2xl p-3 animate-[landingFloatA_6s_ease-in-out_infinite]" style={{ boxShadow: '0 14px 26px -10px rgba(13,27,42,0.16)' }}>
+                      <FileText className="w-4 h-4 text-[#8A93A0] mb-1.5" />
+                      <div className="text-[10.5px] font-bold text-[#5B6472] leading-tight">Tableurs dispersés</div>
+                    </div>
+                    <div className="w-[132px] mt-4 bg-white rounded-2xl p-3 animate-[landingFloatC_6.5s_ease-in-out_infinite]" style={{ boxShadow: '0 14px 26px -10px rgba(13,27,42,0.16)' }}>
+                      <Clock className="w-4 h-4 text-[#8A93A0] mb-1.5" />
+                      <div className="text-[10.5px] font-bold text-[#5B6472] leading-tight">Heures oubliées</div>
+                    </div>
+                    <div className="w-[132px] bg-white rounded-2xl p-3 animate-[landingFloatB_7s_ease-in-out_infinite]" style={{ boxShadow: '0 14px 26px -10px rgba(13,27,42,0.16)' }}>
+                      <AlertTriangle className="w-4 h-4 text-[#8A93A0] mb-1.5" />
+                      <div className="text-[10.5px] font-bold text-[#5B6472] leading-tight">Relances manuelles</div>
+                    </div>
+                  </div>
+
+                  <div className="relative flex justify-center my-4">
+                    <ArrowDown className="w-6 h-6 text-turquoise" />
+                  </div>
+
+                  <div className="relative mx-auto w-[230px] bg-white rounded-2xl p-4 border-2 border-turquoise" style={{ boxShadow: '0 20px 40px -14px rgba(0,179,166,0.3)' }}>
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-[10px] bg-[#E3F7F5] flex items-center justify-center text-[#00857C] shrink-0">
+                        <LayoutDashboard className="w-[18px] h-[18px]" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E] shrink-0 animate-[landingPulseDot_2s_ease-in-out_infinite]" />
+                          <span className="text-[13px] font-extrabold text-navy leading-tight">Tâches &amp; Cash</span>
+                        </div>
+                        <div className="text-[9.5px] text-[#8A93A0] mt-0.5">Une vision unique, à jour en direct</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </Reveal>
+
+              <div style={{ flex: '1 1 400px', minWidth: 300 }}>
+                <Reveal direction="right">
+                  <div className="inline-flex px-3.5 py-1.5 bg-[#F2F4F7] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Notre histoire</div>
+                  <h2 className="mt-[18px] text-[24px] sm:text-[28px] font-extrabold text-navy tracking-[-0.01em]">Pourquoi nous avons créé Tâches &amp; Cash ?</h2>
+                </Reveal>
+                <Reveal direction="right" delay={90}>
+                  <div className="mt-6 space-y-4 text-[15.5px] leading-[1.75] text-[#3D4655]">
+                    <p>Dans beaucoup de cabinets et d'entreprises de services, un constat s'impose : savoir ce qu'on facture est facile, mais savoir ce que chaque dossier coûte réellement est souvent un casse-tête.</p>
+                    <p>Entre les feuilles de calcul dispersées, les heures oubliées, la gestion administrative lourde (échéances, congés, relances) et la pression des délais, les équipes perdent un temps précieux et la direction manque de visibilité sur ses marges.</p>
+                    <p>C'est pour répondre à ce besoin du terrain que Tâches &amp; Cash est né : une plateforme SaaS unifiée qui relie la gestion opérationnelle quotidienne à la performance financière.</p>
+                  </div>
+                </Reveal>
+              </div>
             </div>
           </section>
 
