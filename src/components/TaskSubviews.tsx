@@ -192,7 +192,7 @@ export const TaskSubviews: React.FC<{
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`px-3.5 py-2.5 text-[13px] font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors shrink-0 whitespace-nowrap ${
-              tab === t.id ? 'border-navy text-navy' : 'border-transparent text-gray-500 hover:text-gray-800'
+              tab === t.id ? 'border-amber-700 text-amber-700' : 'border-transparent text-gray-500 hover:text-gray-800'
             }`}
           >
             <t.icon className="w-3.5 h-3.5" />
@@ -201,7 +201,7 @@ export const TaskSubviews: React.FC<{
                 sur deux onglets sur trois n'apprend rien et fait du bruit. */}
             {!!t.count && (
               <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.5 ${
-                tab === t.id ? 'bg-navy text-white' : 'bg-blue-50 text-blue-600'
+                tab === t.id ? 'bg-amber-700 text-white' : 'bg-blue-50 text-blue-600'
               }`}>
                 {t.count}
               </span>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import { CalendarRange, Clock, AlertCircle, CheckCircle2, User } from 'lucide-react';
+import { CalendarRange, Clock, AlertCircle, CheckCircle2, User, Wallet, DollarSign, Flag } from 'lucide-react';
 import { LeavesTab } from './LeavesTab';
 import { AbsencesTab } from './AbsencesTab';
 import { LoansTab } from './LoansTab';
@@ -64,7 +64,10 @@ export const HRManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 shrink-0">
+      {/* Always two even columns — there are only ever two stat cards here,
+          and `lg:grid-cols-4` left the right half of the row empty on a
+          desktop-width screen instead of letting the pair fill it. */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 shrink-0">
         <div className="bg-white p-3 sm:p-5 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between gap-2">
           <div>
             <p className="text-[12px] sm:text-sm font-medium text-gray-500 mb-0.5 sm:mb-1 leading-snug">{t('hr.balance.available')} ({t('hr.balance.days')})</p>
@@ -86,45 +89,30 @@ export const HRManagement: React.FC = () => {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex flex-col sm:flex-1">
-        {/* Scrolls sideways below sm: four tabs sharing 390px squeezed
-            "Autorisations d'absence" onto two lines and clipped the rest. */}
-        <div className="flex border-b border-gray-200 overflow-x-auto shrink-0">
-          <button
-            onClick={() => setActiveTab('leaves')}
-            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'leaves' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            {t('hr.tabs.leaves')}
-          </button>
-          <button
-            onClick={() => setActiveTab('absences')}
-            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'absences' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            {t('hr.tabs.absences')}
-          </button>
-          <button
-            onClick={() => setActiveTab('attendance')}
-            className={`flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'attendance' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Pointage
-          </button>
-          <button
-            onClick={() => setActiveTab('loans')}
-            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'loans' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Prêts
-          </button>
-          <button
-            onClick={() => setActiveTab('advances')}
-            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'advances' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Avances
-          </button>
-          <button
-            onClick={() => setActiveTab('holidays')}
-            className={`shrink-0 whitespace-nowrap sm:flex-1 py-3 px-4 text-sm font-medium text-center transition-colors ${activeTab === 'holidays' ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Jours fériés
-          </button>
+        {/* Left-aligned, natural width, scrolling sideways rather than
+            stretching to fill the row or wrapping — same idiom as Cash's and
+            Tâches' own tab bars, so the three read as one pattern. `flex-1`
+            used to squeeze "Autorisations d'absence" onto two lines on a
+            narrow desktop window. */}
+        <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto shrink-0">
+          {([
+            { id: 'leaves' as const, label: t('hr.tabs.leaves'), icon: CalendarRange },
+            { id: 'absences' as const, label: t('hr.tabs.absences'), icon: Clock },
+            { id: 'attendance' as const, label: 'Pointage', icon: User },
+            { id: 'loans' as const, label: 'Prêts', icon: Wallet },
+            { id: 'advances' as const, label: 'Avances', icon: DollarSign },
+            { id: 'holidays' as const, label: 'Jours fériés', icon: Flag },
+          ]).map(tabDef => (
+            <button
+              key={tabDef.id}
+              onClick={() => setActiveTab(tabDef.id)}
+              className={`flex items-center gap-1.5 shrink-0 whitespace-nowrap px-3.5 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
+                activeTab === tabDef.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <tabDef.icon className="w-4 h-4" /> {tabDef.label}
+            </button>
+          ))}
         </div>
 
         {/* Ne défile plus lui-même : chaque onglet fait défiler son tableau et

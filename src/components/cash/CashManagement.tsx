@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
@@ -79,6 +79,9 @@ export const CashManagement: React.FC = () => {
    * restante devant un refus serait pire que pas de compteur.
    */
   const [quota, setQuota] = useState<{ limit: number | null; used: number; remaining: number | null } | null>(null);
+  /** "Voir le détail" on the Total Général card — collapsed by default, since
+   *  the two summed amounts already answer the usual question. */
+  const [showTotalDetail, setShowTotalDetail] = useState(false);
 
   const canManage = hasPermission('MANAGE_CASH');
 
@@ -211,9 +214,12 @@ export const CashManagement: React.FC = () => {
       tab === 'documents' ? 'max-w-[1200px]' : 'max-w-[1500px]'
     }`}>
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[20px] font-bold text-gray-800 tracking-tight flex items-center gap-2">
-            <Receipt className="w-5 h-5" />
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+            <Receipt className="w-5 h-5 text-gray-800" />
+          </div>
+          <div>
+          <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">
             Cash
           </h1>
           <p className="text-[12px] text-gray-500 mt-1">
@@ -238,6 +244,7 @@ export const CashManagement: React.FC = () => {
                 : `Essai gratuit : ${quota.used} / ${quota.limit} documents ce mois-ci`}
             </p>
           ) : null}
+          </div>
         </div>
         <div className={`flex items-center gap-2 flex-wrap w-full sm:w-auto ${tab === 'documents' ? '' : 'hidden'}`}>
           <div className="relative flex-1 min-w-[160px] sm:flex-none">
@@ -315,7 +322,7 @@ export const CashManagement: React.FC = () => {
             onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-medium -mb-px border-b-2 transition-colors shrink-0 whitespace-nowrap ${
               tab === t.id
-                ? 'border-navy text-navy'
+                ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -329,6 +336,55 @@ export const CashManagement: React.FC = () => {
       {error && (
         <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
           {error}
+        </div>
+      )}
+
+      {/* Total Général — a standalone accent card above the table rather than
+          a sticky row inside it, so the headline figure reads before any
+          scrolling. Sums the whole filtered set, one line per currency —
+          mixing dinars with USD/EUR in a single figure would be meaningless.
+          Collapsed by default; "Voir le détail" adds the document count per
+          currency, the one field the two totals alone don't answer. */}
+      {currencyTotals.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 border-t-[3px] border-t-blue-600 overflow-hidden shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowTotalDetail(v => !v)}
+            className="w-full flex items-center justify-between gap-3 px-5 py-3 bg-blue-50/60 border-b border-blue-100 text-left"
+          >
+            <span className="text-[13.5px] font-bold text-gray-900">
+              Total Général
+              {currencyTotals.length > 1 && <span className="ml-1.5 font-normal text-gray-500">(par devise)</span>}
+            </span>
+            <span className="flex items-center gap-1 text-[12.5px] text-gray-500 shrink-0">
+              Voir le détail
+              {showTotalDetail ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            </span>
+          </button>
+          <div className="px-5 py-3 flex flex-wrap gap-x-8 gap-y-3">
+            {currencyTotals.map(([code, t]) => (
+              <div key={code} className="flex items-center gap-6">
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                    Total HT{currencyTotals.length > 1 ? ` (${CURRENCY_SUFFIX[code] || code})` : ''}
+                  </div>
+                  <div className="font-mono font-bold text-gray-900 text-[13.5px]">{money(t.totalHT)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">Montant de facture</div>
+                  <div className="font-mono font-bold text-emerald-900 text-[13.5px]">
+                    {money(t.totalNetToPay)} <span className="font-sans font-normal text-[10px] text-emerald-700">{CURRENCY_SUFFIX[code] || code}</span>
+                  </div>
+                </div>
+                {showTotalDetail && (
+                  <div>
+                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Documents</div>
+                    <div className="font-mono font-bold text-gray-700 text-[13.5px]">{t.count}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -364,36 +420,6 @@ export const CashManagement: React.FC = () => {
                       the wide sheet scrolls sideways. */}
                   <th className="sticky top-0 right-0 z-30 bg-[#F9FAFB] px-4 py-3 text-center shadow-[-1px_0_0_0_theme(colors.gray.200)]">Actions</th>
                 </tr>
-                {/* Total Général — frozen directly under the column labels,
-                    summing the whole filtered set rather than the page. One
-                    line per currency: mixing dinars with USD/EUR in a single
-                    figure would be meaningless. */}
-                {currencyTotals.length > 0 && (
-                  <tr className="bg-gray-100 border-b border-gray-200 text-[12px]">
-                    <td className="sticky top-[42px] z-20 bg-gray-100 px-4 py-2.5 font-bold text-gray-800 whitespace-nowrap" colSpan={5}>
-                      Total Général
-                      {currencyTotals.length > 1 && (
-                        <span className="ml-2 font-normal text-[11px] text-gray-500">(par devise)</span>
-                      )}
-                    </td>
-                    <td className="sticky top-[42px] z-20 bg-gray-100 px-4 py-2.5 text-right">
-                      {currencyTotals.map(([code, t]) => (
-                        <div key={code} className="font-mono font-bold text-gray-900 whitespace-nowrap">
-                          {money(t.totalHT)}
-                          {currencyTotals.length > 1 && <span className="ml-1 font-sans font-normal text-[10px] text-gray-500">{CURRENCY_SUFFIX[code] || code}</span>}
-                        </div>
-                      ))}
-                    </td>
-                    <td className="sticky top-[42px] z-20 bg-emerald-50 px-4 py-2.5 text-right">
-                      {currencyTotals.map(([code, t]) => (
-                        <div key={code} className="font-mono font-bold text-emerald-900 whitespace-nowrap">
-                          {money(t.totalNetToPay)} <span className="font-sans font-normal text-[10px] text-emerald-700">{CURRENCY_SUFFIX[code] || code}</span>
-                        </div>
-                      ))}
-                    </td>
-                    <td className="sticky top-[42px] right-0 z-30 bg-gray-100 px-4 py-2.5 shadow-[-1px_0_0_0_theme(colors.gray.200)]" />
-                  </tr>
-                )}
               </thead>
               <tbody className="text-[12.5px] divide-y divide-gray-100">
                 {invoices.map(inv => (
