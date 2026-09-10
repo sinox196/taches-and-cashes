@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import {
   Mail, LayoutDashboard, Timer, ListChecks, Building2, FileText, Wallet,
   CalendarCheck, FolderKanban, Users, MessageSquare, Globe, Gift, ArrowRight,
+  Compass,
 } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
-import { Reveal } from '../components/landing/Reveal';
+import { Reveal, CountUp } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
 import { ClientLogos } from '../components/landing/ClientLogos';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
@@ -165,6 +166,36 @@ const HOME_FEATURES: {
 ];
 
 
+/**
+ * Les quatre piliers de la page « À propos » — le contenu réel remis par
+ * l'utilisateur, pas un remplissage, même règle que le reste des maquettes de
+ * cette page (voir Testimonials/ClientLogos plus bas dans CLAUDE.md).
+ */
+const ABOUT_PILLARS: {
+  title: string; description: string; iconBg: string; iconColor: string; icon: React.ReactNode;
+}[] = [
+  {
+    title: 'Une vision à 360° sans briques séparées',
+    description: "Du pointage en un clic jusqu'au portail client, en passant par la facturation conforme et le suivi des échéances, tout est réuni dans une seule et même application.",
+    iconBg: '#E3F7F5', iconColor: '#00857C', icon: <Globe className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'La marge sur temps comme boussole',
+    description: "Nous ne mesurons pas seulement le chiffre d'affaires, mais la marge réelle par client et par mission en intégrant vos coûts employeurs.",
+    iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <Compass className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'Pensé pour les usages métiers',
+    description: "Des catalogues de missions et un calendrier d'échéances fiscales pré-configurés pour être opérationnels dès le premier jour.",
+    iconBg: '#FFF3DE', iconColor: '#C98A1B', icon: <ListChecks className="w-[22px] h-[22px]" />,
+  },
+  {
+    title: 'Collaboration fluide & transparence',
+    description: "Une meilleure communication interne (messagerie, RH) et externe grâce à un portail client dédié qui réduit les relances inutiles.",
+    iconBg: '#FDEBEF', iconColor: '#C2416B', icon: <MessageSquare className="w-[22px] h-[22px]" />,
+  },
+];
+
 const FLOW_STEPS: { label: string; color: string; shadow: string; shape: React.ReactNode }[] = [
   { label: 'Tâches', color: '#0D1B2A', shadow: 'rgba(13,27,42,0.12)', shape: <div className="w-5 h-5 bg-navy rounded" /> },
   { label: 'Temps', color: '#0D1B2A', shadow: 'rgba(13,27,42,0.12)', shape: <div className="w-5 h-5 rounded-full border-[3px] border-navy" /> },
@@ -196,7 +227,7 @@ interface LandingProps {
 }
 
 export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
-  const [view, setView] = useState<'home' | 'tarifs'>('home');
+  const [view, setView] = useState<'home' | 'tarifs' | 'apropos'>('home');
   /** L'en-tête se resserre dès qu'on quitte le haut de la page : au repos il
    *  respire, une fois qu'on lit il rend de la hauteur au contenu. `passive`
    *  parce qu'un écouteur de défilement qui ne prévient jamais le navigateur
@@ -236,6 +267,11 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const goToAPropos = () => {
+    setView('apropos');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const goHome = () => {
     setView('home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -270,6 +306,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <button onClick={() => goToAnchor('modules')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Modules</button>
             <button onClick={() => goToAnchor('dashboard')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Facturation</button>
             <button onClick={goToTarifs} data-active={view === 'tarifs'} className={`landing-navlink text-[14px] whitespace-nowrap ${view === 'tarifs' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Tarifs</button>
+            <button onClick={goToAPropos} data-active={view === 'apropos'} className={`landing-navlink text-[14px] whitespace-nowrap ${view === 'apropos' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>À propos</button>
             <a href={`mailto:${CONTACT_EMAIL}`} className="landing-navlink text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
           </nav>
 
@@ -729,6 +766,116 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </Reveal>
           </section>
         </>
+      ) : view === 'apropos' ? (
+        <>
+          {/* ABOUT HERO */}
+          <section className="pt-[88px] px-6 sm:px-10 pb-10 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
+            <div className="max-w-[760px] mx-auto text-center">
+              <Reveal>
+                <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">À propos</div>
+              </Reveal>
+              <Reveal delay={80}>
+                <h1 className="mt-[18px] text-[34px] sm:text-[42px] font-extrabold text-navy tracking-[-0.02em] leading-[1.15]">
+                  Connecter chaque minute travaillée à votre rentabilité réelle.
+                </h1>
+              </Reveal>
+              <Reveal delay={150}>
+                <p className="mt-[18px] text-[16.5px] text-[#5B6472] leading-[1.6]">
+                  Tâches &amp; Cash a été conçu pour transformer la gestion des cabinets comptables et des entreprises de services : du temps passé au cash encaissé, en passant par le pilotage précis de vos marges.
+                </p>
+              </Reveal>
+            </div>
+          </section>
+
+          {/* NOTRE HISTOIRE & CONSTAT */}
+          <section className="py-20 px-6 sm:px-10 bg-white">
+            <div className="max-w-[760px] mx-auto">
+              <Reveal>
+                <div className="inline-flex px-3.5 py-1.5 bg-[#F2F4F7] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Notre histoire</div>
+                <h2 className="mt-[18px] text-[24px] sm:text-[28px] font-extrabold text-navy tracking-[-0.01em]">Pourquoi nous avons créé Tâches &amp; Cash ?</h2>
+              </Reveal>
+              <Reveal delay={90}>
+                <div className="mt-6 space-y-4 text-[15.5px] leading-[1.75] text-[#3D4655]">
+                  <p>Dans beaucoup de cabinets et d'entreprises de services, un constat s'impose : savoir ce qu'on facture est facile, mais savoir ce que chaque dossier coûte réellement est souvent un casse-tête.</p>
+                  <p>Entre les feuilles de calcul dispersées, les heures oubliées, la gestion administrative lourde (échéances, congés, relances) et la pression des délais, les équipes perdent un temps précieux et la direction manque de visibilité sur ses marges.</p>
+                  <p>C'est pour répondre à ce besoin du terrain que Tâches &amp; Cash est né : une plateforme SaaS unifiée qui relie la gestion opérationnelle quotidienne à la performance financière.</p>
+                </div>
+              </Reveal>
+            </div>
+          </section>
+
+          {/* NOTRE MISSION */}
+          <section className="pb-20 px-6 sm:px-10 bg-white">
+            <Reveal direction="scale" className="max-w-[900px] mx-auto">
+              <div className="relative bg-navy rounded-[28px] px-8 sm:px-14 py-14 text-center overflow-hidden">
+                <div aria-hidden className="absolute w-[300px] h-[300px] rounded-full bg-[radial-gradient(circle,rgba(0,179,166,0.22),rgba(0,179,166,0)_70%)] -top-24 -left-16 pointer-events-none" />
+                <div className="relative">
+                  <div className="inline-flex px-3.5 py-1.5 bg-white/10 rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-turquoise">Notre mission</div>
+                  <p className="mt-6 text-[22px] sm:text-[26px] font-extrabold text-white leading-[1.4] max-w-[640px] mx-auto">
+                    « Redonner aux cabinets et entreprises le contrôle total sur leur temps, leur trésorerie et leur croissance. »
+                  </p>
+                  <p className="mt-6 text-[15px] text-white/65 max-w-[560px] mx-auto leading-[1.65]">
+                    Nous croyons que chaque minute travaillée doit devenir une donnée exploitable. Notre objectif est de simplifier l'organisation interne pour permettre aux managers, collaborateurs et experts de se concentrer sur leur cœur de métier et la satisfaction de leurs clients.
+                  </p>
+                </div>
+              </div>
+            </Reveal>
+          </section>
+
+          {/* NOS PILIERS */}
+          <section className="py-20 px-6 sm:px-10 bg-[#F2F4F7]">
+            <div className="max-w-[1000px] mx-auto">
+              <Reveal className="text-center max-w-[640px] mx-auto">
+                <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Nos piliers</div>
+                <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Ce qui nous rend uniques</h2>
+              </Reveal>
+
+              <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-[22px]">
+                {ABOUT_PILLARS.map((f, i) => (
+                  <Reveal key={f.title} delay={(i % 2) * 90} className="h-full">
+                    <div className="landing-shine group relative h-full bg-white rounded-[18px] border border-[#E6E9EE] p-7 hover:-translate-y-1.5 hover:border-turquoise/45 hover:shadow-[0_18px_38px_rgba(13,27,42,0.10)] transition-all duration-300">
+                      <span
+                        aria-hidden
+                        className="absolute left-7 right-7 bottom-0 h-[3px] rounded-full bg-turquoise origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"
+                      />
+                      <div
+                        className="w-[46px] h-[46px] rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6"
+                        style={{ background: f.iconBg, color: f.iconColor }}
+                      >
+                        {f.icon}
+                      </div>
+                      <div className="text-[16px] font-bold text-navy mt-4 transition-transform duration-300 group-hover:translate-x-1">{f.title}</div>
+                      <p className="text-[14px] leading-[1.55] text-[#5B6472] mt-2">{f.description}</p>
+                    </div>
+                  </Reveal>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* CHIFFRES / IMPACT */}
+          <section className="py-20 px-6 sm:px-10 bg-white">
+            <div className="max-w-[1000px] mx-auto">
+              <Reveal className="text-center max-w-[640px] mx-auto">
+                <h2 className="text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">L'impact, en quelques mots</h2>
+              </Reveal>
+              <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-8">
+                <Reveal direction="scale" className="text-center px-4">
+                  <div className="text-[42px] sm:text-[48px] font-extrabold text-navy tracking-[-0.02em]"><CountUp to={12} /></div>
+                  <p className="mt-2 text-[14.5px] text-[#5B6472] leading-[1.55]">modules intégrés pour remplacer la multiplication des outils et tableurs.</p>
+                </Reveal>
+                <Reveal direction="scale" delay={90} className="text-center px-4">
+                  <div className="text-[42px] sm:text-[48px] font-extrabold text-turquoise tracking-[-0.02em]"><CountUp to={100} suffix=" %" /></div>
+                  <p className="mt-2 text-[14.5px] text-[#5B6472] leading-[1.55]">de conformité dans la facturation (TVA, retenue à la source, timbre fiscal).</p>
+                </Reveal>
+                <Reveal direction="scale" delay={180} className="text-center px-4">
+                  <div className="text-[42px] sm:text-[48px] font-extrabold text-[#22C55E]">↑</div>
+                  <p className="mt-2 text-[14.5px] text-[#5B6472] leading-[1.55]">Une vision claire du temps facturable vs. non facturable pour maximiser vos revenus.</p>
+                </Reveal>
+              </div>
+            </div>
+          </section>
+        </>
       ) : (
         <>
           {/* PRICING HERO */}
@@ -816,20 +963,34 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 son point tournent. */}
             <AnimatedLogo size={72} variant="white" className="justify-center mb-6 w-full" />
             <h2 className="text-[26px] sm:text-[30px] font-extrabold text-white tracking-[-0.01em] max-w-[600px] mx-auto leading-[1.25]">
-              Prêt à voir où va vraiment votre temps et votre argent ?
+              {view === 'apropos'
+                ? 'Prêt à piloter votre cabinet par la rentabilité ?'
+                : 'Prêt à voir où va vraiment votre temps et votre argent ?'}
             </h2>
             <p className="mt-4 text-[15.5px] text-white/65 max-w-[480px] mx-auto">
-              {view === 'home'
-                ? 'Rejoignez les équipes qui pilotent leur rentabilité avec Tâches & Cash.'
-                : "Choisissez votre offre ci-dessus pour créer votre compte — l'essai est gratuit, aucune carte bancaire requise."}
+              {view === 'tarifs'
+                ? "Choisissez votre offre ci-dessus pour créer votre compte — l'essai est gratuit, aucune carte bancaire requise."
+                : view === 'apropos'
+                  ? "Rejoignez les équipes qui maîtrisent leur temps et développent leur chiffre d'affaires avec Tâches & Cash."
+                  : 'Rejoignez les équipes qui pilotent leur rentabilité avec Tâches & Cash.'}
             </p>
-            <button
-              onClick={goToTarifs}
-              className="landing-shine mt-7 inline-flex items-center gap-2 px-[30px] py-4 rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white hover:-translate-y-0.5 transition-all group"
-            >
-              {view === 'home' ? 'Démarrer maintenant' : 'Voir les offres'}
-              <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
-            </button>
+            <div className="mt-7 flex flex-wrap items-center justify-center gap-3.5">
+              <button
+                onClick={goToTarifs}
+                className="landing-shine inline-flex items-center gap-2 px-[30px] py-4 rounded-xl text-[15px] font-bold text-navy bg-turquoise hover:bg-white hover:-translate-y-0.5 transition-all group"
+              >
+                {view === 'tarifs' ? 'Voir les offres' : view === 'apropos' ? 'Commencer gratuitement' : 'Démarrer maintenant'}
+                <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
+              </button>
+              {view === 'apropos' && (
+                <button
+                  onClick={() => goToAnchor('modules')}
+                  className="landing-shine px-[26px] py-4 rounded-xl text-[15px] font-semibold text-white border-[1.5px] border-white/25 hover:border-white/60 hover:-translate-y-0.5 transition-all"
+                >
+                  Découvrir les modules
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -860,6 +1021,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <div>
               <p className="text-[12px] font-bold text-white uppercase tracking-[0.05em] mb-3.5">Entreprise</p>
               <div className="flex flex-col gap-2.5">
+                <button onClick={goToAPropos} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">À propos</button>
                 <a href={`mailto:${CONTACT_EMAIL}`} className="flex items-center gap-1.5 text-[13.5px] text-white/60! hover:text-white! transition-colors">
                   <Mail className="w-3.5 h-3.5" /> Contact
                 </a>
