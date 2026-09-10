@@ -49,8 +49,12 @@ export interface Client {
    *  server-side and NOT editable here: the journal owns them, and the
    *  movement is recorded once, there. */
   journalEncaissements?: EncaissementEntry[];
-  /** Derived server-side: the sum of this client's own invoices' totals. */
+  /** Derived server-side: the sum of this client's own invoices' totals, TND only — see isTnd() server-side. */
   montantFacture?: number;
+  /** Derived server-side: the same total broken down by currency (TND included), so a client
+   *  billed in a foreign currency isn't invisible on this screen just because it's excluded
+   *  from `montantFacture`. */
+  montantFactureDevises?: Record<string, number>;
   /** Derived server-side: soldeAnterieur - sum(encaissements) + montantFacture. */
   resteAPayer?: number;
   /**
@@ -68,6 +72,17 @@ const FINANCIAL_KEYS = ['soldeAnterieur', 'montantFacture', 'encaissements', 're
 
 const sumEncaissements = (entries: EncaissementEntry[] | number | undefined): number =>
   Array.isArray(entries) ? entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) : (Number(entries) || 0);
+
+/** `montantFactureDevises` minus TND (already shown as `montantFacture`), sorted alphabetically
+ *  so the order doesn't shuffle as documents in other currencies come and go — same rule
+ *  Cash's own Total Général follows for its per-currency rows. */
+const otherCurrencies = (devises: Record<string, number> | undefined): [string, number][] =>
+  Object.entries(devises || {})
+    .filter(([code, amount]) => code !== 'TND' && amount)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+const formatDeviseAmount = (amount: number, code: string): string =>
+  `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${code}`;
 
 /** Same legacy shape recovery, applied when a client is loaded into the edit
  *  form — the old total becomes one editable, dated entry instead of being
@@ -98,7 +113,7 @@ export const ClientsManagement: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'Active' | 'Inactive'>('ALL');
   /** Several specific clients at once, alongside (not instead of) free-text search. */
   const [selectedClients, setSelectedClients] = useState<{ id: number; name: string }[]>([]);
-  const [totals, setTotals] = useState({ soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
+  const [totals, setTotals] = useState<{ soldeAnterieur: number; montantFacture: number; montantFactureDevises: Record<string, number>; encaissements: number; resteAPayer: number }>({ soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {}, encaissements: 0, resteAPayer: 0 });
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -352,7 +367,7 @@ export const ClientsManagement: React.FC = () => {
         if (data && data.data) {
           setClients(data.data);
           setTotalCount(data.total);
-          setTotals(data.totals || { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
+          setTotals(data.totals || { soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {}, encaissements: 0, resteAPayer: 0 });
         } else if (Array.isArray(data)) {
           setClients(data);
           setTotalCount(data.length);
@@ -1003,6 +1018,17 @@ export const ClientsManagement: React.FC = () => {
                           >
                             {i === 0 ? (
                               <span className="font-bold text-gray-800">Total Général</span>
+                            ) : col.key === 'montantFacture' ? (
+                              <div className="text-right">
+                                <span className="block font-mono font-bold text-gray-900">
+                                  {formatCostTND(totals.montantFacture || 0)}
+                                </span>
+                                {otherCurrencies(totals.montantFactureDevises).map(([code, amount]) => (
+                                  <span key={code} className="block font-mono text-[11px] text-gray-500">
+                                    {formatDeviseAmount(amount, code)}
+                                  </span>
+                                ))}
+                              </div>
                             ) : isFinancial ? (
                               <span className="block text-right font-mono font-bold text-gray-900">
                                 {formatCostTND((totals as any)[col.key] || 0)}
@@ -1090,7 +1116,30 @@ export const ClientsManagement: React.FC = () => {
                             </td>
                           );
                         }
-                        if (col.key === 'soldeAnterieur' || col.key === 'montantFacture' || col.key === 'resteAPayer') {
+                        if (col.key === 'montantFacture') {
+                          // TND-only, per isTnd() server-side — a client billed
+                          // in a foreign currency isn't silently absent from
+                          // this screen though: the other amounts show as
+                          // small lines underneath, matching Facturation's own
+                          // per-currency Total Général rather than converting
+                          // or dropping them.
+                          const others = otherCurrencies(client.montantFactureDevises);
+                          return (
+                            <td key={col.key} className="px-5 py-3 text-right bg-emerald-50/25">
+                              <div className="font-mono text-gray-700">{formatCostTND(client.montantFacture || 0)}</div>
+                              {others.length > 0 && (
+                                <div className="mt-0.5 space-y-0.5">
+                                  {others.map(([code, amount]) => (
+                                    <div key={code} className="font-mono text-[11px] text-gray-400">
+                                      {formatDeviseAmount(amount, code)}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        }
+                        if (col.key === 'soldeAnterieur' || col.key === 'resteAPayer') {
                           const amount = Number(client[col.key as keyof Client]) || 0;
                           // Reste à payer is the figure that actually gets acted
                           // on, so it reads darker than its two inputs.
@@ -1633,6 +1682,32 @@ export const ClientsManagement: React.FC = () => {
                   </div>
                 </div>
               </section>
+
+              {/* Facturation par devise — le détail complet derrière le
+                  "Montant de facture" (TND uniquement) de la table et du
+                  Total Général : une facture en devise étrangère n'est pas
+                  perdue, elle est simplement hors de ce total-là faute de
+                  taux de change stocké. N'apparaît que si le client a au
+                  moins une facture en dehors de la TND. */}
+              {seesFinancials && otherCurrencies(viewingClient.montantFactureDevises).length > 0 && (
+                <section>
+                  <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+                    Facturation par devise
+                  </h3>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 text-[12px]">
+                      <span className="text-gray-500">TND</span>
+                      <span className="font-mono font-semibold text-gray-800">{formatCostTND(viewingClient.montantFacture || 0)}</span>
+                    </div>
+                    {otherCurrencies(viewingClient.montantFactureDevises).map(([code, amount]) => (
+                      <div key={code} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 text-[12px]">
+                        <span className="text-gray-500">{code}</span>
+                        <span className="font-mono font-semibold text-gray-800">{formatDeviseAmount(amount, code)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {/* Encaissements — every dated entry, both the manually typed
                   ones and those merged in from the Brouillard de caisse. This

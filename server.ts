@@ -942,7 +942,7 @@ async function startServer() {
    * without this the figures still ship over the wire, the same rule the
    * ADMIN-only cost on time entries already follows.
    */
-  const LEDGER_FIELDS = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer', 'journalEncaissements'];
+  const LEDGER_FIELDS = ['soldeAnterieur', 'montantFacture', 'montantFactureDevises', 'encaissements', 'resteAPayer', 'journalEncaissements'];
   const stripLedger = (client: any) => {
     const out = { ...client };
     for (const f of LEDGER_FIELDS) delete out[f];
@@ -1436,15 +1436,23 @@ async function startServer() {
   const enrichClientLedger = async (companyId: string, client: any) => {
     const invoices = await db.getAllInvoices(companyId);
     let montantFacture = 0;
+    // Les factures en devise étrangère n'entrent pas dans `montantFacture`
+    // (TND uniquement, voir `isTnd()`), mais elles restent facturées : la
+    // page Clients doit pouvoir les montrer plutôt que les faire disparaître
+    // purement et simplement. `montantFactureDevises` porte donc les deux —
+    // TND compris, pour que l'écran n'ait qu'un seul champ à lire.
+    const montantFactureDevises: Record<string, number> = {};
     for (const inv of invoices) {
-      // Seule la TND s'additionne — voir `isTnd()`. Sans ce garde, une seule
-      // facture en devise étrangère faisait grimper le total du client d'un
-      // montant qui n'était ni des dinars ni la bonne devise.
-      if (!countsAsBilled(inv) || !isTnd(inv)) continue;
+      if (!countsAsBilled(inv)) continue;
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
-      if (key === String(client.id) || key === `name:${client.name}`) {
-        montantFacture += num(Number(inv.totalNetToPay), 0);
-      }
+      if (key !== String(client.id) && key !== `name:${client.name}`) continue;
+      const devise = String(inv.currency || 'TND').toUpperCase();
+      montantFactureDevises[devise] = round3((montantFactureDevises[devise] || 0) + num(Number(inv.totalNetToPay), 0));
+      // Seule la TND s'additionne dans `montantFacture` — voir `isTnd()`.
+      // Sans ce garde, une seule facture en devise étrangère faisait grimper
+      // le total du client d'un montant qui n'était ni des dinars ni la
+      // bonne devise.
+      if (isTnd(inv)) montantFacture += num(Number(inv.totalNetToPay), 0);
     }
     montantFacture = round3(montantFacture);
     const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
@@ -1456,6 +1464,7 @@ async function startServer() {
     return {
       ...client,
       montantFacture,
+      montantFactureDevises,
       journalEncaissements,
       resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
     };
@@ -1569,15 +1578,21 @@ async function startServer() {
       // same fallback `clientBucketKey()` already uses for the KPI dashboard,
       // so a document like that isn't silently dropped from the total.
       const allInvoices = await db.getAllInvoices(req.user.companyId);
-      const montantFactureByClient = new Map<string, number>();
+      // Une facture en devise étrangère n'entre pas dans `montantFacture`
+      // (TND uniquement — voir `isTnd()` : sans ce garde, une facture en GBP
+      // ou en USD gonflait le total du client et la ligne "Total Général"
+      // d'un chiffre qui n'était ni en dinars ni convertible, faute de taux
+      // stocké) mais reste facturée : `montantFactureDevisesByClient` garde
+      // donc le détail par devise (TND comprise) pour que l'écran puisse la
+      // montrer plutôt que la faire simplement disparaître.
+      const montantFactureDevisesByClient = new Map<string, Record<string, number>>();
       for (const inv of allInvoices) {
-        // Seule la TND s'additionne — voir `isTnd()`. Sans ce garde, une
-        // facture en GBP ou en USD gonflait le "Montant de facture" du
-        // client (et la ligne "Total Général") d'un chiffre qui n'était ni
-        // en dinars ni convertible, puisqu'aucun taux n'est stocké.
-        if (!countsAsBilled(inv) || !isTnd(inv)) continue;
+        if (!countsAsBilled(inv)) continue;
         const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
-        montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+        const devise = String(inv.currency || 'TND').toUpperCase();
+        const byDevise = montantFactureDevisesByClient.get(key) || {};
+        byDevise[devise] = round3((byDevise[devise] || 0) + num(Number(inv.totalNetToPay), 0));
+        montantFactureDevisesByClient.set(key, byDevise);
       }
       // Enriched over every client matching the current search/filters, not
       // just the current page — the "Total Général" row needs the ledger
@@ -1586,16 +1601,20 @@ async function startServer() {
       // read once for the whole request, then looked up per client.
       const journalByClient = journalEncaissementsByClient(await db.getAllCashJournalEntries(req.user.companyId));
       const enrichedAll = clients.map((c: any) => {
-        const montantFacture = round3(
-          (montantFactureByClient.get(String(c.id)) || 0) +
-          (montantFactureByClient.get(`name:${c.name}`) || 0),
-        );
+        const devisesA = montantFactureDevisesByClient.get(String(c.id)) || {};
+        const devisesB = montantFactureDevisesByClient.get(`name:${c.name}`) || {};
+        const montantFactureDevises: Record<string, number> = { ...devisesA };
+        for (const [d, v] of Object.entries(devisesB)) {
+          montantFactureDevises[d] = round3((montantFactureDevises[d] || 0) + v);
+        }
+        const montantFacture = round3(montantFactureDevises.TND || 0);
         const soldeAnterieur = num(Number(c.soldeAnterieur), 0);
         const journalEncaissements = journalFor(journalByClient, c);
         const encaissements = round3(sumEncaissements(c) + sumAmounts(journalEncaissements));
         return {
           ...c,
           montantFacture,
+          montantFactureDevises,
           journalEncaissements,
           resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
         };
@@ -1619,12 +1638,18 @@ async function startServer() {
         const totals = enrichedAll.reduce((acc: any, c: any) => {
           acc.soldeAnterieur = round3(acc.soldeAnterieur + num(Number(c.soldeAnterieur), 0));
           acc.montantFacture = round3(acc.montantFacture + num(Number(c.montantFacture), 0));
+          // Même détail par devise que chaque ligne, sommé — la ligne Total
+          // Général peut ainsi montrer les autres devises facturées comme
+          // Facturation le fait déjà pour son propre Total Général.
+          for (const [d, v] of Object.entries(c.montantFactureDevises || {})) {
+            acc.montantFactureDevises[d] = round3((acc.montantFactureDevises[d] || 0) + (v as number));
+          }
           // c.journalEncaissements is already attached above — reuse it rather
           // than re-deriving, so the total can never drift from the rows.
           acc.encaissements = round3(acc.encaissements + sumEncaissements(c) + sumAmounts(c.journalEncaissements || []));
           acc.resteAPayer = round3(acc.resteAPayer + num(Number(c.resteAPayer), 0));
           return acc;
-        }, { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
+        }, { soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {} as Record<string, number>, encaissements: 0, resteAPayer: 0 });
         res.json({ data: page_, total: clients.length, page, limit, ...(seesLedger ? { totals } : {}) });
       } else {
         res.json(page_);
