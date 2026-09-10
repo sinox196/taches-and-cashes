@@ -140,9 +140,12 @@ export const UsersManagement: React.FC = () => {
   const [formCategorie, setFormCategorie] = useState('');
   const [formEchelon, setFormEchelon] = useState('');
   const [formSalHeure, setFormSalHeure] = useState<number | ''>('');
-  /** Paramètres de la paie — Tableau des Déductions Fiscales : chaque case cochée / valeur saisie ici devient une déduction du salaire brut imposable, voir computePayslip() côté serveur. */
+  /** Paramètres de la paie — Tableau des Déductions Fiscales : chaque valeur
+   * saisie ici devient une déduction du salaire brut imposable, voir
+   * computePayslip() côté serveur. Marié(e) n'a pas de champ ici : il se lit
+   * sur « Situation familiale » ci-dessus (Gestion des paies), pour ne pas
+   * dupliquer la même information à deux endroits du formulaire. */
   const [paieParamsCollapsed, setPaieParamsCollapsed] = useState(true);
-  const [formPaieMarie, setFormPaieMarie] = useState(false);
   const [formPaieEnfantsInfirmes, setFormPaieEnfantsInfirmes] = useState<number | ''>('');
   const [formPaieEnfantsEtudiants, setFormPaieEnfantsEtudiants] = useState<number | ''>('');
   const [formPaieParentsACharge, setFormPaieParentsACharge] = useState<number | ''>('');
@@ -220,7 +223,6 @@ export const UsersManagement: React.FC = () => {
     setFormEchelon('');
     setFormSalHeure('');
     setPaieCollapsed(true);
-    setFormPaieMarie(false);
     setFormPaieEnfantsInfirmes('');
     setFormPaieEnfantsEtudiants('');
     setFormPaieParentsACharge('');
@@ -265,7 +267,6 @@ export const UsersManagement: React.FC = () => {
     setFormEchelon(user.echelon ?? '');
     setFormSalHeure(typeof user.salHeure === 'number' ? user.salHeure : '');
     setPaieCollapsed(true);
-    setFormPaieMarie(!!user.paieMarie);
     setFormPaieEnfantsInfirmes(typeof user.paieEnfantsInfirmes === 'number' ? user.paieEnfantsInfirmes : '');
     setFormPaieEnfantsEtudiants(typeof user.paieEnfantsEtudiants === 'number' ? user.paieEnfantsEtudiants : '');
     setFormPaieParentsACharge(typeof user.paieParentsACharge === 'number' ? user.paieParentsACharge : '');
@@ -345,7 +346,6 @@ export const UsersManagement: React.FC = () => {
         categorie: formCategorie || null,
         echelon: formEchelon || null,
         salHeure: formSalHeure === '' ? null : Number(formSalHeure),
-        paieMarie: formPaieMarie,
         paieEnfantsInfirmes: formPaieEnfantsInfirmes === '' ? null : Number(formPaieEnfantsInfirmes),
         paieEnfantsEtudiants: formPaieEnfantsEtudiants === '' ? null : Number(formPaieEnfantsEtudiants),
         paieParentsACharge: formPaieParentsACharge === '' ? null : Number(formPaieParentsACharge),
@@ -1027,17 +1027,7 @@ export const UsersManagement: React.FC = () => {
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                           placeholder="Ex: Marié(e)"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Nombre d'enfants</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={formNombreEnfants}
-                          onChange={e => setFormNombreEnfants(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                        />
+                        <p className="text-[10.5px] text-gray-500 mt-1">Sert aussi à la déduction « Marié(e) » (300 DT/an) dans « Paramètres de la paie » ci-dessous, dès qu'elle contient « Marié(e) ».</p>
                       </div>
                       <div>
                         <label className="block text-[12px] font-semibold text-gray-700 mb-1">Catégorie</label>
@@ -1088,17 +1078,23 @@ export const UsersManagement: React.FC = () => {
                   </div>
                   {!paieParamsCollapsed && (
                     <div className="mt-4 space-y-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={formPaieMarie}
-                          onChange={e => setFormPaieMarie(e.target.checked)}
-                          className="rounded border-gray-300 text-navy focus:ring-navy"
-                        />
-                        <span className="text-[13px] text-gray-800">Marié(e) <span className="text-gray-500">(déduction 300 DT/an)</span></span>
-                      </label>
+                      <p className="text-[11px] text-gray-500">
+                        Marié(e) (déduction 300 DT/an) se déduit de « Situation familiale », dans « Gestion des paies » ci-dessus — pas de case à part ici, pour ne pas saisir la même information deux fois.
+                      </p>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                            Nombre d'enfants à charge
+                          </label>
+                          <input
+                            type="number" min="0" max="4" step="1"
+                            value={formNombreEnfants}
+                            onChange={e => setFormNombreEnfants(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">100/200/300/400 DT/an selon le nombre (1 à 4), plafonné à 4.</p>
+                        </div>
                         <div>
                           <label className="block text-[12px] font-semibold text-gray-700 mb-1">
                             Enfants infirmes (handicapés)
@@ -1157,9 +1153,6 @@ export const UsersManagement: React.FC = () => {
                           <p className="text-[10.5px] text-gray-500 mt-1">Plafonné à 100 000 DT/an.</p>
                         </div>
                       </div>
-                      <p className="text-[11px] text-gray-500">
-                        Le nombre d'enfants à charge ordinaire (100/200/300/400 DT/an) reste dans « Gestion des paies » ci-dessus.
-                      </p>
                     </div>
                   )}
                 </div>

@@ -44,8 +44,7 @@ export interface User {
   categorie?: string | null;
   echelon?: string | null;
   salHeure?: number | null;
-  /** Paramètres de la paie — Tableau des Déductions Fiscales : chacun devient une déduction du salaire brut imposable dans computePayslip() côté serveur, jamais un calcul côté client. */
-  paieMarie?: boolean;
+  /** Paramètres de la paie — Tableau des Déductions Fiscales : chacun devient une déduction du salaire brut imposable dans computePayslip() côté serveur, jamais un calcul côté client. Marié(e) n'a pas de champ à part : il se lit sur `situationFamiliale` ci-dessus, pour ne pas dupliquer la même information à deux endroits du formulaire Équipe. */
   paieEnfantsInfirmes?: number | null;
   paieEnfantsEtudiants?: number | null;
   paieParentsACharge?: number | null;
