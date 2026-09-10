@@ -526,55 +526,63 @@ export const UsersManagement: React.FC = () => {
               )}
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Nom d'utilisateur</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!!editingUserId}
-                    value={formUsername}
-                    onChange={e => setFormUsername(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
-                    placeholder="Ex: jean.dupont"
-                  />
-                </div>
+                {(() => {
+                  const usernameField = (
+                    <div key="username">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Nom d'utilisateur</label>
+                      <input
+                        type="text"
+                        required
+                        disabled={!!editingUserId}
+                        value={formUsername}
+                        onChange={e => setFormUsername(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
+                        placeholder="Ex: jean.dupont"
+                      />
+                    </div>
+                  );
 
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">
-                    Mot de passe {editingUserId && <span className="text-gray-400 font-normal">(laisser vide pour ne pas changer)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-1p-ignore
-                    data-form-type="other"
-                    required={!editingUserId}
-                    value={formPassword}
-                    onChange={e => setFormPassword(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                    placeholder="••••••••"
-                  />
-                </div>
+                  const passwordField = (
+                    <div key="password">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                        Mot de passe {editingUserId && <span className="text-gray-400 font-normal">(laisser vide pour ne pas changer)</span>}
+                      </label>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-1p-ignore
+                        data-form-type="other"
+                        required={!editingUserId}
+                        value={formPassword}
+                        onChange={e => setFormPassword(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                  );
 
-                <div className="pt-4 border-t border-gray-200 mt-4">
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
-                  <select
-                    value={formRole}
-                    onChange={e => setFormRole(e.target.value as Role)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
-                  >
-                    {ROLES.map(r => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
-                    ))}
-                  </select>
+                  const roleField = (
+                    <div key="role" className="pt-4 border-t border-gray-200 mt-4">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
+                      <select
+                        value={formRole}
+                        onChange={e => setFormRole(e.target.value as Role)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
+                      >
+                        {ROLES.map(r => (
+                          <option key={r.id} value={r.id}>{r.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
 
-                  {/* Un compte client n'a de sens que rattaché à un dossier :
-                      sans lui le portail n'a rien à montrer et le dit. Le
-                      choix passe par la recherche serveur, jamais par une
-                      liste complète — il y a des centaines de clients. */}
-                  {formRole === CLIENT_ROLE && (
-                    <div className="mt-3">
+                  // Un compte client n'a de sens que rattaché à un dossier :
+                  // sans lui le portail n'a rien à montrer et le dit. Le
+                  // choix passe par la recherche serveur, jamais par une
+                  // liste complète — il y a des centaines de clients.
+                  const dossierField = (
+                    <div key="dossier">
                       <label className="block text-[12px] font-semibold text-gray-700 mb-1">Dossier client rattaché</label>
                       {formClientId && !formClientName ? (
                         <div className="flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-gray-50">
@@ -607,8 +615,19 @@ export const UsersManagement: React.FC = () => {
                         Ce compte ne verra que ce dossier. Plusieurs comptes peuvent viser le même client (gérant, comptable…).
                       </p>
                     </div>
-                  )}
-                </div>
+                  );
+
+                  // Pour un compte client, choisir le dossier remplit le nom
+                  // d'utilisateur juste en dessous (voir ClientSearchInput
+                  // ci-dessus) — le champ qui en alimente un autre doit donc
+                  // précéder celui qu'il remplit, pas le suivre. Le Rôle,
+                  // déjà posé sur Client par « Nouveau compte client », passe
+                  // en dernier : rien au-dessus de lui n'a plus besoin d'être
+                  // révélé par un choix qui est déjà fait.
+                  return formRole === CLIENT_ROLE
+                    ? <>{dossierField}{usernameField}{passwordField}{roleField}</>
+                    : <>{usernameField}{passwordField}{roleField}</>;
+                })()}
 
                 {/* Salaire, shift et congés n'ont aucun sens pour un client :
                     il n'est pas employé du cabinet. */}

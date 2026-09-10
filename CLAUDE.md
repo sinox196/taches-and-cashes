@@ -657,7 +657,25 @@ identifiant que l'admin invente — mais reste modifiable avant la création.
 après tout le bloc coût employeur / shift / congés : c'est lui qui décide si
 ce bloc s'affiche ou s'efface au profit du sélecteur de dossier client, donc
 le choisir en dernier obligeait à faire défiler tout un formulaire non
-pertinent avant de trouver le réglage qui en changeait le contenu.
+pertinent avant de trouver le réglage qui en changeait le contenu. Ce n'est
+vrai que pour un collaborateur — voir l'ordre inversé ci-dessous pour un
+compte client, où le rôle est déjà tranché avant même d'ouvrir la modale.
+
+**Pour un compte client, le formulaire s'ouvre déjà tranché sur le rôle**
+(`handleOpenCreate(CLIENT_ROLE)`, ce que « Nouveau compte client » appelle) —
+le dossier client rattaché passe donc **en tête**, avant nom d'utilisateur et
+mot de passe, et Rôle redescend en dernier. Ce n'est pas l'inverse arbitraire
+de l'ordre collaborateur : choisir le dossier **remplit** le nom
+d'utilisateur juste en dessous (`ClientSearchInput`'s `onChange`), donc le
+champ qui en alimente un autre doit le précéder, pas le suivre — la
+dépendance était déjà là, seul l'ordre à l'écran ne la suivait pas. Les deux
+séquences (`usernameField`/`passwordField`/`roleField`/`dossierField`, dans
+[UsersManagement.tsx](src/components/UsersManagement.tsx)) sont des fragments
+JSX assemblés une seule fois par rendu, pas deux copies du formulaire : rien
+ne duplique le balisage entre les deux ordres. Le rôle reste modifiable en
+cours de saisie (l'admin peut rebasculer un `Nouvel utilisateur` en `Client`
+depuis le `<select>` Rôle) et la réorganisation suit en direct, puisqu'elle
+ne dépend que de `formRole`.
 
 **La sécurité est un périmètre global, pas un filtre par route.** Un compte
 `CLIENT` n'a aucune permission, donc `requirePermission` le refuse déjà partout
