@@ -14,7 +14,8 @@ import {
   MessageCircle,
   FileCheck2,
   Building2,
-  Gift
+  Gift,
+  Wallet
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { planAllowsModule, type PlanModule } from '../constants/plans';
@@ -56,6 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // UserCheck, not Users2: Équipe took the plain "group of people" mark, and
     // two nav items sharing one icon is unreadable at 16px.
     ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: UserCheck, hasChevron: true }] : []),
+    ...(hasPermission('VIEW_PAYROLL') ? [{ id: 'Payroll', label: 'Gestion des paies', icon: Wallet, hasChevron: false }] : []),
     // Parrainage : c'est l'abonnement de l'entreprise qui est en jeu, donc
     // réservé à qui la gère — la même permission que la page Équipe.
     ...(hasPermission('MANAGE_USERS') ? [{ id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false }] : []),

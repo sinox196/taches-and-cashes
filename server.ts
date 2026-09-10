@@ -194,6 +194,139 @@ const employerHourlyRate = (user: any, settings: any): number | null => {
   return heuresMensuelles > 0 ? total / heuresMensuelles : null;
 };
 
+/**
+ * Gestion des paies — le moteur de calcul du bulletin, reproduisant tel quel
+ * le cahier des charges Excel remis par le cabinet (barème IRPP, CNSS
+ * salariale, CSS LF2018, abattement forfaitaire, déductions communes). Une
+ * seule implémentation : `POST /api/payslips/preview` et
+ * `POST`/`PUT /api/payslips` l'appellent tous, pour qu'un bulletin
+ * enregistré ne puisse jamais afficher un chiffre que l'aperçu n'avait pas
+ * déjà montré — même principe que `computeInvoiceTotals()`.
+ *
+ * Le barème IRPP est annuel et progressif — chaque tranche ne taxe que la
+ * part du revenu qui lui appartient. Le calcul a besoin d'une base annuelle
+ * stable pour que la retenue à la source ne varie pas d'un mois à l'autre au
+ * gré des primes ; cette base est le salaire brut *de ce bulletin* multiplié
+ * par `nombreMois` (12 par défaut, saisi par l'admin à la génération) — pas
+ * un salaire annuel réel qu'on ne demande pas de saisir. C'est ce que
+ * `nombreMois` représente : sur combien de mois annualiser ce bulletin pour
+ * la progressivité de l'impôt, pas une durée de contrat.
+ *
+ * **« Jours fériés » se chiffre à 8 h/jour au taux horaire** (`salHeure` ×
+ * `HEURES_PAR_JOUR`) — une hypothèse, pas une valeur du cahier des charges :
+ * le document modèle remis ne donne aucune formule pour cette ligne, et 8 h
+ * est ce qui reproduit exactement son propre exemple chiffré (1 jour × 8 h ×
+ * 4,783 DT/h = 38,264, la valeur imprimée).
+ *
+ * **Volontairement non couvert**, faute de donnée saisie sur la fiche
+ * utilisateur : parents à charge, assurance vie, compte épargne en actions,
+ * enfants handicapés ou étudiants non boursiers — le barème du cahier des
+ * charges les prévoit, mais rien dans « Gestion des paies » ne distingue un
+ * enfant de ces cas particuliers. Seules Marié(e) et Nombre d'enfants
+ * (plafonné à 4, comme le barème) alimentent les déductions communes.
+ */
+const CNSS_TAUX_DEFAUT = 9.68; // %, cahier des charges (modifiable par bulletin)
+const CSS_TAUX = 0.5; // %, flat, cahier des charges (contribution sociale de solidarité, LF 2018)
+const ABATTEMENT_TAUX = 10; // %, abattement forfaitaire pour frais professionnels
+const ABATTEMENT_PLAFOND_ANNUEL = 2000; // DT/an
+const HEURES_PAR_JOUR = 8; // pour chiffrer un jour férié payé à partir du taux horaire
+
+/** Barème IRPP annuel (tranches, taux) — cahier des charges Excel. */
+const IRPP_BRACKETS: { upTo: number; rate: number }[] = [
+  { upTo: 5000, rate: 0 },
+  { upTo: 10000, rate: 0.15 },
+  { upTo: 20000, rate: 0.25 },
+  { upTo: 30000, rate: 0.30 },
+  { upTo: 40000, rate: 0.33 },
+  { upTo: 50000, rate: 0.36 },
+  { upTo: 70000, rate: 0.38 },
+  { upTo: Infinity, rate: 0.40 },
+];
+
+/** Impôt annuel progressif : chaque tranche ne taxe que la part qui lui appartient. */
+const irppAnnuel = (imposable: number): number => {
+  if (imposable <= 0) return 0;
+  let total = 0;
+  let lower = 0;
+  for (const { upTo, rate } of IRPP_BRACKETS) {
+    if (imposable <= lower) break;
+    total += (Math.min(imposable, upTo) - lower) * rate;
+    lower = upTo;
+  }
+  return total;
+};
+
+/** Marié(e) : +300 DT/an. Enfants à charge, plafonnés à 4 : 100/200/300/400 DT/an. */
+const DEDUCTION_ENFANTS: Record<number, number> = { 0: 0, 1: 100, 2: 200, 3: 300, 4: 400 };
+const deductionsCommunesAnnuelles = (situationFamiliale: string | null | undefined, nombreEnfants: number | null | undefined): number => {
+  const marie = /mari/i.test(String(situationFamiliale || ''));
+  const enfants = Math.max(0, Math.min(4, Math.round(Number(nombreEnfants) || 0)));
+  return (marie ? 300 : 0) + DEDUCTION_ENFANTS[enfants];
+};
+
+/**
+ * Calcule un bulletin de paie mensuel à partir des gains saisis pour ce mois
+ * et de la situation familiale/nombre d'enfants figés sur le bulletin. Rend
+ * toutes les lignes du modèle — jamais de valeur que l'admin aurait à
+ * recalculer à la main pour vérifier le document.
+ */
+function computePayslip(input: {
+  salaireBase: number; salHeure: number;
+  joursFeries: number;
+  primePresence: number; primeTransport: number; primeEncouragement: number;
+  tauxCnss: number;
+  nombreMois: number;
+  situationFamiliale: string | null | undefined;
+  nombreEnfants: number | null | undefined;
+}) {
+  // « Salaire de base » n'est pas dérivé d'heures : c'est le salaire brut
+  // mensuel de la fiche Équipe (`user.salaireBrut`), repris tel quel — la
+  // demande explicite était de le prendre depuis Équipe, pas de le recalculer
+  // à partir d'un taux horaire. Modifiable sur ce bulletin sans toucher la
+  // fiche : un mois peut différer (absence, avenant…) sans réécrire le
+  // salaire de référence de l'employé.
+  const salaireBase = round3(num(input.salaireBase, 0));
+  const gainsJoursFeries = round3(num(input.joursFeries, 0) * HEURES_PAR_JOUR * num(input.salHeure, 0));
+  const primePresence = round3(num(input.primePresence, 0));
+  const primeTransport = round3(num(input.primeTransport, 0));
+  const primeEncouragement = round3(num(input.primeEncouragement, 0));
+
+  const salaireBrut = round3(salaireBase + gainsJoursFeries + primePresence + primeTransport + primeEncouragement);
+
+  const tauxCnss = typeof input.tauxCnss === 'number' && input.tauxCnss >= 0 ? input.tauxCnss : CNSS_TAUX_DEFAUT;
+  const retenueCnss = round3(salaireBrut * (tauxCnss / 100));
+  const salaireBrutImposable = round3(salaireBrut - retenueCnss);
+
+  const nombreMois = num(input.nombreMois, 12) > 0 ? num(input.nombreMois, 12) : 12;
+  const imposableAnnuelRef = salaireBrutImposable * nombreMois;
+  const abattement = Math.min(imposableAnnuelRef * (ABATTEMENT_TAUX / 100), ABATTEMENT_PLAFOND_ANNUEL);
+  const deductionsCommunes = deductionsCommunesAnnuelles(input.situationFamiliale, input.nombreEnfants);
+  const imposableIrppAnnuel = Math.max(0, imposableAnnuelRef - abattement - deductionsCommunes);
+  const imposableIrppArrondi = Math.ceil(imposableIrppAnnuel);
+
+  const impotSurLeRevenu = round3(irppAnnuel(imposableIrppArrondi) / nombreMois);
+  const contributionSocialeSolidarite = round3((imposableIrppArrondi * (CSS_TAUX / 100)) / nombreMois);
+
+  const salaireNet = round3(salaireBrutImposable - impotSurLeRevenu);
+  const salaireNetAPayer = round3(salaireNet - contributionSocialeSolidarite);
+
+  return {
+    salaireBase, gainsJoursFeries, primePresence, primeTransport, primeEncouragement,
+    salaireBrut,
+    tauxCnss, retenueCnss,
+    salaireBrutImposable,
+    abattement: round3(abattement),
+    deductionsCommunes,
+    imposableIrppAnnuel: round3(imposableIrppAnnuel),
+    imposableIrppArrondi,
+    impotSurLeRevenu,
+    contributionSocialeSolidarite,
+    salaireNet,
+    salaireNetAPayer,
+    nombreMois,
+  };
+}
+
 /** DD/MM/YYYY (how entries are stored) → epoch ms. */
 const parseFrenchDateTs = (dateStr: string) => {
   if (!dateStr) return 0;
@@ -353,6 +486,9 @@ const PLAN_MODULE_ROUTES: [string, PlanModule][] = [
   ['/api/useful-links', 'Ressources'],
 
   ['/api/messages', 'Messages'],
+
+  ['/api/payslips', 'Payroll'],
+  ['/api/payroll', 'Payroll'],
 
   ['/api/users', 'Users'],
   ['/api/settings', 'Users'],
@@ -1113,6 +1249,213 @@ async function startServer() {
       res.json(companyBlock(updated));
     } catch (error) {
       console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Gestion des paies
+  // ---------------------------------------------------------
+
+  /**
+   * L'émetteur du bulletin (nom, adresse, logo) est la même identité que
+   * celle de Cash (`companyBlock(getSettings())`) — ce n'est pas une donnée
+   * de facturation, c'est l'identité de l'entreprise, donc une deuxième copie
+   * n'aurait fait que diverger de la première la première fois que l'une des
+   * deux serait corrigée. Route à part et non `/api/cash/company` : un
+   * titulaire de `VIEW_PAYROLL` sans `VIEW_CASH` doit pouvoir imprimer un
+   * bulletin.
+   */
+  app.get('/api/payroll/company', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      res.json(companyBlock(await db.getSettings(req.user.companyId)));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Liste blanche des champs de paie d'un collaborateur — jamais la fiche
+   * complète (permissions, coût employeur détaillé…) à un titulaire de
+   * `VIEW_PAYROLL` qui n'a pas forcément `MANAGE_USERS`. Exclut les comptes
+   * `CLIENT` : un dossier client n'est pas un employé.
+   */
+  app.get('/api/payroll/employees', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const users = await db.getAllUsers(req.user.companyId);
+      const rows = users
+        .filter((u: any) => u.role !== CLIENT_ROLE)
+        .map((u: any) => ({
+          id: u.id, username: u.username, role: u.role,
+          salaireBrut: u.salaireBrut ?? null, regimeHoraire: u.regimeHoraire ?? null,
+          matricule: u.matricule ?? null, numCin: u.numCin ?? null, numCnss: u.numCnss ?? null,
+          qualification: u.qualification ?? null, departement: u.departement ?? null,
+          banque: u.banque ?? null, numeroCompte: u.numeroCompte ?? null,
+          situationFamiliale: u.situationFamiliale ?? null, nombreEnfants: u.nombreEnfants ?? null,
+          categorie: u.categorie ?? null, echelon: u.echelon ?? null, salHeure: u.salHeure ?? null,
+        }))
+        .sort((a: any, b: any) => a.username.localeCompare(b.username));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Dernier jour civil d'un mois — pour la « Période du / au » imprimée sur le bulletin. */
+  const lastDayOfMonth = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  /**
+   * Construit les entrées communes à l'aperçu et à l'enregistrement : la
+   * copie figée de l'identité de paie de l'employé (au moment de l'appel) et
+   * le résultat de `computePayslip()`. Ni l'aperçu ni l'enregistrement n'ont
+   * de deuxième façon de calculer un bulletin.
+   */
+  const buildPayslipDraft = (employee: any, body: any) => {
+    const year = parseInt(body.year, 10);
+    const month = parseInt(body.month, 10);
+    const nombreMois = num(body.nombreMois, 12) || 12;
+    const salHeure = typeof body.salHeure === 'number' ? body.salHeure : num(employee.salHeure, 0);
+    // Prérempli depuis la fiche Équipe (`user.salaireBrut`), modifiable sur ce
+    // bulletin — voir le commentaire de `computePayslip()`.
+    const salaireBase = typeof body.salaireBase === 'number' ? body.salaireBase : num(employee.salaireBrut, 0);
+    const computed = computePayslip({
+      salaireBase,
+      salHeure,
+      joursFeries: num(body.joursFeries, 0),
+      primePresence: num(body.primePresence, 0),
+      primeTransport: num(body.primeTransport, 0),
+      primeEncouragement: num(body.primeEncouragement, 0),
+      tauxCnss: typeof body.tauxCnss === 'number' ? body.tauxCnss : CNSS_TAUX_DEFAUT,
+      nombreMois,
+      situationFamiliale: employee.situationFamiliale,
+      nombreEnfants: employee.nombreEnfants,
+    });
+    return {
+      userId: employee.id,
+      employeeName: employee.username,
+      year, month,
+      periodeDu: Number.isFinite(year) && Number.isFinite(month) ? `01/${String(month).padStart(2, '0')}/${year}` : '',
+      periodeAu: Number.isFinite(year) && Number.isFinite(month)
+        ? `${String(lastDayOfMonth(year, month)).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`
+        : '',
+      // Copie figée — voir le commentaire de `getAllPayslips` dans db-types.ts.
+      matricule: employee.matricule ?? null, numCin: employee.numCin ?? null, numCnss: employee.numCnss ?? null,
+      qualification: employee.qualification ?? null, departement: employee.departement ?? null,
+      banque: employee.banque ?? null, numeroCompte: employee.numeroCompte ?? null,
+      situationFamiliale: employee.situationFamiliale ?? null, nombreEnfants: employee.nombreEnfants ?? null,
+      categorie: employee.categorie ?? null, echelon: employee.echelon ?? null,
+      salHeure,
+      nbHeures: num(body.nbHeures, 0),
+      joursFeries: num(body.joursFeries, 0),
+      primePresence: num(body.primePresence, 0),
+      primeTransport: num(body.primeTransport, 0),
+      primeEncouragement: num(body.primeEncouragement, 0),
+      // Informatif seulement — voir CLAUDE.md « Gestion des paies ».
+      nHeures: num(body.nHeures, 0),
+      joursConges: num(body.joursConges, 0),
+      joursAbsences: num(body.joursAbsences, 0),
+      soldeConge: typeof body.soldeConge === 'number' ? body.soldeConge : null,
+      ...computed,
+    };
+  };
+
+  /** Aperçu à la volée — aucune écriture, purement le résultat de `computePayslip()` sur les valeurs saisies. */
+  app.post('/api/payslips/preview', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const employee = await db.getUserById(req.user.companyId, Number(req.body.userId));
+      if (!employee || employee.role === CLIENT_ROLE) return res.status(404).json({ error: 'Collaborateur introuvable' });
+      res.json(buildPayslipDraft(employee, req.body || {}));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Année optionnelle en filtre (`?year=2026`) — un cabinet accumule un bulletin par employé et par mois, potentiellement des années d'historique. */
+  app.get('/api/payslips', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      let rows = await db.getAllPayslips(req.user.companyId);
+      if (req.query.year) rows = rows.filter((p: any) => String(p.year) === String(req.query.year));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/payslips', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const employee = await db.getUserById(req.user.companyId, Number(req.body.userId));
+      if (!employee || employee.role === CLIENT_ROLE) return res.status(404).json({ error: 'Collaborateur introuvable' });
+
+      const year = parseInt(req.body.year, 10);
+      const month = parseInt(req.body.month, 10);
+      if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+        return res.status(400).json({ error: 'Période invalide' });
+      }
+      const existing = (await db.getAllPayslips(req.user.companyId))
+        .find((p: any) => p.userId === employee.id && p.year === year && p.month === month);
+      if (existing) {
+        return res.status(400).json({ error: 'Un bulletin existe déjà pour ce collaborateur sur cette période.' });
+      }
+
+      const draft = buildPayslipDraft(employee, req.body || {});
+      const row = await db.createPayslip(req.user.companyId, {
+        id: Date.now(),
+        ...draft,
+        createdAt: new Date().toISOString(),
+        createdBy: req.user.id,
+      });
+      res.json(row);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** La période et le collaborateur ne se corrigent pas depuis cette route — supprimer et régénérer pour ceux-là, comme un document Cash mal daté. */
+  app.put('/api/payslips/:id', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = await db.getPayslipById(req.user.companyId, id);
+      if (!existing) return res.status(404).json({ error: 'Bulletin introuvable' });
+
+      // L'identité de paie reste celle figée à la génération — modifier les
+      // gains du mois ne doit pas aller rechercher une fiche Équipe
+      // éventuellement changée depuis.
+      const computed = computePayslip({
+        salaireBase: typeof req.body.salaireBase === 'number' ? req.body.salaireBase : num(existing.salaireBase, 0),
+        salHeure: typeof req.body.salHeure === 'number' ? req.body.salHeure : num(existing.salHeure, 0),
+        joursFeries: num(req.body.joursFeries, existing.joursFeries),
+        primePresence: num(req.body.primePresence, existing.primePresence),
+        primeTransport: num(req.body.primeTransport, existing.primeTransport),
+        primeEncouragement: num(req.body.primeEncouragement, existing.primeEncouragement),
+        tauxCnss: typeof req.body.tauxCnss === 'number' ? req.body.tauxCnss : existing.tauxCnss,
+        nombreMois: num(req.body.nombreMois, existing.nombreMois),
+        situationFamiliale: existing.situationFamiliale,
+        nombreEnfants: existing.nombreEnfants,
+      });
+
+      const updated = await db.updatePayslip(req.user.companyId, id, {
+        nHeures: num(req.body.nHeures, existing.nHeures),
+        joursConges: num(req.body.joursConges, existing.joursConges),
+        joursAbsences: num(req.body.joursAbsences, existing.joursAbsences),
+        soldeConge: typeof req.body.soldeConge === 'number' ? req.body.soldeConge : existing.soldeConge,
+        salHeure: typeof req.body.salHeure === 'number' ? req.body.salHeure : existing.salHeure,
+        ...computed,
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/payslips/:id', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deletePayslip(req.user.companyId, parseInt(req.params.id, 10));
+      if (!ok) return res.status(404).json({ error: 'Bulletin introuvable' });
+      res.json({ success: true });
+    } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   });

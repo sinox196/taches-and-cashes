@@ -64,7 +64,7 @@ export interface PlanMeta {
  */
 export type PlanModule =
   | 'Dashboard' | 'Users' | 'Missions' | 'Clients' | 'Time Tracking'
-  | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage';
+  | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage' | 'Payroll';
 
 /**
  * Le socle est identique dans les trois packs : ce qui change, c'est le
@@ -267,6 +267,8 @@ export const PERMISSION_MODULE: Record<string, PlanModule> = {
   CREATE_LOAN_REQUEST: 'HR', MANAGE_LOANS_ADVANCES: 'HR',
 
   VIEW_RESOURCES: 'Ressources', MANAGE_RESOURCES: 'Ressources',
+
+  VIEW_PAYROLL: 'Payroll', MANAGE_PAYROLL: 'Payroll',
 };
 
 /** Les vues ouvertes par une offre — `null` quand elle les ouvre toutes. */

@@ -64,7 +64,7 @@ const TENANT_COLLECTIONS = [
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
-  'publicHolidays',
+  'publicHolidays', 'payslips',
 ];
 
 async function initJsonDb(): Promise<Database> {
@@ -99,6 +99,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.echeanceStatuses) db.echeanceStatuses = [];
     if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
     if (!db.publicHolidays) db.publicHolidays = [];
+    if (!db.payslips) db.payslips = [];
     if (!db.orders) db.orders = [];
     if (!db.messageGroups) db.messageGroups = [];
     if (!db.platformSettings) db.platformSettings = defaultPlatformSettings();
@@ -546,6 +547,29 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.timeEntries, companyId, id);
       if (index === -1) return false;
       db.timeEntries.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllPayslips: async (companyId: string) => scoped(db.payslips, companyId),
+    getPayslipById: async (companyId: string, id: number) => findScoped(db.payslips, companyId, id),
+    createPayslip: async (companyId: string, payslip: any) => {
+      const row = { ...payslip, companyId };
+      db.payslips.unshift(row); // newest first, like invoices
+      await saveDb();
+      return row;
+    },
+    updatePayslip: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.payslips, companyId, id);
+      if (index === -1) return null;
+      db.payslips[index] = { ...db.payslips[index], ...updates };
+      await saveDb();
+      return db.payslips[index];
+    },
+    deletePayslip: async (companyId: string, id: number) => {
+      const index = indexScoped(db.payslips, companyId, id);
+      if (index === -1) return false;
+      db.payslips.splice(index, 1);
       await saveDb();
       return true;
     },

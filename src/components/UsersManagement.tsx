@@ -61,6 +61,13 @@ const PERMISSIONS_GROUPED = [
     ]
   },
   {
+    group: 'Gestion des paies',
+    permissions: [
+      { id: 'VIEW_PAYROLL', label: 'Voir les bulletins', desc: 'Peut consulter et imprimer les bulletins de paie' },
+      { id: 'MANAGE_PAYROLL', label: 'Générer les bulletins', desc: 'Peut générer, modifier et supprimer les bulletins de paie' },
+    ]
+  },
+  {
     group: 'Administration',
     permissions: [
       { id: 'MANAGE_USERS', label: 'Gérer les utilisateurs', desc: 'Accès administrateur complet' },
