@@ -67,7 +67,7 @@ const Fields: React.FC<{
   <>
     <td className="px-2 py-1.5">
       <input type="date" value={value.date} onChange={e => onChange({ date: e.target.value })}
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
+        className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] bg-turquoise/10" />
     </td>
     <td className="px-2 py-1.5">
       <CategoryPicker
@@ -77,16 +77,18 @@ const Fields: React.FC<{
         onCreate={onCreateCategory}
         onDelete={onDeleteCategory}
         canManage={canManage}
+        bgClassName="bg-turquoise/10"
       />
     </td>
     <td className="px-2 py-1.5">
       <input value={value.label} onChange={e => onChange({ label: e.target.value })} placeholder="Description"
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[180px]" />
+        className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] min-w-[180px] bg-turquoise/10" />
     </td>
     <td className="px-2 py-1.5 min-w-[180px]">
       <ClientSearchInput
         value={value.clientName}
         onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
+        bgClassName="bg-turquoise/10"
       />
     </td>
     {/* w-full, not a fixed width: the column itself is stretched wide by
@@ -98,12 +100,12 @@ const Fields: React.FC<{
     <td className="px-2 py-1.5">
       <input type="number" step="0.001" min="0" value={value.entree || ''} placeholder="0,000"
         onChange={e => onChange({ entree: Number(e.target.value) || 0, sortie: 0 })}
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
+        className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] text-right font-mono bg-turquoise/10" />
     </td>
     <td className="px-2 py-1.5">
       <input type="number" step="0.001" min="0" value={value.sortie || ''} placeholder="0,000"
         onChange={e => onChange({ sortie: Number(e.target.value) || 0, entree: 0 })}
-        className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
+        className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] text-right font-mono bg-turquoise/10" />
     </td>
   </>
 );
@@ -217,13 +219,19 @@ export const CashJournal: React.FC = () => {
   }, [rows, search, month, year]);
 
   // Balance over the whole filtered set, then paged — so page 2 continues
-  // from page 1 instead of restarting.
+  // from page 1 instead of restarting. `filtered` arrives oldest-first
+  // (the server sorts by date, then by createdAt) — the running balance is
+  // accumulated in that order, since a balance computed newest-first would
+  // be meaningless. The result is reversed only afterward, so the row just
+  // added — by date, then by creation time — is what the cabinet sees at
+  // the top of the table, not buried at the bottom of a growing list.
   const withSolde = useMemo(() => {
     let solde = 0;
-    return filtered.map(r => {
+    const chronological = filtered.map(r => {
       solde = solde + (Number(r.entree) || 0) - (Number(r.sortie) || 0);
       return { row: r, solde };
     });
+    return chronological.reverse();
   }, [filtered]);
 
   const totalPages = Math.max(1, Math.ceil(withSolde.length / PAGE_SIZE));

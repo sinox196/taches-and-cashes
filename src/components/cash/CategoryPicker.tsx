@@ -18,6 +18,10 @@ interface CategoryPickerProps {
   onCreate: (label: string) => Promise<CashCategory | null>;
   onDelete: (c: CashCategory) => void;
   canManage: boolean;
+  /** Overrides the trigger's background, which defaults to white — used to
+   *  make an editable table cell visibly distinct from the surrounding
+   *  table instead of blending into it. */
+  bgClassName?: string;
 }
 
 /**
@@ -29,7 +33,7 @@ interface CategoryPickerProps {
  * a new objet never needs a code change or a trip to a settings screen.
  */
 export const CategoryPicker: React.FC<CategoryPickerProps> = ({
-  value, onChange, categories, onCreate, onDelete, canManage,
+  value, onChange, categories, onCreate, onDelete, canManage, bgClassName = 'bg-white',
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -66,7 +70,7 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full text-left px-2 py-1 border border-gray-300 rounded text-[12px] bg-white hover:border-gray-400 truncate min-w-[150px]"
+        className={`w-full text-left px-2 py-1 border border-gray-300 rounded text-[12px] ${bgClassName} hover:border-gray-400 truncate min-w-[150px]`}
         title={value || 'Choisir un objet'}
       >
         {value || <span className="text-gray-400">Objet…</span>}

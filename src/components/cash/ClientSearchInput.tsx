@@ -7,6 +7,10 @@ interface ClientSearchInputProps {
   /** `id` is undefined when the name was typed free-hand rather than picked. */
   onChange: (name: string, id?: number) => void;
   placeholder?: string;
+  /** Overrides the wrapper's background, which defaults to white — used to
+   *  make an editable table cell visibly distinct from the surrounding
+   *  table instead of blending into it. */
+  bgClassName?: string;
 }
 
 /**
@@ -18,7 +22,7 @@ interface ClientSearchInputProps {
  * the brouillard is filled in fast from paper, and the ledger already falls
  * back to matching a client by name when no id was ever linked.
  */
-export const ClientSearchInput: React.FC<ClientSearchInputProps> = ({ value, onChange, placeholder }) => {
+export const ClientSearchInput: React.FC<ClientSearchInputProps> = ({ value, onChange, placeholder, bgClassName = 'bg-white' }) => {
   const { token } = useAuth();
   const [results, setResults] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
@@ -52,7 +56,7 @@ export const ClientSearchInput: React.FC<ClientSearchInputProps> = ({ value, onC
 
   return (
     <div className="relative" ref={boxRef}>
-      <div className="flex items-center border border-gray-300 rounded bg-white focus-within:border-gray-500">
+      <div className={`flex items-center border border-gray-300 rounded ${bgClassName} focus-within:border-gray-500`}>
         <Search className="w-3 h-3 text-gray-400 ml-2" />
         <input
           value={value}

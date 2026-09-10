@@ -71,18 +71,19 @@ const Fields: React.FC<{
     <>
       <td className="px-2 py-1.5">
         <input type="date" value={value.date} onChange={e => onChange({ date: e.target.value })}
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px]" />
+          className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] bg-turquoise/10" />
       </td>
       <td className="px-2 py-1.5 min-w-[180px]">
         <ClientSearchInput
           value={value.clientName}
           onChange={(name, id) => onChange({ clientName: name, clientId: id ?? null })}
+          bgClassName="bg-turquoise/10"
         />
       </td>
       <td className="px-2 py-1.5">
         <input value={value.label} onChange={e => onChange({ label: e.target.value })}
           placeholder="Facture N°, Avance,…"
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[160px]" />
+          className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] min-w-[160px] bg-turquoise/10" />
       </td>
       <td className="px-2 py-1.5">
         <select
@@ -94,7 +95,7 @@ const Fields: React.FC<{
             // server would strip on save anyway.
             onChange(isCashMode(mode) ? { paymentMethod: mode, bankAccount: '' } : { paymentMethod: mode });
           }}
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[130px]"
+          className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] min-w-[130px] bg-turquoise/10"
         >
           {PAYMENT_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
         </select>
@@ -106,17 +107,17 @@ const Fields: React.FC<{
           disabled={cash}
           placeholder={cash ? 'Caisse' : 'Compte bancaire'}
           title={cash ? "Un règlement en espèce entre en caisse, pas sur un compte" : undefined}
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[130px] disabled:bg-gray-100 disabled:text-gray-400 disabled:placeholder-gray-400"
+          className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] min-w-[130px] bg-turquoise/10 disabled:bg-gray-100 disabled:text-gray-400 disabled:placeholder-gray-400"
         />
       </td>
       <td className="px-2 py-1.5">
         <input value={value.reference} onChange={e => onChange({ reference: e.target.value })} placeholder="Référence"
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] min-w-[110px]" />
+          className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] min-w-[110px] bg-turquoise/10" />
       </td>
       <td className="px-2 py-1.5">
         <input type="number" step="0.001" min="0" value={value.entree || ''} placeholder="0,000"
           onChange={e => onChange({ entree: Number(e.target.value) || 0 })}
-          className="w-full px-2 py-1 border border-gray-300 rounded text-[12px] text-right font-mono" />
+          className="w-full px-2 py-1 border border-turquoise/30 rounded text-[12px] text-right font-mono bg-turquoise/10" />
       </td>
     </>
   );
@@ -190,7 +191,7 @@ export const ClientPayments: React.FC = () => {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return payments.filter(r => {
+    const matches = payments.filter(r => {
       if (year && yearOf(r.date) !== year) return false;
       if (month && monthOf(r.date) !== month) return false;
       // An older row carries no mode and reads as espèce, so the Espèce
@@ -200,6 +201,11 @@ export const ClientPayments: React.FC = () => {
       return [r.clientName, r.label, r.reference, r.bankAccount]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
+    // `payments` arrives oldest-first (the server sorts by date, then by
+    // createdAt) — reversed here so the règlement just added, by date then
+    // by creation time, shows at the top instead of the bottom of a growing
+    // list. Same ordering the journal itself now follows.
+    return matches.reverse();
   }, [payments, search, mode, year, month]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
