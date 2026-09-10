@@ -166,7 +166,7 @@ export const UsersManagement: React.FC = () => {
     setFormPermissions([]);
     setFormSalaireBrut('');
     setFormRegimeHoraire(48);
-    setFormCnss(globalSettings?.cnss ?? 16.57);
+    setFormCnss(globalSettings?.cnss ?? 17.07);
     setFormTfp(globalSettings?.tfp ?? 2.0);
     setFormFoprolos(globalSettings?.foprolos ?? 1.0);
     setFormAccidentTravail(globalSettings?.accidentTravail ?? 0.5);
@@ -190,7 +190,7 @@ export const UsersManagement: React.FC = () => {
     setFormPermissions(user.permissions);
     setFormSalaireBrut(user.salaireBrut || '');
     setFormRegimeHoraire(user.regimeHoraire || 48);
-    setFormCnss(typeof user.cnss === 'number' ? user.cnss : (globalSettings?.cnss ?? 16.57));
+    setFormCnss(typeof user.cnss === 'number' ? user.cnss : (globalSettings?.cnss ?? 17.07));
     setFormTfp(typeof user.tfp === 'number' ? user.tfp : (globalSettings?.tfp ?? 2.0));
     setFormFoprolos(typeof user.foprolos === 'number' ? user.foprolos : (globalSettings?.foprolos ?? 1.0));
     setFormAccidentTravail(typeof user.accidentTravail === 'number' ? user.accidentTravail : (globalSettings?.accidentTravail ?? 0.5));

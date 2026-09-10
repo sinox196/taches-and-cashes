@@ -260,7 +260,7 @@ export const DEFAULT_LEAVE_ENTITLEMENT = 20;
  */
 export const defaultSettings = () => ({
   employerCharges: {
-    cnss: 16.57,
+    cnss: 17.07,
     tfp: 2.0,
     foprolos: 1.0,
     accidentTravail: 0.5,

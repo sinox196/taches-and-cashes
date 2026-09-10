@@ -184,7 +184,7 @@ const employerHourlyRate = (user: any, settings: any): number | null => {
 
   const g = settings?.employerCharges ?? {};
   const pct =
-    num(user.cnss, num(g.cnss, 16.57)) +
+    num(user.cnss, num(g.cnss, 17.07)) +
     num(user.tfp, num(g.tfp, 2)) +
     num(user.foprolos, num(g.foprolos, 1)) +
     num(user.accidentTravail, num(g.accidentTravail, 0.5));
