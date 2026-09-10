@@ -117,6 +117,19 @@ async function initJsonDb(): Promise<Database> {
       legacySettings.employerCharges = defaultSettings().employerCharges;
     }
 
+    // CNSS patronale moved from 16.57% to 17.07% (the real statutory rate).
+    // defaultSettings() only seeds a brand-new company; a row created before
+    // this change still carries the old value forever otherwise. A company
+    // or user still sitting at exactly the old hardcoded default has never
+    // deliberately typed a different rate, so it is safe to carry forward —
+    // same reasoning as normalizeBalance()'s legacy-shape recovery above.
+    for (const row of db.settingsByCompany) {
+      if (row.employerCharges?.cnss === 16.57) row.employerCharges.cnss = 17.07;
+    }
+    for (const u of db.users) {
+      if (u.cnss === 16.57) u.cnss = 17.07;
+    }
+
     // A settings row that predates the per-year invoice sequence has no
     // invoiceCounterYear yet. Treat an already-in-progress counter as
     // belonging to the current year rather than letting nextInvoiceNumber()

@@ -145,6 +145,8 @@ Le serveur formate les montants avec un `formatCostTND` aligné sur celui du cli
 
 Default charge percentages come from `defaultSettings()` in [src/server/db-types.ts](src/server/db-types.ts) — CNSS **17.07%**, TFP 2%, FOPROLOS 1% (the rates a Tunisian services provider actually pays), accident du travail 0.5%.
 
+**CNSS patronale used to default to 16.57% and was corrected to 17.07%.** `defaultSettings()` is only a seed for a brand-new company, so the code-level fix alone never touched an already-persisted settings row or a user row that already had its own explicit `cnss` saved — either one keeps the old value forever otherwise, since `employerHourlyRate()` prefers a stored value over the default at every read. Both engines carry a one-time, idempotent backfill run on every boot ([database.ts](src/server/database.ts) for the JSON file, [db-postgres.ts](src/server/db-postgres.ts) for Postgres): a settings row or a user still sitting at *exactly* the old hardcoded `16.57` is bumped to `17.07` — the same "recover a legacy shape" reasoning as `normalizeBalance()`. A company or collaborator with a genuinely different, deliberately-typed rate is untouched, since the check only matches the literal old default.
+
 **Cost configuration lives only in the user form** ([UsersManagement.tsx](src/components/UsersManagement.tsx)). There is deliberately no Settings page: it was removed so there is exactly one place to reason about employer cost. `GET /api/settings` survives purely to seed that form's defaults — don't rebuild a global settings UI on top of it, and keep the form's `?? 2.0` style fallbacks in step with `defaultSettings()`.
 
 ### Presence (actif / absent / inactif)

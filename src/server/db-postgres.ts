@@ -213,6 +213,16 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`INSERT INTO settings (company_id, data) VALUES ($1, $2)
            ON CONFLICT (company_id) DO NOTHING`, [LEGACY_COMPANY_ID, JSON.stringify(defaultSettings())]);
 
+  // CNSS patronale moved from 16.57% to 17.07% (the real statutory rate).
+  // defaultSettings() only seeds a brand-new company's row; one written
+  // before this change keeps the old value forever otherwise. A company or
+  // user still sitting at exactly the old hardcoded default has never
+  // deliberately typed a different rate, so it is safe to carry forward.
+  await q(`UPDATE settings SET data = jsonb_set(data, '{employerCharges,cnss}', '17.07'::jsonb)
+           WHERE data->'employerCharges'->>'cnss' = '16.57'`);
+  await q(`UPDATE users SET data = jsonb_set(data, '{cnss}', '17.07'::jsonb)
+           WHERE data->>'cnss' = '16.57'`);
+
   // The platform's own receiving bank details — a genuine global singleton,
   // distinct from any one company's Cash issuer settings above.
   await q(`CREATE TABLE IF NOT EXISTS platform_settings (
