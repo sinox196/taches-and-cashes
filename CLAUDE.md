@@ -685,6 +685,33 @@ cours de saisie (l'admin peut rebasculer un `Nouvel utilisateur` en `Client`
 depuis le `<select>` Rôle) et la réorganisation suit en direct, puisqu'elle
 ne dépend que de `formRole`.
 
+**La modale de création/édition porte une section « Gestion des paies »**,
+douze champs (matricule, n° CIN, n° CNSS, qualification, département,
+banque/poste, numéro de compte, situation familiale, nombre d'enfants,
+catégorie, échelon, salaire/heure) purement déclaratifs — un dossier
+administratif de paie, pas un calcul : aucun d'eux n'entre dans
+`employerHourlyRate()`, dans le pointage ou dans quoi que ce soit d'autre
+dans l'app. C'est délibéré : le cabinet a besoin de les *conserver* quelque
+part, pas de les faire agir. Repliée par défaut (`paieCollapsed`, même
+idiome chevron `ChevronRight`/`ChevronDown` que le tableau de bord et les
+groupes de permissions juste en dessous — chaque section garde son propre
+`useState`, pas d'abstraction partagée) : douze champs de plus, dépliés
+d'office, auraient allongé le formulaire pour tout le monde alors que seule
+la paie les consulte au quotidien. Gated `formRole !== CLIENT_ROLE` comme
+Coût employeur/Shift/Congés — un compte portail n'est pas un employé du
+cabinet. La modale elle-même est passée de `max-w-md` à `max-w-2xl` pour
+cette section : douze champs sur une seule colonne auraient rendu le
+formulaire interminable à faire défiler, la grille à deux colonnes n'a de
+sens que sur une modale plus large. Les douze champs sont stockés tels
+quels sur la fiche utilisateur (`matricule`, `numCin`, `numCnss`,
+`qualification`, `departement`, `banque`, `numeroCompte`,
+`situationFamiliale`, `nombreEnfants`, `categorie`, `echelon`, `salHeure` —
+voir l'interface `User` dans [AuthContext.tsx](src/context/AuthContext.tsx))
+et traversent `POST`/`PUT /api/users` par la même liste blanche explicite que
+le reste du formulaire ; `publicUser()` les renvoie sans traitement
+particulier puisqu'il ne fait que retirer `password` et parser
+`permissions`.
+
 **La sécurité est un périmètre global, pas un filtre par route.** Un compte
 `CLIENT` n'a aucune permission, donc `requirePermission` le refuse déjà partout
 où il est posé — mais beaucoup de routes ne portent que `authenticate` et lui

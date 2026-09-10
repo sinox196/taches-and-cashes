@@ -31,6 +31,19 @@ export interface User {
   soldeConge?: number;
   congesUtilises?: number;
   congesRestants?: number;
+  /** Gestion des paies — dossier administratif/paie de l'employé, sans effet sur aucun calcul de coût ou de pointage : ce sont des informations de référence saisies par l'admin, lues nulle part ailleurs dans l'app. */
+  matricule?: string | null;
+  numCin?: string | null;
+  numCnss?: string | null;
+  qualification?: string | null;
+  departement?: string | null;
+  banque?: string | null;
+  numeroCompte?: string | null;
+  situationFamiliale?: string | null;
+  nombreEnfants?: number | null;
+  categorie?: string | null;
+  echelon?: string | null;
+  salHeure?: number | null;
   /** Runs the platform itself (confirms other companies' payments) — orthogonal to `role`, which is scoped to this user's own company. */
   isPlatformAdmin?: boolean;
   /** This user's own company — trial status, plan, deadline, secteur. Absent for a pre-migration /api/login response shape. */

@@ -1187,7 +1187,7 @@ async function startServer() {
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId } = req.body;
+      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure } = req.body;
 
       const existing = await db.getUserByUsername(username);
       if (existing) {
@@ -1235,6 +1235,21 @@ async function startServer() {
         // même client — le gérant et son comptable — sans table pivot, et un
         // compte ne peut par construction en viser qu'un seul.
         clientId: role === CLIENT_ROLE && clientId != null ? Number(clientId) : null,
+        // Gestion des paies — dossier administratif de l'employé, purement
+        // déclaratif : rien ici n'entre dans employerHourlyRate() ni dans
+        // aucun calcul de pointage.
+        matricule: matricule || null,
+        numCin: numCin || null,
+        numCnss: numCnss || null,
+        qualification: qualification || null,
+        departement: departement || null,
+        banque: banque || null,
+        numeroCompte: numeroCompte || null,
+        situationFamiliale: situationFamiliale || null,
+        nombreEnfants: typeof nombreEnfants === 'number' && Number.isFinite(nombreEnfants) ? nombreEnfants : null,
+        categorie: categorie || null,
+        echelon: echelon || null,
+        salHeure: typeof salHeure === 'number' && Number.isFinite(salHeure) ? salHeure : null,
       });
 
       // The admin sets the annual leave allowance from this same form.
@@ -1258,7 +1273,7 @@ async function startServer() {
   app.put('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId } = req.body;
+      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure } = req.body;
 
       // Changer de panier — d'un compte du back-office vers le portail client
       // ou l'inverse — revient à prendre un siège dans l'autre panier. Sans ce
@@ -1304,6 +1319,18 @@ async function startServer() {
         // même client — le gérant et son comptable — sans table pivot, et un
         // compte ne peut par construction en viser qu'un seul.
         clientId: role === CLIENT_ROLE && clientId != null ? Number(clientId) : null,
+        matricule: matricule || null,
+        numCin: numCin || null,
+        numCnss: numCnss || null,
+        qualification: qualification || null,
+        departement: departement || null,
+        banque: banque || null,
+        numeroCompte: numeroCompte || null,
+        situationFamiliale: situationFamiliale || null,
+        nombreEnfants: typeof nombreEnfants === 'number' && Number.isFinite(nombreEnfants) ? nombreEnfants : null,
+        categorie: categorie || null,
+        echelon: echelon || null,
+        salHeure: typeof salHeure === 'number' && Number.isFinite(salHeure) ? salHeure : null,
       };
 
       if (password) {

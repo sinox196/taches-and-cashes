@@ -119,6 +119,20 @@ export const UsersManagement: React.FC = () => {
   const [formClientName, setFormClientName] = useState('');
   /** Days already consumed — read-only context so the admin sets the allowance knowingly. */
   const [formCongesUtilises, setFormCongesUtilises] = useState<number>(0);
+  /** Gestion des paies — dossier administratif/paie, purement déclaratif : aucun de ces champs n'entre dans employerHourlyRate() ni dans aucun calcul de pointage. */
+  const [paieCollapsed, setPaieCollapsed] = useState(true);
+  const [formMatricule, setFormMatricule] = useState('');
+  const [formNumCin, setFormNumCin] = useState('');
+  const [formNumCnss, setFormNumCnss] = useState('');
+  const [formQualification, setFormQualification] = useState('');
+  const [formDepartement, setFormDepartement] = useState('');
+  const [formBanque, setFormBanque] = useState('');
+  const [formNumeroCompte, setFormNumeroCompte] = useState('');
+  const [formSituationFamiliale, setFormSituationFamiliale] = useState('');
+  const [formNombreEnfants, setFormNombreEnfants] = useState<number | ''>('');
+  const [formCategorie, setFormCategorie] = useState('');
+  const [formEchelon, setFormEchelon] = useState('');
+  const [formSalHeure, setFormSalHeure] = useState<number | ''>('');
   const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -178,6 +192,19 @@ export const UsersManagement: React.FC = () => {
     setFormBreakMinutes('');
     setFormClientId(null);
     setFormClientName('');
+    setFormMatricule('');
+    setFormNumCin('');
+    setFormNumCnss('');
+    setFormQualification('');
+    setFormDepartement('');
+    setFormBanque('');
+    setFormNumeroCompte('');
+    setFormSituationFamiliale('');
+    setFormNombreEnfants('');
+    setFormCategorie('');
+    setFormEchelon('');
+    setFormSalHeure('');
+    setPaieCollapsed(true);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -203,6 +230,19 @@ export const UsersManagement: React.FC = () => {
     setFormClientId(user.clientId ?? null);
     setFormClientName(user.clientName ?? '');
     setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
+    setFormMatricule(user.matricule ?? '');
+    setFormNumCin(user.numCin ?? '');
+    setFormNumCnss(user.numCnss ?? '');
+    setFormQualification(user.qualification ?? '');
+    setFormDepartement(user.departement ?? '');
+    setFormBanque(user.banque ?? '');
+    setFormNumeroCompte(user.numeroCompte ?? '');
+    setFormSituationFamiliale(user.situationFamiliale ?? '');
+    setFormNombreEnfants(typeof user.nombreEnfants === 'number' ? user.nombreEnfants : '');
+    setFormCategorie(user.categorie ?? '');
+    setFormEchelon(user.echelon ?? '');
+    setFormSalHeure(typeof user.salHeure === 'number' ? user.salHeure : '');
+    setPaieCollapsed(true);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -264,6 +304,18 @@ export const UsersManagement: React.FC = () => {
         shiftEnd: formShiftEnd || null,
         breakMinutes: formBreakMinutes === '' ? null : Number(formBreakMinutes),
         clientId: formRole === CLIENT_ROLE ? formClientId : null,
+        matricule: formMatricule || null,
+        numCin: formNumCin || null,
+        numCnss: formNumCnss || null,
+        qualification: formQualification || null,
+        departement: formDepartement || null,
+        banque: formBanque || null,
+        numeroCompte: formNumeroCompte || null,
+        situationFamiliale: formSituationFamiliale || null,
+        nombreEnfants: formNombreEnfants === '' ? null : Number(formNombreEnfants),
+        categorie: formCategorie || null,
+        echelon: formEchelon || null,
+        salHeure: formSalHeure === '' ? null : Number(formSalHeure),
       };
       if (formPassword) payload.password = formPassword;
       if (!editingUserId) payload.username = formUsername;
@@ -507,7 +559,7 @@ export const UsersManagement: React.FC = () => {
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm">
-          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
               <h2 className="text-[16px] font-bold text-gray-900">
                 {editingUserId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}
@@ -851,6 +903,138 @@ export const UsersManagement: React.FC = () => {
                   <p className="text-[11px] text-gray-500 mt-2">
                     Modifier le solde annuel n'affecte pas les congés déjà pris.
                   </p>
+                </div>
+
+                {/* Dossier administratif de paie — purement déclaratif, ne
+                    nourrit ni employerHourlyRate() ni aucun calcul de
+                    pointage. Repliée par défaut : douze champs de plus
+                    grossiraient le formulaire pour tout le monde alors que
+                    seule la paie en a besoin au quotidien. */}
+                <div className="pt-4 border-t border-gray-200 mt-4">
+                  <div
+                    className="flex items-center gap-1.5 cursor-pointer select-none"
+                    onClick={() => setPaieCollapsed(prev => !prev)}
+                  >
+                    {paieCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
+                    <h3 className="text-[13px] font-bold text-gray-800">Gestion des paies</h3>
+                  </div>
+                  {!paieCollapsed && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Matricule</label>
+                        <input
+                          type="text"
+                          value={formMatricule}
+                          onChange={e => setFormMatricule(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">N° CIN</label>
+                        <input
+                          type="text"
+                          value={formNumCin}
+                          onChange={e => setFormNumCin(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">N° CNSS</label>
+                        <input
+                          type="text"
+                          value={formNumCnss}
+                          onChange={e => setFormNumCnss(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Qualification</label>
+                        <input
+                          type="text"
+                          value={formQualification}
+                          onChange={e => setFormQualification(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Département</label>
+                        <input
+                          type="text"
+                          value={formDepartement}
+                          onChange={e => setFormDepartement(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Banque / Poste</label>
+                        <input
+                          type="text"
+                          value={formBanque}
+                          onChange={e => setFormBanque(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Numéro de compte</label>
+                        <input
+                          type="text"
+                          value={formNumeroCompte}
+                          onChange={e => setFormNumeroCompte(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Situation familiale</label>
+                        <input
+                          type="text"
+                          value={formSituationFamiliale}
+                          onChange={e => setFormSituationFamiliale(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          placeholder="Ex: Marié(e)"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Nombre d'enfants</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={formNombreEnfants}
+                          onChange={e => setFormNombreEnfants(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Catégorie</label>
+                        <input
+                          type="text"
+                          value={formCategorie}
+                          onChange={e => setFormCategorie(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Échelon</label>
+                        <input
+                          type="text"
+                          value={formEchelon}
+                          onChange={e => setFormEchelon(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Salaire / heure (DT)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={formSalHeure}
+                          onChange={e => setFormSalHeure(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 </>
                 )}
