@@ -7,7 +7,6 @@ import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
 import { Reveal } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
-import { Testimonials } from '../components/landing/Testimonials';
 import { ClientLogos } from '../components/landing/ClientLogos';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
 import { SELLABLE_PLANS, formatDT } from '../constants/plans';
@@ -269,7 +268,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           <nav className="hidden min-[1041px]:flex items-center gap-7 min-w-0">
             <button onClick={() => goToAnchor('fonctionnalites')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Fonctionnalités</button>
             <button onClick={() => goToAnchor('modules')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Modules</button>
-            <button onClick={() => goToAnchor('avis')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Avis</button>
             <button onClick={() => goToAnchor('dashboard')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Facturation</button>
             <button onClick={goToTarifs} data-active={view === 'tarifs'} className={`landing-navlink text-[14px] whitespace-nowrap ${view === 'tarifs' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Tarifs</button>
             <a href={`mailto:${CONTACT_EMAIL}`} className="landing-navlink text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
@@ -344,7 +342,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
                 <Reveal delay={150}>
                   <p className="mt-[22px] text-[17px] leading-[1.65] text-[#5B6472]">
-                    Pointage, missions, échéances fiscales, facturation, trésorerie, RH, messagerie et portail client — réunis dans une plateforme qui relie chaque minute travaillée à votre rentabilité réelle.
+                    Suivi du temps, missions, échéances fiscales, facturation, trésorerie, RH, messagerie et portail client — réunis dans une plateforme qui relie chaque minute travaillée à votre rentabilité réelle.
                   </p>
                 </Reveal>
                 <Reveal delay={220}>
@@ -730,8 +728,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               <ModuleExplorer onCta={goToTarifs} />
             </Reveal>
           </section>
-
-          <Testimonials />
         </>
       ) : (
         <>
@@ -849,7 +845,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               </span>
             </button>
             <p className="mt-3.5 text-[12px] font-semibold tracking-[0.06em] text-white/40 uppercase">
-              Time tracking • Invoicing • Growth
+              Suivi du temps • Facturation • Croissance
             </p>
           </div>
           <div className="flex gap-16 flex-wrap">
@@ -858,7 +854,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               <div className="flex flex-col gap-2.5">
                 <button onClick={() => goToAnchor('fonctionnalites')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Fonctionnalités</button>
                 <button onClick={() => goToAnchor('modules')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Modules</button>
-                <button onClick={() => goToAnchor('avis')} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Avis clients</button>
                 <button onClick={goToTarifs} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">Tarifs</button>
               </div>
             </div>

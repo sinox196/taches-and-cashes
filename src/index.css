@@ -142,12 +142,6 @@ a:hover { color: oklch(48% 0.14 250); }
 @keyframes landingBarRise  { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 @keyframes landingDotBeat  { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: .75; } }
 
-/* Les deux rangées d'avis, qui défilent en sens inverse. */
-@keyframes landingMarqueeBack {
-  from { transform: translateX(-50%); }
-  to   { transform: translateX(0); }
-}
-
 /* L'entrée d'un point de la liste, rejouée à chaque changement d'onglet. */
 @keyframes landingItemIn {
   from { opacity: 0; transform: translateX(-10px); }
@@ -157,14 +151,7 @@ a:hover { color: oklch(48% 0.14 250); }
 /* Les barres du graphique de démonstration, qui poussent depuis le bas. */
 @keyframes landingBarGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 
-/* Une carte d'avis qui apparaît. */
-@keyframes landingStarPop {
-  0%   { opacity: 0; transform: scale(0.4) rotate(-25deg); }
-  70%  { opacity: 1; transform: scale(1.18) rotate(4deg); }
-  100% { opacity: 1; transform: scale(1) rotate(0); }
-}
-
-/* Une piste de défilement s'arrête au survol : on lit l'avis qu'on vise. */
+/* Une piste de défilement s'arrête au survol : on lit ce qu'on vise. */
 .landing-marquee:hover .landing-marquee-track { animation-play-state: paused; }
 
 /* Le soulignement animé d'un lien de navigation. */
