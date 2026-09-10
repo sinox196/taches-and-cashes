@@ -234,6 +234,20 @@ const countsAsBilled = (inv: any) =>
   inv.documentKind !== 'AUTRE_NON_FACTURABLE' && inv.status !== 'DRAFT';
 
 /**
+ * `currency` est un texte libre saisi sur le document ; on ne stocke aucun
+ * taux de change, donc mélanger des devises dans une même somme produirait
+ * un chiffre faux et crédible — 1 500 USD compté comme 1 500 TND, par
+ * exemple. Un champ vide vaut TND (c'est la devise par défaut de l'éditeur).
+ * Point unique : la ligne « montant facturé » d'un client (fiche, page
+ * Clients, tableau de bord, portail) ne doit sommer que les documents en
+ * TND, exactement comme le grand-livre du tableau de bord Direction — avant
+ * ce helper partagé, chaque autre écran resommait `totalNetToPay` sans ce
+ * filtre et affichait un total plausible mais faux dès qu'un client avait ne
+ * serait-ce qu'une facture en devise étrangère.
+ */
+const isTnd = (inv: any) => String(inv.currency || 'TND').toUpperCase() === 'TND';
+
+/**
  * Le mois où un document a été **émis**, au format `YYYY-MM` et dans le
  * fuseau du cabinet.
  *
@@ -1423,7 +1437,10 @@ async function startServer() {
     const invoices = await db.getAllInvoices(companyId);
     let montantFacture = 0;
     for (const inv of invoices) {
-      if (!countsAsBilled(inv)) continue;
+      // Seule la TND s'additionne — voir `isTnd()`. Sans ce garde, une seule
+      // facture en devise étrangère faisait grimper le total du client d'un
+      // montant qui n'était ni des dinars ni la bonne devise.
+      if (!countsAsBilled(inv) || !isTnd(inv)) continue;
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       if (key === String(client.id) || key === `name:${client.name}`) {
         montantFacture += num(Number(inv.totalNetToPay), 0);
@@ -1554,7 +1571,11 @@ async function startServer() {
       const allInvoices = await db.getAllInvoices(req.user.companyId);
       const montantFactureByClient = new Map<string, number>();
       for (const inv of allInvoices) {
-        if (!countsAsBilled(inv)) continue;
+        // Seule la TND s'additionne — voir `isTnd()`. Sans ce garde, une
+        // facture en GBP ou en USD gonflait le "Montant de facture" du
+        // client (et la ligne "Total Général") d'un chiffre qui n'était ni
+        // en dinars ni convertible, puisqu'aucun taux n'est stocké.
+        if (!countsAsBilled(inv) || !isTnd(inv)) continue;
         const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
         montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
       }
@@ -2242,8 +2263,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     for (const inv of allInvoices) {
       // "Autre document (non facturable)" is explicitly excluded from the
       // client's running balance and from the billing activity below — it
-      // exists in Cash but isn't billing.
-      if (!countsAsBilled(inv)) continue;
+      // exists in Cash but isn't billing. A foreign-currency document is
+      // excluded the same way `isTnd()` excludes it from the executive
+      // dashboard's own grand-livre — no rate is stored, so mixing it into
+      // this TND figure would just be a wrong number that looks plausible.
+      if (!countsAsBilled(inv) || !isTnd(inv)) continue;
       const k = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       montantFactureByClient.set(k, round3((montantFactureByClient.get(k) || 0) + num(Number(inv.totalNetToPay), 0)));
       const ts = parseIsoDate(inv.issueDate);
@@ -2470,7 +2494,6 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     // que la TND et on compte ce qui a été écarté, plutôt que de convertir à
     // un taux qu'on ne stocke pas (Q-07).
     const isBillable = countsAsBilled;
-    const isTnd = (inv: any) => String(inv.currency || 'TND').toUpperCase() === 'TND';
     const invoiceTs = (inv: any) => (inv.issueDate ? new Date(inv.issueDate).getTime() : 0);
 
     let devisesExclues = 0;
@@ -5496,7 +5519,9 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
       const invoices = await portalInvoicesFor(req.user.companyId, client);
       const encaissements = await portalEncaissementsFor(req.user.companyId, client);
-      const montantFacture = round3(invoices.reduce((s: number, i: any) => s + num(Number(i.totalNetToPay), 0), 0));
+      // Seule la TND s'additionne — voir `isTnd()` — pour rester d'accord avec
+      // la page Clients du back-office, qui applique le même garde.
+      const montantFacture = round3(invoices.filter(isTnd).reduce((s: number, i: any) => s + num(Number(i.totalNetToPay), 0), 0));
       const totalEncaisse = round3(encaissements.reduce((s: number, e: any) => s + num(Number(e.amount), 0), 0));
       const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
 
@@ -5527,7 +5552,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const client = await requirePortalClient(req, res);
       if (!client) return;
 
-      const invoices = await portalInvoicesFor(req.user.companyId, client);
+      // Seule la TND entre dans le relevé — voir `isTnd()`. Le solde qui
+      // court ici doit rester d'accord avec `montantFacture`/`soldeGlobal`
+      // de /api/portal/summary, qui applique déjà ce même garde : mélanger
+      // une facture en devise étrangère dans ce calcul lui aurait fait
+      // annoncer un solde différent de celui du résumé pour le même dossier.
+      const invoices = (await portalInvoicesFor(req.user.companyId, client)).filter(isTnd);
       const encaissements = await portalEncaissementsFor(req.user.companyId, client);
 
       type StatementLine = {
