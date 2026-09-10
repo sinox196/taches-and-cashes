@@ -8,11 +8,14 @@ import type { CompanyBlock } from '../cash/invoicePdf';
  * searchable and sharp at any zoom, and download/print share this one
  * renderer so what is filed and what is printed can never differ.
  *
- * Layout follows the cabinet's own "Modèle de fiche de paie" template
- * (AMIRA DESIGN sample): company header, employee identity grid, a
- * TAUX/GAINS/RETENUES rubriques table, the net-à-payer banner with the
- * amount in words, and the Nb Heures/J.Congés/J.Fériés/J.Absences/Solde
- * Congé footer strip.
+ * **Reproduces the cabinet's own "Modèle de fiche de paie" template
+ * literally**, not a restyled adaptation of it: a bordered Excel-style grid
+ * throughout (the identity block, the rubriques table, the two boxes at the
+ * bottom, the footer stats strip), plain black text and thin black borders
+ * everywhere except the navy "BULLETIN DE PAIE" title — no filled dark
+ * header bars, no colour-coded cards. The model was supplied twice by the
+ * cabinet, byte-identical both times; the point of this file is to match it,
+ * not to bring it into this app's own design language.
  */
 
 const money = (v: number) =>
@@ -20,15 +23,14 @@ const money = (v: number) =>
     .toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
     .replace(/[  ]/g, ' ');
 
-const INK: [number, number, number] = [13, 27, 42];
-const MUTED: [number, number, number] = [102, 112, 133];
-const LINE: [number, number, number] = [200, 205, 214];
-const HEAD: [number, number, number] = INK;
-const HEAD_TEXT: [number, number, number] = [255, 255, 255];
+const INK: [number, number, number] = [0, 0, 0];
+const NAVY: [number, number, number] = [13, 27, 42];
+const BORDER: [number, number, number] = [70, 80, 95];
 
 const M = 14;
 const W = 210;
 const RIGHT = W - M;
+const CONTENT_W = RIGHT - M;
 
 export const MOIS_FR = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -46,161 +48,184 @@ export const payslipDocumentName = (p: any) =>
 
 export function buildPayslipPdf(p: any, block?: CompanyBlock | null): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  let y = M;
 
   const text = (v: string, x: number, yy: number, opts?: any) => doc.text(String(v ?? ''), x, yy, opts);
   const setInk = (c: [number, number, number]) => doc.setTextColor(c[0], c[1], c[2]);
-  const rule = (yy: number, color: [number, number, number] = LINE) => {
-    doc.setDrawColor(color[0], color[1], color[2]);
+  const box = (x: number, y: number, w: number, h: number, fill?: [number, number, number]) => {
+    doc.setDrawColor(BORDER[0], BORDER[1], BORDER[2]);
     doc.setLineWidth(0.2);
-    doc.line(M, yy, RIGHT, yy);
+    if (fill) { doc.setFillColor(fill[0], fill[1], fill[2]); doc.rect(x, y, w, h, 'FD'); }
+    else doc.rect(x, y, w, h);
   };
-
-  // ---- header --------------------------------------------------------
+  // ---- header ----------------------------------------------------------
+  let y = 16;
+  if (block?.company?.name) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); setInk(INK);
+    text(block.company.name, M, y);
+  }
   if (block?.logo) {
     try {
       const fmt = /^data:image\/png/.test(block.logo) ? 'PNG'
         : /^data:image\/webp/.test(block.logo) ? 'WEBP' : 'JPEG';
-      doc.addImage(block.logo, fmt, M, y, 20, 14, undefined, 'FAST');
+      doc.addImage(block.logo, fmt, RIGHT - 22, y - 12, 22, 16, undefined, 'FAST');
     } catch { /* a corrupt data URL must not take the whole document down */ }
   }
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); setInk(INK);
-  text(block?.company?.name || '', M, y + 6);
 
-  doc.setFontSize(18);
-  text('BULLETIN DE PAIE', RIGHT, y + 7, { align: 'right' });
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); setInk(MUTED);
-  text(`Période du ${p.periodeDu || '—'} au ${p.periodeAu || '—'}`, RIGHT, y + 13, { align: 'right' });
+  y += 10;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18); setInk(NAVY);
+  text('BULLETIN DE PAIE', W / 2, y, { align: 'center' });
 
-  y += 20;
-  rule(y);
-  y += 6;
+  y += 9;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK);
+  text(`Période du   ${p.periodeDu || '—'}     Au   ${p.periodeAu || '—'}`, M, y);
+  y += 5;
 
-  // ---- employee identity grid -----------------------------------------
-  const LEFT_LABEL_W = 34;
-  const midX = M + 96;
-  const rowH = 5.4;
-  const idRow = (label: string, value: string, x: number, labelW: number, valueW: number) => {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); setInk(MUTED);
-    text(label, x, y);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK);
-    const lines = doc.splitTextToSize(String(value ?? '—') || '—', valueW) as string[];
-    text(lines[0] || '—', x + labelW, y);
+  // ---- employee identity grid -------------------------------------------
+  // Four columns: label / value / label / value — the same grid the model
+  // itself uses, right down to which rows carry a second label/value pair
+  // and which don't (row 1 and the last row are full-width instead).
+  const C1 = 36, C2 = 58, C3 = 44, C4 = 44; // sums to CONTENT_W (182)
+  const x1 = M, x2 = x1 + C1, x3 = x2 + C2, x4 = x3 + C3;
+  const idRowH = 6.2;
+  const labelStyle = () => { doc.setFont('helvetica', 'bold'); doc.setFontSize(8); setInk(INK); };
+  const valueStyle = () => { doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK); };
+  const cellText = (v: any, x: number, w: number, yy: number, bold = false) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(9); setInk(INK);
+    const s = v === null || v === undefined || v === '' ? '—' : String(v);
+    const lines = doc.splitTextToSize(s, w - 4) as string[];
+    text(lines[0] || '—', x + 2, yy);
   };
 
-  idRow('NOM ET PRÉNOM', p.employeeName, M, LEFT_LABEL_W, midX - M - LEFT_LABEL_W - 2);
-  idRow('SITUATION FAM.', `${p.situationFamiliale || '—'}${p.nombreEnfants != null ? `  ·  ${p.nombreEnfants} enfant(s)` : ''}`, midX, 30, RIGHT - midX - 30);
-  y += rowH;
-  idRow('MATRICULE', p.matricule, M, LEFT_LABEL_W, midX - M - LEFT_LABEL_W - 2);
-  idRow('CATÉGORIE', p.categorie, midX, 30, RIGHT - midX - 30);
-  y += rowH;
-  idRow('N° CIN', p.numCin, M, LEFT_LABEL_W, midX - M - LEFT_LABEL_W - 2);
-  idRow('ÉCHELON', p.echelon, midX, 30, RIGHT - midX - 30);
-  y += rowH;
-  idRow('N° CNSS', p.numCnss, M, LEFT_LABEL_W, midX - M - LEFT_LABEL_W - 2);
-  idRow('SAL HEURE', typeof p.salHeure === 'number' ? money(p.salHeure) : '—', midX, 30, RIGHT - midX - 30);
-  y += rowH;
-  idRow('QUALIFICATION', p.qualification, M, LEFT_LABEL_W, midX - M - LEFT_LABEL_W - 2);
-  idRow('BANQUE / POSTE', p.banque, midX, 30, RIGHT - midX - 30);
-  y += rowH;
-  idRow('DÉPARTEMENT', p.departement, M, LEFT_LABEL_W, midX - M - LEFT_LABEL_W - 2);
-  idRow('COMPTE BANQ/POSTE', p.numeroCompte, midX, 34, RIGHT - midX - 34);
-  y += rowH + 3;
-  rule(y);
-  y += 6;
+  // Row 1 — NOM ET PRENOM, value spans the rest of the row.
+  box(x1, y, C1, idRowH); box(x2, y, C2 + C3 + C4, idRowH);
+  labelStyle(); text('NOM ET PRENOM', x1 + 2, y + 4.2);
+  cellText(p.employeeName, x2, C2 + C3 + C4, y + 4.2);
+  y += idRowH;
 
-  // ---- rubriques table --------------------------------------------------
-  const cols = [
-    { k: 'label', w: 94, a: 'left' },
-    { k: 'taux', w: 24, a: 'right' },
-    { k: 'gains', w: 36, a: 'right' },
-    { k: 'retenues', w: 38, a: 'right' },
-  ] as const;
-  const colLabel: Record<string, string> = { label: 'Rubriques', taux: 'Taux', gains: 'Gains', retenues: 'Retenues' };
-
-  const drawHead = () => {
-    doc.setFillColor(HEAD[0], HEAD[1], HEAD[2]);
-    doc.rect(M, y, RIGHT - M, 6.5, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setInk(HEAD_TEXT);
-    let x = M + 2;
-    for (const c of cols) {
-      text(colLabel[c.k].toUpperCase(), c.a === 'right' ? x + c.w - 4 : x, y + 4.4, c.a === 'right' ? { align: 'right' } : undefined);
-      x += c.w;
-    }
-    y += 6.5;
+  const pairRow = (label1: string, value1: any, label2: string, value2: any) => {
+    box(x1, y, C1, idRowH); box(x2, y, C2, idRowH); box(x3, y, C3, idRowH); box(x4, y, C4, idRowH);
+    labelStyle(); text(label1, x1 + 2, y + 4.2);
+    cellText(value1, x2, C2, y + 4.2);
+    labelStyle(); text(label2, x3 + 2, y + 4.2);
+    cellText(value2, x4, C4, y + 4.2);
+    y += idRowH;
   };
-  drawHead();
+
+  pairRow('MATRICULE', p.matricule, 'SITUATION FAMILIALE',
+    `${p.situationFamiliale || '—'}${p.nombreEnfants != null ? `   NB ENFANT : ${p.nombreEnfants}` : ''}`);
+  pairRow('N° CIN', p.numCin, 'CATEGORIE', p.categorie);
+  pairRow('N° CNSS', p.numCnss, 'ECHELON', p.echelon);
+  pairRow('QUALIFICATION', p.qualification, 'SAL HEURE', typeof p.salHeure === 'number' ? money(p.salHeure) : '—');
+
+  // DÉPARTEMENT — left pair only, like the model; the right half stays blank.
+  box(x1, y, C1, idRowH); box(x2, y, C2, idRowH); box(x3, y, C3 + C4, idRowH);
+  labelStyle(); text('DEPARTEMENT', x1 + 2, y + 4.2);
+  cellText(p.departement, x2, C2, y + 4.2);
+  y += idRowH;
+
+  // BANQUE — the right half is a single merged cell headed "COMPTE BANQ / POSTE",
+  // exactly as the model prints it, rather than a second label/value pair.
+  box(x1, y, C1, idRowH); box(x2, y, C2, idRowH); box(x3, y, C3 + C4, idRowH);
+  labelStyle(); text('BANQUE', x1 + 2, y + 4.2);
+  cellText(p.banque, x2, C2, y + 4.2);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8); setInk(INK);
+  text('COMPTE BANQ / POSTE', x3 + (C3 + C4) / 2, y + 4.2, { align: 'center' });
+  y += idRowH;
+
+  y += 5;
+
+  // ---- rubriques table ---------------------------------------------------
+  const RC1 = 100, RC2 = 27, RC3 = 27, RC4 = 28; // sums to CONTENT_W
+  const rx1 = M, rx2 = rx1 + RC1, rx3 = rx2 + RC2, rx4 = rx3 + RC3;
+  const headH = 7;
+
+  box(rx1, y, RC1, headH); box(rx2, y, RC2, headH); box(rx3, y, RC3, headH); box(rx4, y, RC4, headH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9); setInk(INK);
+  text('RUBRIQUES', rx1 + RC1 / 2, y + 4.6, { align: 'center' });
+  text('TAUX', rx2 + RC2 / 2, y + 4.6, { align: 'center' });
+  text('GAINS', rx3 + RC3 / 2, y + 4.6, { align: 'center' });
+  text('RETENUES', rx4 + RC4 / 2, y + 4.6, { align: 'center' });
+  y += headH;
 
   type Row = { label: string; taux?: string; gains?: number; retenues?: number; bold?: boolean };
   const rows: Row[] = [
-    { label: 'Salaire de base', gains: p.salaireBase },
-    { label: 'Jours fériés', taux: p.joursFeries ? String(p.joursFeries) : '', gains: p.gainsJoursFeries },
-    { label: 'Prime de présence', gains: p.primePresence },
-    { label: 'Prime de transport', gains: p.primeTransport },
-    { label: "Prime d'encouragement", gains: p.primeEncouragement },
-    { label: 'Salaire brut', gains: p.salaireBrut, bold: true },
-    { label: 'CNSS', taux: `${money(p.tauxCnss)} %`, retenues: p.retenueCnss },
-    { label: 'Salaire brut imposable', gains: p.salaireBrutImposable, bold: true },
-    { label: 'Impôt sur le revenu', retenues: p.impotSurLeRevenu },
-    { label: 'Contribution sociale de solidarité', taux: '0,5 %', retenues: p.contributionSocialeSolidarite },
-    { label: 'Salaire net', gains: p.salaireNet, bold: true },
+    // Le TAUX de cette ligne est Nb Heures, purement informatif comme sur le
+    // modèle — le gains lui-même vient de salaireBase (voir computePayslip()
+    // côté serveur), pas d'un calcul heures × taux horaire.
+    { label: 'SALAIRE DE BASE', taux: p.nbHeures ? String(p.nbHeures) : '', gains: p.salaireBase },
+    { label: 'JOURS FÉRIÉS', taux: p.joursFeries ? String(p.joursFeries) : '', gains: p.gainsJoursFeries },
+    { label: 'PRIME DE PRESENCE', gains: p.primePresence },
+    { label: 'PRIME DE TRANSPORT', gains: p.primeTransport },
+    { label: "PRIME D'ENCOURAGEMENT", gains: p.primeEncouragement },
+    { label: 'SALAIRE BRUTE', gains: p.salaireBrut },
+    // Le TAUX de la colonne est un nombre tel quel (« 6.99 », « 0.5 »), pas
+    // un montant en dinars — money() (virgule, 3 décimales) déformait ici un
+    // simple pourcentage en « 6,990 ».
+    { label: 'CNSS %', taux: String(p.tauxCnss ?? ''), retenues: p.retenueCnss },
+    { label: 'SALAIRE BRUTE IMPOSABLE', gains: p.salaireBrutImposable },
+    { label: 'IMPÔT SUR LE REVENU', retenues: p.impotSurLeRevenu },
+    { label: 'CONTRIBUTION SOCIALE DE SOLIDARITÉ', taux: '0.5', retenues: p.contributionSocialeSolidarite },
+    { label: 'SALAIRE NET', gains: p.salaireNet },
   ];
 
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.8);
+  const rowH = 6.3;
   for (const r of rows) {
-    doc.setFillColor(r.bold ? 245 : 255, r.bold ? 247 : 255, r.bold ? 250 : 255);
-    if (r.bold) doc.rect(M, y, RIGHT - M, 6, 'F');
-    doc.setFont('helvetica', r.bold ? 'bold' : 'normal');
-    setInk(INK);
-    let x = M + 2;
-    for (const c of cols) {
-      const raw = c.k === 'label' ? r.label
-        : c.k === 'taux' ? (r.taux ?? '')
-        : c.k === 'gains' ? (typeof r.gains === 'number' ? money(r.gains) : '')
-        : (typeof r.retenues === 'number' ? money(r.retenues) : '');
-      text(raw, c.a === 'right' ? x + c.w - 4 : x, y + 4.2, c.a === 'right' ? { align: 'right' } : undefined);
-      x += c.w;
-    }
-    y += 6;
-    rule(y);
+    box(rx1, y, RC1, rowH); box(rx2, y, RC2, rowH); box(rx3, y, RC3, rowH); box(rx4, y, RC4, rowH);
+    doc.setFont('helvetica', r.bold ? 'bold' : 'normal'); doc.setFontSize(8.5); setInk(INK);
+    text(r.label, rx1 + 2, y + 4.2);
+    if (r.taux) text(r.taux, rx2 + RC2 - 2, y + 4.2, { align: 'right' });
+    if (typeof r.gains === 'number') text(money(r.gains), rx3 + RC3 - 2, y + 4.2, { align: 'right' });
+    if (typeof r.retenues === 'number') text(money(r.retenues), rx4 + RC4 - 2, y + 4.2, { align: 'right' });
+    y += rowH;
   }
 
-  // ---- net à payer banner -------------------------------------------
-  y += 4;
-  doc.setFillColor(INK[0], INK[1], INK[2]);
-  doc.rect(M, y, RIGHT - M, 10, 'F');
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setInk(HEAD_TEXT);
-  text('SALAIRE NET À PAYER', M + 4, y + 6.5);
-  doc.setFontSize(12);
-  text(`${money(p.salaireNetAPayer)} DT`, RIGHT - 4, y + 6.8, { align: 'right' });
-  y += 15;
+  // SALAIRE NET A PAYER — merged final row (label spans RUBRIQUES+TAUX, amount spans GAINS+RETENUES), like the model.
+  box(rx1, y, RC1 + RC2, rowH + 1); box(rx3, y, RC3 + RC4, rowH + 1);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); setInk(INK);
+  text('SALAIRE NET A PAYER', rx1 + (RC1 + RC2) / 2, y + 4.6, { align: 'center' });
+  text(money(p.salaireNetAPayer), rx3 + (RC3 + RC4) / 2, y + 4.6, { align: 'center' });
+  y += rowH + 1 + 6;
 
-  doc.setFont('helvetica', 'italic'); doc.setFontSize(9); setInk(MUTED);
-  const words = doc.splitTextToSize(amountToFrenchWords(p.salaireNetAPayer || 0), RIGHT - M) as string[];
-  for (const line of words) { text(line, M, y); y += 4.6; }
-  y += 4;
+  // ---- Net à payer / Signature & cachet ----------------------------------
+  const NB1 = 120, NB2 = CONTENT_W - 120;
+  const netHeadH = 7, netBodyH = 20;
+  box(M, y, NB1, netHeadH); box(M + NB1, y, NB2, netHeadH + netBodyH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9); setInk(INK);
+  text(`Net à payer : ${money(p.salaireNetAPayer)}`, M + NB1 / 2, y + 4.6, { align: 'center' });
+  text('Signature & cachet', M + NB1 + NB2 / 2, y + 4.6, { align: 'center' });
+  box(M, y + netHeadH, NB1, netBodyH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); setInk(INK);
+  const words = doc.splitTextToSize(amountToFrenchWords(p.salaireNetAPayer || 0), NB1 - 6) as string[];
+  let wy = y + netHeadH + 5;
+  for (const line of words) { text(line, M + 3, wy); wy += 4.4; }
+  y += netHeadH + netBodyH + 6;
 
-  // ---- footer stats strip --------------------------------------------
+  // ---- footer stats strip -------------------------------------------------
   const stats: [string, string][] = [
-    ['Nb Heures', p.nbHeures ? String(p.nbHeures) : '—'],
+    ['Nb Heures', p.nbHeures ? String(p.nbHeures) : '0'],
     ['N Heures', p.nHeures ? String(p.nHeures) : '0'],
     ['J.Congés', p.joursConges ? String(p.joursConges) : '0'],
     ['J.Fériés', p.joursFeries ? String(p.joursFeries) : '0'],
     ['J.Absences', p.joursAbsences ? String(p.joursAbsences) : '0'],
     ['Solde Congé', typeof p.soldeConge === 'number' ? String(p.soldeConge) : '—'],
   ];
-  const cellW = (RIGHT - M) / stats.length;
-  doc.setDrawColor(LINE[0], LINE[1], LINE[2]);
-  doc.rect(M, y, RIGHT - M, 12);
-  for (let i = 1; i < stats.length; i++) doc.line(M + cellW * i, y, M + cellW * i, y + 12);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setInk(MUTED);
-  stats.forEach(([label], i) => text(label, M + cellW * i + cellW / 2, y + 4.5, { align: 'center' }));
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); setInk(INK);
-  stats.forEach(([, value], i) => text(value, M + cellW * i + cellW / 2, y + 9.5, { align: 'center' }));
-  y += 18;
+  const cellW = CONTENT_W / stats.length;
+  const statsHeadH = 6, statsBodyH = 7;
+  stats.forEach(([, ], i) => {
+    box(M + cellW * i, y, cellW, statsHeadH);
+    box(M + cellW * i, y + statsHeadH, cellW, statsBodyH);
+  });
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setInk(INK);
+  stats.forEach(([label], i) => text(label, M + cellW * i + cellW / 2, y + 4, { align: 'center' }));
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(INK);
+  stats.forEach(([, value], i) => text(value, M + cellW * i + cellW / 2, y + statsHeadH + 4.8, { align: 'center' }));
+  y += statsHeadH + statsBodyH + 12;
 
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(7); setInk(MUTED);
-  text("Dans votre intérêt et pour vous aider à faire valoir vos droits, conservez ce bulletin de paie sans limitation de durée.", M, 285);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); setInk(INK);
+  text(
+    "DANS VOTRE INTERET ET POUR VOUS AIDEZ A FAIRE VALOIR VOS DROITS, CONSERVER CE BULLETIN DE PAIE SANS LIMITATION DE DUREE",
+    W / 2, Math.max(y, 280), { align: 'center' },
+  );
 
   return doc;
 }
