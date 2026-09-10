@@ -25,8 +25,12 @@ interface NotificationBellProps {
 }
 
 const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClass: string }> = {
-  TASK_ASSIGNED: { icon: ClipboardCheck, nav: 'Dashboard', iconClass: 'bg-blue-50 text-blue-600' },
-  TASK_REMINDER: { icon: CalendarClock, nav: 'Dashboard', iconClass: 'bg-purple-50 text-purple-600' },
+  // Les tâches assignées/planifiées vivent sous Tâches, dans Pointage
+  // ('Time Tracking') — plus sur le tableau de bord depuis qu'AssignedTasksCard
+  // en a été retiré (voir « Task assignments » dans CLAUDE.md). `TASK_TAB_FOR_TYPE`
+  // ci-dessous pousse en plus le bon sous-onglet une fois sur cette page.
+  TASK_ASSIGNED: { icon: ClipboardCheck, nav: 'Time Tracking', iconClass: 'bg-blue-50 text-blue-600' },
+  TASK_REMINDER: { icon: CalendarClock, nav: 'Time Tracking', iconClass: 'bg-purple-50 text-purple-600' },
   ECHEANCE_REMINDER: { icon: FileClock, nav: 'Ressources', iconClass: 'bg-purple-50 text-purple-600' },
   LEAVE_REQUEST: { icon: CalendarDays, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },
   LEAVE_DECISION: { icon: CalendarDays, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
@@ -43,6 +47,19 @@ const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClas
   PORTAL_INVOICE: { icon: FileText, nav: 'Statement', iconClass: 'bg-blue-50 text-blue-600' },
   PORTAL_DELIVERABLE: { icon: FolderCheck, nav: 'Deliverables', iconClass: 'bg-emerald-50 text-emerald-600' },
   PORTAL_TASK_DONE: { icon: ClipboardCheck, nav: 'Tasks', iconClass: 'bg-emerald-50 text-emerald-600' },
+};
+
+/**
+ * `nav: 'Time Tracking'` above only opens Pointage — it has no sub-tab of its
+ * own, and TaskSubviews.tsx keeps its "Mon chrono"/"Mes tâches planifiées"/
+ * "Tâches déléguées" tab in local state, not in the URL. This is the extra
+ * hint that gets the right one open: TASK_ASSIGNED means someone delegated a
+ * task to you (« Tâches déléguées »), TASK_REMINDER means one you planned for
+ * yourself just came due (« Mes tâches planifiées »).
+ */
+const TASK_TAB_FOR_TYPE: Record<string, string> = {
+  TASK_ASSIGNED: 'assigned',
+  TASK_REMINDER: 'planned',
 };
 
 /**
@@ -317,6 +334,16 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
 
   const openNotification = async (n: any) => {
     setOpen(false);
+    const taskTab = TASK_TAB_FOR_TYPE[n.type];
+    if (taskTab) {
+      // Two paths, because TaskSubviews may or may not be mounted yet:
+      // sessionStorage for "Time Tracking" isn't the current page and is
+      // about to mount fresh (read once by its initial `tab` state, same
+      // idiom App.tsx already uses for a closed-app push's `?nav=`), and the
+      // event for when it's already sitting there open on another tab.
+      sessionStorage.setItem('open_task_subview', taskTab);
+      window.dispatchEvent(new CustomEvent('open-task-subview', { detail: taskTab }));
+    }
     onNavigate(TYPE_META[n.type]?.nav ?? 'Dashboard');
     if (!n.readAt) {
       setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x)));

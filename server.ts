@@ -6640,8 +6640,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * the destination has to travel inside the push payload itself.
    */
   const PUSH_NAV_FOR_TYPE: Record<string, string> = {
-    TASK_ASSIGNED: 'Dashboard',
-    TASK_REMINDER: 'Dashboard',
+    // Les tâches assignées/planifiées vivent sous Tâches, dans Pointage
+    // ('Time Tracking') — plus sur le tableau de bord depuis que
+    // AssignedTasksCard en a été retiré (voir « Task assignments »).
+    TASK_ASSIGNED: 'Time Tracking',
+    TASK_REMINDER: 'Time Tracking',
     ECHEANCE_REMINDER: 'Ressources',
     LEAVE_REQUEST: 'HR',
     LEAVE_DECISION: 'HR',
@@ -6825,8 +6828,8 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
           req.user.companyId,
           targetId,
           'TASK_ASSIGNED',
-          'Nouvelle tâche assignée',
-          `${assignment.assignedByName} vous a assigné « ${assignment.pole}${assignment.taskType ? ' · ' + assignment.taskType : ''} »` +
+          'Nouvelle tâche déléguée',
+          `${assignment.assignedByName} vous a délégué « ${assignment.pole}${assignment.taskType ? ' · ' + assignment.taskType : ''} »` +
             (assignment.client ? ` pour ${assignment.client}` : ''),
         );
       }

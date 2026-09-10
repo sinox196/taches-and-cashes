@@ -1025,7 +1025,7 @@ export default function App() {
           taskTypes={taskTypesList}
           onClose={() => setIsAssignTaskOpen(false)}
           onAssigned={() => {
-            showToast('Tâche assignée.');
+            showToast('Tâche déléguée.');
             // TaskSubviews vit sous la vue Tâches, hors de cette modale montée
             // au niveau de la page — sans cet événement sa liste ne se
             // remettait à jour qu'au prochain montage, donc au rechargement

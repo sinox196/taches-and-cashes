@@ -1,9 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useEscapeToClose } from '../hooks/useEscapeToClose';
-import { X, ChevronDown, Search, Loader, Send } from 'lucide-react';
+import { X, Search, Loader, Send, Check } from 'lucide-react';
 import { SearchableSelect } from './SearchableSelect';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
+
+/** Repliage des accents, comme le sélecteur de participants de GroupModal. */
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 /**
  * An admin hands a mission + type de tâche to a staff member. It shows up
@@ -26,7 +29,11 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
 
   const [staff, setStaff] = useState<any[]>([]);
   const [loadingStaff, setLoadingStaff] = useState(true);
-  const [assignedToUserId, setAssignedToUserId] = useState('');
+  const [staffSearch, setStaffSearch] = useState('');
+  // Plusieurs collaborateurs à la fois : chacun reçoit sa propre assignation,
+  // une par personne, exactement comme si on avait rempli le formulaire N
+  // fois — le suivi (démarrer, statut, progression) reste par assignataire.
+  const [assignedToUserIds, setAssignedToUserIds] = useState<number[]>([]);
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientResults, setClientResults] = useState<any[]>([]);
@@ -98,7 +105,15 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
     ? taskTypes.filter((t) => String(t.serviceId) === String(selectedServiceId))
     : [];
 
-  const canSubmit = !!assignedToUserId && !!selectedServiceId;
+  const matchingStaff = useMemo(() => {
+    const q = fold(staffSearch.trim());
+    return q ? staff.filter((s) => fold(s.name).includes(q)) : staff;
+  }, [staff, staffSearch]);
+
+  const toggleStaff = (id: number) =>
+    setAssignedToUserIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const canSubmit = assignedToUserIds.length > 0 && !!selectedServiceId;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,24 +123,43 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
     try {
       const service = services.find((s) => String(s.id) === selectedServiceId);
       const taskType = taskTypes.find((t) => String(t.id) === selectedTaskTypeId);
-      const res = await fetch('/api/task-assignments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          assignedToUserId: Number(assignedToUserId),
-          client: selectedClient ? selectedClient.name : clientSearch.trim(),
-          clientId: selectedClient ? Number(selectedClient.id) : undefined,
-          pole: service?.name,
-          serviceId: service ? Number(service.id) : undefined,
-          taskType: taskType?.name,
-          taskTypeId: taskType ? Number(taskType.id) : undefined,
-          description: description.trim(),
+      const body = {
+        client: selectedClient ? selectedClient.name : clientSearch.trim(),
+        clientId: selectedClient ? Number(selectedClient.id) : undefined,
+        pole: service?.name,
+        serviceId: service ? Number(service.id) : undefined,
+        taskType: taskType?.name,
+        taskTypeId: taskType ? Number(taskType.id) : undefined,
+        description: description.trim(),
+      };
+      // Une requête par collaborateur sélectionné — même geste que le
+      // formulaire rempli plusieurs fois, en parallèle plutôt qu'un par un,
+      // pour qu'une seule assignation refusée n'empêche pas les autres.
+      const results = await Promise.allSettled(
+        assignedToUserIds.map(async (id) => {
+          const res = await fetch('/api/task-assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ ...body, assignedToUserId: id }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Assignation impossible.');
+          return data;
         }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Assignation impossible.');
-      setDone(true);
-      onAssigned();
+      );
+      const failed = results
+        .map((r, i) => (r.status === 'rejected' ? { id: assignedToUserIds[i], reason: r.reason } : null))
+        .filter((x): x is { id: number; reason: any } => x !== null);
+      const succeeded = results.length - failed.length;
+      if (succeeded > 0) onAssigned();
+      if (failed.length === 0) {
+        setDone(true);
+      } else if (succeeded > 0) {
+        const names = failed.map((f) => staff.find((s) => s.id === f.id)?.name || f.id).join(', ');
+        setError(`Assignée à ${succeeded} collaborateur${succeeded > 1 ? 's' : ''}, échec pour ${names}.`);
+      } else {
+        throw failed[0].reason;
+      }
     } catch (e: any) {
       setError(friendlyError(e));
     } finally {
@@ -148,8 +182,13 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
             <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
               <Send className="w-5 h-5" />
             </div>
-            <p className="text-[13px] font-semibold text-gray-900">Tâche assignée.</p>
-            <p className="text-[12px] text-gray-500 mt-1">Elle apparaît maintenant dans Tâches → « Tâches déléguées » du collaborateur.</p>
+            <p className="text-[13px] font-semibold text-gray-900">
+              Tâche déléguée{assignedToUserIds.length > 1 ? ` à ${assignedToUserIds.length} collaborateurs` : ''}.
+            </p>
+            <p className="text-[12px] text-gray-500 mt-1">
+              Elle apparaît maintenant dans Tâches → « Tâches déléguées »
+              {assignedToUserIds.length > 1 ? ' de chacun' : ' du collaborateur'}.
+            </p>
             <button
               onClick={onClose}
               className="mt-4 px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover"
@@ -160,25 +199,54 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
         ) : (
           <form onSubmit={handleSubmit} className="p-5 space-y-3.5">
             <div>
-              <label className="text-[11px] font-semibold text-gray-400 block mb-1">Collaborateur</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-semibold text-gray-400">Collaborateur(s)</label>
+                {assignedToUserIds.length > 0 && (
+                  <span className="text-[11px] text-gray-400">{assignedToUserIds.length} sélectionné(s)</span>
+                )}
+              </div>
               {loadingStaff ? (
                 <div className="flex items-center gap-2 text-[12px] text-gray-400 py-2">
                   <Loader className="w-3.5 h-3.5 animate-spin" /> Chargement…
                 </div>
               ) : (
-                <div className="relative">
-                  <select
-                    value={assignedToUserId}
-                    onChange={(e) => setAssignedToUserId(e.target.value)}
-                    className="w-full appearance-none bg-white border border-gray-200 rounded-md px-3 py-2 pr-8 text-[13px] font-medium text-gray-800 focus:outline-none focus:border-gray-400"
-                  >
-                    <option value="" disabled>Sélectionner un collaborateur</option>
-                    {staff.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <>
+                  {staff.length > 6 && (
+                    <div className="relative mb-1.5">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        value={staffSearch}
+                        onChange={(e) => setStaffSearch(e.target.value)}
+                        placeholder="Rechercher un collaborateur…"
+                        className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-md text-[12.5px] focus:outline-none focus:border-gray-400"
+                      />
+                    </div>
+                  )}
+                  <div className="border border-gray-200 rounded-md divide-y divide-gray-100 max-h-44 overflow-y-auto">
+                    {matchingStaff.length === 0 ? (
+                      <p className="px-3 py-2.5 text-[12px] text-gray-400 italic">Aucun collaborateur ne correspond.</p>
+                    ) : (
+                      matchingStaff.map((s) => {
+                        const on = assignedToUserIds.includes(s.id);
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => toggleStaff(s.id)}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50"
+                          >
+                            <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                              on ? 'bg-navy border-navy text-white' : 'border-gray-300'
+                            }`}>
+                              {on && <Check className="w-3 h-3" />}
+                            </span>
+                            <span className="text-[13px] text-gray-800 truncate flex-1">{s.name}</span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
               )}
             </div>
 

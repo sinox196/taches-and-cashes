@@ -65,7 +65,17 @@ export const TaskSubviews: React.FC<{
 }> = ({ children, onStarted }) => {
   const { token, user, hasPermission } = useAuth();
   const canDelegate = hasPermission('ASSIGN_TASKS');
-  const [tab, setTab] = useState<Tab>('chrono');
+  // Clicking a "tâche déléguée"/"rappel de tâche planifiée" notification
+  // wants a specific sub-tab open, not just this page — NotificationBell.tsx
+  // stashes it here since Time Tracking carries no sub-tab of its own to read
+  // it from (no router — see App.tsx). Consumed once, same idiom as the
+  // `?nav=` query param a closed-app push leaves for App.tsx's own initial
+  // `activeSidebarItem`.
+  const [tab, setTab] = useState<Tab>(() => {
+    const pending = sessionStorage.getItem('open_task_subview');
+    if (pending) sessionStorage.removeItem('open_task_subview');
+    return pending === 'planned' || pending === 'assigned' || pending === 'delegatedByMe' ? pending : 'chrono';
+  });
   const [items, setItems] = useState<any[]>([]);
   const [delegated, setDelegated] = useState<any[]>([]);
   const [startingId, setStartingId] = useState<string | null>(null);
@@ -102,6 +112,21 @@ export const TaskSubviews: React.FC<{
     window.addEventListener('refresh-task-assignments', load);
     return () => window.removeEventListener('refresh-task-assignments', load);
   }, [load]);
+
+  // Same signal as the `sessionStorage` read above, for when this component
+  // is already mounted (Time Tracking already open) when the notification is
+  // clicked — the initial-state read only fires on mount, so a live update
+  // needs the event too.
+  useEffect(() => {
+    const onOpenTab = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail === 'chrono' || detail === 'planned' || detail === 'assigned' || detail === 'delegatedByMe') {
+        setTab(detail);
+      }
+    };
+    window.addEventListener('open-task-subview', onOpenTab);
+    return () => window.removeEventListener('open-task-subview', onOpenTab);
+  }, []);
 
   const planned = items.filter(a => a.assignedByUserId === user?.id);
   const assigned = items.filter(a => a.assignedByUserId !== user?.id);
@@ -271,7 +296,7 @@ const AssignmentList: React.FC<{
                 )}
                 {/* Qui l'a demandée : évident sur l'onglet « planifiées »
                     (c'est vous), pas sur l'autre. */}
-                {kind === 'assigned' && <span>Assignée par {a.assignedByName}</span>}
+                {kind === 'assigned' && <span>Déléguée par {a.assignedByName}</span>}
               </div>
             </div>
             <div className="shrink-0 flex items-center gap-1.5 self-start">
