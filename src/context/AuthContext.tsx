@@ -44,6 +44,13 @@ export interface User {
   categorie?: string | null;
   echelon?: string | null;
   salHeure?: number | null;
+  /** Paramètres de la paie — Tableau des Déductions Fiscales : chacun devient une déduction du salaire brut imposable dans computePayslip() côté serveur, jamais un calcul côté client. */
+  paieMarie?: boolean;
+  paieEnfantsInfirmes?: number | null;
+  paieEnfantsEtudiants?: number | null;
+  paieParentsACharge?: number | null;
+  paieAssuranceVie?: number | null;
+  paieCEA?: number | null;
   /** Runs the platform itself (confirms other companies' payments) — orthogonal to `role`, which is scoped to this user's own company. */
   isPlatformAdmin?: boolean;
   /** This user's own company — trial status, plan, deadline, secteur. Absent for a pre-migration /api/login response shape. */

@@ -218,12 +218,26 @@ const employerHourlyRate = (user: any, settings: any): number | null => {
  * est ce qui reproduit exactement son propre exemple chiffré (1 jour × 8 h ×
  * 4,783 DT/h = 38,264, la valeur imprimée).
  *
- * **Volontairement non couvert**, faute de donnée saisie sur la fiche
- * utilisateur : parents à charge, assurance vie, compte épargne en actions,
- * enfants handicapés ou étudiants non boursiers — le barème du cahier des
- * charges les prévoit, mais rien dans « Gestion des paies » ne distingue un
- * enfant de ces cas particuliers. Seules Marié(e) et Nombre d'enfants
- * (plafonné à 4, comme le barème) alimentent les déductions communes.
+ * **Les déductions communes couvrent tout le barème du « Tableau des
+ * Déductions Fiscales »** remis par le cabinet — Marié(e), enfants à charge
+ * (plafonné à 4), enfants infirmes (sans plafond), enfants étudiants non
+ * boursiers de moins de 25 ans (plafonné à 4), parents à charge (0 à 2,
+ * 5 % du revenu imposable par parent, plafonné à 450 DT/an chacun),
+ * assurance vie et compte épargne en actions (chacun plafonné à
+ * 100 000 DT/an) — via `deductionsCommunesAnnuelles()`. Chaque paramètre
+ * vit sur la fiche Équipe, section « Paramètres de la paie » (voir
+ * CLAUDE.md), et est figé sur le bulletin à la génération comme le reste de
+ * l'identité de paie.
+ *
+ * **Parents à charge se calcule sur le revenu imposable *avant* déductions
+ * communes**, pas sur `(11)` du cahier des charges à la lettre : la formule
+ * qui y est écrite (`Min((11)*5%, 450)`) référence la base *après* le total
+ * des déductions communes, alors que parents à charge en fait lui-même
+ * partie — une définition circulaire dans le document source. La base
+ * retenue ici (salaire imposable annuel après abattement forfaitaire, avant
+ * toute déduction commune) est ce qui rend le calcul possible sans boucler,
+ * et c'est cohérent avec la logique du barème : une part de l'imposable
+ * *avant* qu'on ne le réduise pour charges de famille.
  */
 const CNSS_TAUX_DEFAUT = 9.68; // %, cahier des charges (modifiable par bulletin)
 const CSS_TAUX = 0.5; // %, flat, cahier des charges (contribution sociale de solidarité, LF 2018)
@@ -258,10 +272,47 @@ const irppAnnuel = (imposable: number): number => {
 
 /** Marié(e) : +300 DT/an. Enfants à charge, plafonnés à 4 : 100/200/300/400 DT/an. */
 const DEDUCTION_ENFANTS: Record<number, number> = { 0: 0, 1: 100, 2: 200, 3: 300, 4: 400 };
-const deductionsCommunesAnnuelles = (situationFamiliale: string | null | undefined, nombreEnfants: number | null | undefined): number => {
-  const marie = /mari/i.test(String(situationFamiliale || ''));
-  const enfants = Math.max(0, Math.min(4, Math.round(Number(nombreEnfants) || 0)));
-  return (marie ? 300 : 0) + DEDUCTION_ENFANTS[enfants];
+const DEDUCTION_ENFANT_INFIRME = 2000; // DT/an, par enfant, sans plafond de nombre
+const DEDUCTION_ENFANT_ETUDIANT = 1000; // DT/an, par enfant, plafonné à 4
+const PARENT_A_CHARGE_TAUX = 5; // %, par parent, plafonné à 450 DT/an chacun
+const PARENT_A_CHARGE_PLAFOND = 450; // DT/an, par parent
+const PLAFOND_ASSURANCE_VIE = 100000; // DT/an
+const PLAFOND_CEA = 100000; // DT/an
+
+/**
+ * Le total des déductions communes annuelles — tout le « Tableau des
+ * Déductions Fiscales » remis par le cabinet, chaque paramètre venant de la
+ * fiche Équipe (« Paramètres de la paie »), figé sur le bulletin à la
+ * génération. `baseAvantDeductionsCommunes` est le revenu imposable annuel
+ * après abattement forfaitaire mais avant toute déduction commune — c'est
+ * sur cette base, non circulaire, que se calcule Parents à charge (voir le
+ * commentaire de `computePayslip()`).
+ */
+const deductionsCommunesAnnuelles = (params: {
+  marie: boolean;
+  nombreEnfants: number | null | undefined;
+  enfantsInfirmes: number | null | undefined;
+  enfantsEtudiants: number | null | undefined;
+  parentsACharge: number | null | undefined;
+  assuranceVie: number | null | undefined;
+  cea: number | null | undefined;
+  baseAvantDeductionsCommunes: number;
+}): number => {
+  const enfants = Math.max(0, Math.min(4, Math.round(Number(params.nombreEnfants) || 0)));
+  const infirmes = Math.max(0, Math.round(Number(params.enfantsInfirmes) || 0));
+  const etudiants = Math.max(0, Math.min(4, Math.round(Number(params.enfantsEtudiants) || 0)));
+  const parents = Math.max(0, Math.min(2, Math.round(Number(params.parentsACharge) || 0)));
+  const assuranceVie = Math.min(Math.max(0, Number(params.assuranceVie) || 0), PLAFOND_ASSURANCE_VIE);
+  const cea = Math.min(Math.max(0, Number(params.cea) || 0), PLAFOND_CEA);
+  const parentDeduction = Math.min(params.baseAvantDeductionsCommunes * (PARENT_A_CHARGE_TAUX / 100), PARENT_A_CHARGE_PLAFOND);
+
+  return (params.marie ? 300 : 0)
+    + DEDUCTION_ENFANTS[enfants]
+    + infirmes * DEDUCTION_ENFANT_INFIRME
+    + etudiants * DEDUCTION_ENFANT_ETUDIANT
+    + parents * parentDeduction
+    + assuranceVie
+    + cea;
 };
 
 /**
@@ -276,8 +327,14 @@ function computePayslip(input: {
   primePresence: number; primeTransport: number; primeEncouragement: number;
   tauxCnss: number;
   nombreMois: number;
-  situationFamiliale: string | null | undefined;
   nombreEnfants: number | null | undefined;
+  // Paramètres de la paie — Tableau des Déductions Fiscales, voir CLAUDE.md.
+  paieMarie: boolean | null | undefined;
+  paieEnfantsInfirmes: number | null | undefined;
+  paieEnfantsEtudiants: number | null | undefined;
+  paieParentsACharge: number | null | undefined;
+  paieAssuranceVie: number | null | undefined;
+  paieCEA: number | null | undefined;
 }) {
   // « Salaire de base » n'est pas dérivé d'heures : c'est le salaire brut
   // mensuel de la fiche Équipe (`user.salaireBrut`), repris tel quel — la
@@ -300,7 +357,17 @@ function computePayslip(input: {
   const nombreMois = num(input.nombreMois, 12) > 0 ? num(input.nombreMois, 12) : 12;
   const imposableAnnuelRef = salaireBrutImposable * nombreMois;
   const abattement = Math.min(imposableAnnuelRef * (ABATTEMENT_TAUX / 100), ABATTEMENT_PLAFOND_ANNUEL);
-  const deductionsCommunes = deductionsCommunesAnnuelles(input.situationFamiliale, input.nombreEnfants);
+  const baseAvantDeductionsCommunes = imposableAnnuelRef - abattement;
+  const deductionsCommunes = deductionsCommunesAnnuelles({
+    marie: !!input.paieMarie,
+    nombreEnfants: input.nombreEnfants,
+    enfantsInfirmes: input.paieEnfantsInfirmes,
+    enfantsEtudiants: input.paieEnfantsEtudiants,
+    parentsACharge: input.paieParentsACharge,
+    assuranceVie: input.paieAssuranceVie,
+    cea: input.paieCEA,
+    baseAvantDeductionsCommunes,
+  });
   const imposableIrppAnnuel = Math.max(0, imposableAnnuelRef - abattement - deductionsCommunes);
   const imposableIrppArrondi = Math.ceil(imposableIrppAnnuel);
 
@@ -1293,6 +1360,13 @@ async function startServer() {
           banque: u.banque ?? null, numeroCompte: u.numeroCompte ?? null,
           situationFamiliale: u.situationFamiliale ?? null, nombreEnfants: u.nombreEnfants ?? null,
           categorie: u.categorie ?? null, echelon: u.echelon ?? null, salHeure: u.salHeure ?? null,
+          // Paramètres de la paie — voir CLAUDE.md « Tableau des Déductions Fiscales ».
+          paieMarie: !!u.paieMarie,
+          paieEnfantsInfirmes: u.paieEnfantsInfirmes ?? null,
+          paieEnfantsEtudiants: u.paieEnfantsEtudiants ?? null,
+          paieParentsACharge: u.paieParentsACharge ?? null,
+          paieAssuranceVie: u.paieAssuranceVie ?? null,
+          paieCEA: u.paieCEA ?? null,
         }))
         .sort((a: any, b: any) => a.username.localeCompare(b.username));
       res.json(rows);
@@ -1327,8 +1401,13 @@ async function startServer() {
       primeEncouragement: num(body.primeEncouragement, 0),
       tauxCnss: typeof body.tauxCnss === 'number' ? body.tauxCnss : CNSS_TAUX_DEFAUT,
       nombreMois,
-      situationFamiliale: employee.situationFamiliale,
       nombreEnfants: employee.nombreEnfants,
+      paieMarie: employee.paieMarie,
+      paieEnfantsInfirmes: employee.paieEnfantsInfirmes,
+      paieEnfantsEtudiants: employee.paieEnfantsEtudiants,
+      paieParentsACharge: employee.paieParentsACharge,
+      paieAssuranceVie: employee.paieAssuranceVie,
+      paieCEA: employee.paieCEA,
     });
     return {
       userId: employee.id,
@@ -1344,6 +1423,15 @@ async function startServer() {
       banque: employee.banque ?? null, numeroCompte: employee.numeroCompte ?? null,
       situationFamiliale: employee.situationFamiliale ?? null, nombreEnfants: employee.nombreEnfants ?? null,
       categorie: employee.categorie ?? null, echelon: employee.echelon ?? null,
+      // Copie figée des paramètres de la paie — c'est ce qui a déterminé les
+      // déductions communes de ce bulletin, gardé pour trace même si la
+      // fiche Équipe change ensuite.
+      paieMarie: !!employee.paieMarie,
+      paieEnfantsInfirmes: employee.paieEnfantsInfirmes ?? null,
+      paieEnfantsEtudiants: employee.paieEnfantsEtudiants ?? null,
+      paieParentsACharge: employee.paieParentsACharge ?? null,
+      paieAssuranceVie: employee.paieAssuranceVie ?? null,
+      paieCEA: employee.paieCEA ?? null,
       salHeure,
       nbHeures: num(body.nbHeures, 0),
       joursFeries: num(body.joursFeries, 0),
@@ -1431,8 +1519,13 @@ async function startServer() {
         primeEncouragement: num(req.body.primeEncouragement, existing.primeEncouragement),
         tauxCnss: typeof req.body.tauxCnss === 'number' ? req.body.tauxCnss : existing.tauxCnss,
         nombreMois: num(req.body.nombreMois, existing.nombreMois),
-        situationFamiliale: existing.situationFamiliale,
         nombreEnfants: existing.nombreEnfants,
+        paieMarie: existing.paieMarie,
+        paieEnfantsInfirmes: existing.paieEnfantsInfirmes,
+        paieEnfantsEtudiants: existing.paieEnfantsEtudiants,
+        paieParentsACharge: existing.paieParentsACharge,
+        paieAssuranceVie: existing.paieAssuranceVie,
+        paieCEA: existing.paieCEA,
       });
 
       const updated = await db.updatePayslip(req.user.companyId, id, {
@@ -1530,7 +1623,7 @@ async function startServer() {
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure } = req.body;
+      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure, paieMarie, paieEnfantsInfirmes, paieEnfantsEtudiants, paieParentsACharge, paieAssuranceVie, paieCEA } = req.body;
 
       const existing = await db.getUserByUsername(username);
       if (existing) {
@@ -1593,6 +1686,15 @@ async function startServer() {
         categorie: categorie || null,
         echelon: echelon || null,
         salHeure: typeof salHeure === 'number' && Number.isFinite(salHeure) ? salHeure : null,
+        // Paramètres de la paie — Tableau des Déductions Fiscales, voir
+        // CLAUDE.md : ce que déclare l'admin ici alimente les déductions
+        // communes de computePayslip(), rien d'autre.
+        paieMarie: !!paieMarie,
+        paieEnfantsInfirmes: typeof paieEnfantsInfirmes === 'number' && Number.isFinite(paieEnfantsInfirmes) ? paieEnfantsInfirmes : null,
+        paieEnfantsEtudiants: typeof paieEnfantsEtudiants === 'number' && Number.isFinite(paieEnfantsEtudiants) ? paieEnfantsEtudiants : null,
+        paieParentsACharge: typeof paieParentsACharge === 'number' && Number.isFinite(paieParentsACharge) ? paieParentsACharge : null,
+        paieAssuranceVie: typeof paieAssuranceVie === 'number' && Number.isFinite(paieAssuranceVie) ? paieAssuranceVie : null,
+        paieCEA: typeof paieCEA === 'number' && Number.isFinite(paieCEA) ? paieCEA : null,
       });
 
       // The admin sets the annual leave allowance from this same form.
@@ -1616,7 +1718,7 @@ async function startServer() {
   app.put('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure } = req.body;
+      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure, paieMarie, paieEnfantsInfirmes, paieEnfantsEtudiants, paieParentsACharge, paieAssuranceVie, paieCEA } = req.body;
 
       // Changer de panier — d'un compte du back-office vers le portail client
       // ou l'inverse — revient à prendre un siège dans l'autre panier. Sans ce
@@ -1674,6 +1776,12 @@ async function startServer() {
         categorie: categorie || null,
         echelon: echelon || null,
         salHeure: typeof salHeure === 'number' && Number.isFinite(salHeure) ? salHeure : null,
+        paieMarie: !!paieMarie,
+        paieEnfantsInfirmes: typeof paieEnfantsInfirmes === 'number' && Number.isFinite(paieEnfantsInfirmes) ? paieEnfantsInfirmes : null,
+        paieEnfantsEtudiants: typeof paieEnfantsEtudiants === 'number' && Number.isFinite(paieEnfantsEtudiants) ? paieEnfantsEtudiants : null,
+        paieParentsACharge: typeof paieParentsACharge === 'number' && Number.isFinite(paieParentsACharge) ? paieParentsACharge : null,
+        paieAssuranceVie: typeof paieAssuranceVie === 'number' && Number.isFinite(paieAssuranceVie) ? paieAssuranceVie : null,
+        paieCEA: typeof paieCEA === 'number' && Number.isFinite(paieCEA) ? paieCEA : null,
       };
 
       if (password) {

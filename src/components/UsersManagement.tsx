@@ -140,6 +140,14 @@ export const UsersManagement: React.FC = () => {
   const [formCategorie, setFormCategorie] = useState('');
   const [formEchelon, setFormEchelon] = useState('');
   const [formSalHeure, setFormSalHeure] = useState<number | ''>('');
+  /** Paramètres de la paie — Tableau des Déductions Fiscales : chaque case cochée / valeur saisie ici devient une déduction du salaire brut imposable, voir computePayslip() côté serveur. */
+  const [paieParamsCollapsed, setPaieParamsCollapsed] = useState(true);
+  const [formPaieMarie, setFormPaieMarie] = useState(false);
+  const [formPaieEnfantsInfirmes, setFormPaieEnfantsInfirmes] = useState<number | ''>('');
+  const [formPaieEnfantsEtudiants, setFormPaieEnfantsEtudiants] = useState<number | ''>('');
+  const [formPaieParentsACharge, setFormPaieParentsACharge] = useState<number | ''>('');
+  const [formPaieAssuranceVie, setFormPaieAssuranceVie] = useState<number | ''>('');
+  const [formPaieCEA, setFormPaieCEA] = useState<number | ''>('');
   const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -212,6 +220,13 @@ export const UsersManagement: React.FC = () => {
     setFormEchelon('');
     setFormSalHeure('');
     setPaieCollapsed(true);
+    setFormPaieMarie(false);
+    setFormPaieEnfantsInfirmes('');
+    setFormPaieEnfantsEtudiants('');
+    setFormPaieParentsACharge('');
+    setFormPaieAssuranceVie('');
+    setFormPaieCEA('');
+    setPaieParamsCollapsed(true);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -250,6 +265,13 @@ export const UsersManagement: React.FC = () => {
     setFormEchelon(user.echelon ?? '');
     setFormSalHeure(typeof user.salHeure === 'number' ? user.salHeure : '');
     setPaieCollapsed(true);
+    setFormPaieMarie(!!user.paieMarie);
+    setFormPaieEnfantsInfirmes(typeof user.paieEnfantsInfirmes === 'number' ? user.paieEnfantsInfirmes : '');
+    setFormPaieEnfantsEtudiants(typeof user.paieEnfantsEtudiants === 'number' ? user.paieEnfantsEtudiants : '');
+    setFormPaieParentsACharge(typeof user.paieParentsACharge === 'number' ? user.paieParentsACharge : '');
+    setFormPaieAssuranceVie(typeof user.paieAssuranceVie === 'number' ? user.paieAssuranceVie : '');
+    setFormPaieCEA(typeof user.paieCEA === 'number' ? user.paieCEA : '');
+    setPaieParamsCollapsed(true);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -323,6 +345,12 @@ export const UsersManagement: React.FC = () => {
         categorie: formCategorie || null,
         echelon: formEchelon || null,
         salHeure: formSalHeure === '' ? null : Number(formSalHeure),
+        paieMarie: formPaieMarie,
+        paieEnfantsInfirmes: formPaieEnfantsInfirmes === '' ? null : Number(formPaieEnfantsInfirmes),
+        paieEnfantsEtudiants: formPaieEnfantsEtudiants === '' ? null : Number(formPaieEnfantsEtudiants),
+        paieParentsACharge: formPaieParentsACharge === '' ? null : Number(formPaieParentsACharge),
+        paieAssuranceVie: formPaieAssuranceVie === '' ? null : Number(formPaieAssuranceVie),
+        paieCEA: formPaieCEA === '' ? null : Number(formPaieCEA),
       };
       if (formPassword) payload.password = formPassword;
       if (!editingUserId) payload.username = formUsername;
@@ -566,7 +594,7 @@ export const UsersManagement: React.FC = () => {
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm">
-          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
               <h2 className="text-[16px] font-bold text-gray-900">
                 {editingUserId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}
@@ -1040,6 +1068,98 @@ export const UsersManagement: React.FC = () => {
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                         />
                       </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tableau des Déductions Fiscales : ce qu'on coche/saisit ici
+                    devient une déduction du salaire brut imposable dans
+                    computePayslip() côté serveur — jamais un calcul côté
+                    client. Repliée par défaut, même raison que Gestion des
+                    paies juste au-dessus : six champs de plus grossiraient
+                    le formulaire pour tout le monde. */}
+                <div className="pt-4 border-t border-gray-200 mt-4">
+                  <div
+                    className="flex items-center gap-1.5 cursor-pointer select-none"
+                    onClick={() => setPaieParamsCollapsed(prev => !prev)}
+                  >
+                    {paieParamsCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
+                    <h3 className="text-[13px] font-bold text-gray-800">Paramètres de la paie</h3>
+                  </div>
+                  {!paieParamsCollapsed && (
+                    <div className="mt-4 space-y-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formPaieMarie}
+                          onChange={e => setFormPaieMarie(e.target.checked)}
+                          className="rounded border-gray-300 text-navy focus:ring-navy"
+                        />
+                        <span className="text-[13px] text-gray-800">Marié(e) <span className="text-gray-500">(déduction 300 DT/an)</span></span>
+                      </label>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                            Enfants infirmes (handicapés)
+                          </label>
+                          <input
+                            type="number" min="0" step="1"
+                            value={formPaieEnfantsInfirmes}
+                            onChange={e => setFormPaieEnfantsInfirmes(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">2 000 DT/an par enfant, sans limite de nombre.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                            Enfants étudiants non boursiers (&lt; 25 ans)
+                          </label>
+                          <input
+                            type="number" min="0" max="4" step="1"
+                            value={formPaieEnfantsEtudiants}
+                            onChange={e => setFormPaieEnfantsEtudiants(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">1 000 DT/an par enfant, plafonné à 4.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">Parents à charge</label>
+                          <select
+                            value={formPaieParentsACharge}
+                            onChange={e => setFormPaieParentsACharge(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
+                          >
+                            <option value="">Aucun</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                          </select>
+                          <p className="text-[10.5px] text-gray-500 mt-1">5 % du revenu imposable par parent, plafonné à 450 DT/an chacun.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">Assurance vie (DT/an)</label>
+                          <input
+                            type="number" min="0" step="0.001"
+                            value={formPaieAssuranceVie}
+                            onChange={e => setFormPaieAssuranceVie(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">Plafonné à 100 000 DT/an.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">Compte épargne en actions (CEA) (DT/an)</label>
+                          <input
+                            type="number" min="0" step="0.001"
+                            value={formPaieCEA}
+                            onChange={e => setFormPaieCEA(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">Plafonné à 100 000 DT/an.</p>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-gray-500">
+                        Le nombre d'enfants à charge ordinaire (100/200/300/400 DT/an) reste dans « Gestion des paies » ci-dessus.
+                      </p>
                     </div>
                   )}
                 </div>
