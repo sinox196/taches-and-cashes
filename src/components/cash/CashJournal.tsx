@@ -377,7 +377,7 @@ export const CashJournal: React.FC = () => {
                             {busyId === 'new' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                           </button>
                           <button title="Annuler" onClick={() => setDraft(null)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
+                            className="p-1.5 rounded-lg text-gray-600 bg-gray-100 border border-gray-300 hover:bg-gray-200"><X className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
@@ -396,7 +396,7 @@ export const CashJournal: React.FC = () => {
                               {busyId === row.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                             </button>
                             <button title="Annuler" onClick={() => { setEditingId(null); setEditDraft(null); }}
-                              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"><X className="w-3.5 h-3.5" /></button>
+                              className="p-1.5 rounded-lg text-gray-600 bg-gray-100 border border-gray-300 hover:bg-gray-200"><X className="w-3.5 h-3.5" /></button>
                           </div>
                         </td>
                       </tr>

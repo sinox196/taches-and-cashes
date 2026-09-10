@@ -369,12 +369,12 @@ export const ClientPayments: React.FC = () => {
                             onClick={async () => { if (await save(draft)) setDraft(null); }}
                             disabled={busyId === 'new'}
                             title="Enregistrer"
-                            className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-50"
+                            className="p-1.5 rounded-lg text-white bg-navy hover:bg-navy-hover disabled:opacity-50"
                           >
                             {busyId === 'new' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                           </button>
                           <button onClick={() => { setDraft(null); setError(''); }} title="Annuler"
-                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded">
+                            className="p-1.5 rounded-lg text-gray-600 bg-gray-100 border border-gray-300 hover:bg-gray-200">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
@@ -392,12 +392,12 @@ export const ClientPayments: React.FC = () => {
                               onClick={async () => { if (await save(editDraft, row.id)) { setEditingId(null); setEditDraft(null); } }}
                               disabled={busyId === row.id}
                               title="Enregistrer"
-                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-50"
+                              className="p-1.5 rounded-lg text-white bg-navy hover:bg-navy-hover disabled:opacity-50"
                             >
                               {busyId === row.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                             </button>
                             <button onClick={() => { setEditingId(null); setEditDraft(null); setError(''); }} title="Annuler"
-                              className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded">
+                              className="p-1.5 rounded-lg text-gray-600 bg-gray-100 border border-gray-300 hover:bg-gray-200">
                               <X className="w-4 h-4" />
                             </button>
                           </div>
@@ -430,7 +430,7 @@ export const ClientPayments: React.FC = () => {
                             {canManage && (
                               <>
                                 <button onClick={() => startEdit(row)} title="Modifier"
-                                  className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded">
+                                  className="p-1.5 rounded-lg text-gray-600 bg-gray-100 border border-gray-300 hover:bg-gray-200">
                                   <Pencil className="w-4 h-4" />
                                 </button>
                                 <button onClick={() => remove(row)} disabled={busyId === row.id} title="Supprimer"
