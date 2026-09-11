@@ -195,8 +195,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <nav className="flex flex-col px-2.5">
           {navGroups.map((group, i) => (
             <div key={group.header} className="flex flex-col gap-px">
-              <div className={`flex items-center gap-1.5 px-3 ${i === 0 ? 'pt-1' : 'pt-4'} pb-1.5 text-[12px] font-extrabold uppercase tracking-wider text-white/70`}>
-                <span className="text-turquoise">•</span> {group.header}
+              <div className={`flex items-center gap-1.5 px-3 ${i === 0 ? 'pt-1' : 'pt-4'} pb-1.5 text-[12px] font-extrabold uppercase tracking-wider text-turquoise`}>
+                <span>•</span> {group.header}
               </div>
               {group.items.map((item) => (
                 <NavButton key={item.id} item={item} isActive={activeItem === item.id} onSelect={() => { onSelectItem?.(item.id); onClose?.(); }} />
