@@ -3,19 +3,30 @@ import { X, Loader2, Pencil, Trash2, Check, XCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { friendlyError } from '../../utils/errors';
-import { ROLES, roleMeta } from '../../constants/roles';
+import { ROLES, roleMeta, CLIENT_ROLE } from '../../constants/roles';
+import { planMeta, formatDT } from '../../constants/plans';
 
 interface PlatformUser {
   id: number;
   username: string;
   role: string;
+  /** Absent sur un compte créé avant ce champ — voir CLAUDE.md « Parrainage »-adjacent notes on legacy shapes. */
+  createdAt?: string;
 }
 
 interface PlatformUsersModalProps {
   companyId: string;
   companyName: string;
+  /** Pour calculer les sièges inclus vs supplémentaires — voir `pricePerExtraUserDT` dans plans.ts. */
+  plan?: string;
   onClose: () => void;
 }
+
+const fmtCreated = (iso?: string) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
 
 /**
  * Cross-tenant user management for the platform admin — edit or delete any
@@ -23,7 +34,7 @@ interface PlatformUsersModalProps {
  * reset). Creating users stays the company's own job, done from its own
  * UsersManagement screen; this is for support/cleanup only.
  */
-export const PlatformUsersModal: React.FC<PlatformUsersModalProps> = ({ companyId, companyName, onClose }) => {
+export const PlatformUsersModal: React.FC<PlatformUsersModalProps> = ({ companyId, companyName, plan, onClose }) => {
   useEscapeToClose(onClose);
   const { token } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
@@ -55,6 +66,24 @@ export const PlatformUsersModal: React.FC<PlatformUsersModalProps> = ({ companyI
   };
 
   useEffect(() => { load(); }, [companyId]);
+
+  // Sièges inclus vs supplémentaires — seules les offres dynamiques
+  // (`pricePerExtraUserDT`) ont ce concept ; les comptes portail (CLIENT) ne
+  // partagent pas ce panier, voir `seatLimitError()` côté serveur. L'ordre de
+  // création décide qui est « inclus » : les premiers comptes créés couvrent
+  // `baseSeats`, tout ce qui vient après est le siège payant en plus dont
+  // `POST /api/users` avertit par mail.
+  const meta = planMeta(plan);
+  const baseSeats = meta?.baseSeats ?? 1;
+  const seatUsers = users.filter(u => u.role !== CLIENT_ROLE);
+  const extraIds = meta?.pricePerExtraUserDT
+    ? new Set(
+        [...seatUsers]
+          .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+          .slice(baseSeats)
+          .map(u => u.id),
+      )
+    : new Set<number>();
 
   const startEdit = (u: PlatformUser) => {
     setEditingId(u.id);
@@ -121,6 +150,14 @@ export const PlatformUsersModal: React.FC<PlatformUsersModalProps> = ({ companyI
         </div>
 
         <div className="px-6 py-4 overflow-y-auto space-y-2">
+          {!isLoading && !!meta?.pricePerExtraUserDT && (
+            <p className="text-[11.5px] text-gray-500 -mt-1 mb-1">
+              {seatUsers.length} utilisateur{seatUsers.length > 1 ? 's' : ''} — {Math.min(seatUsers.length, baseSeats)} inclus dans l'offre
+              {extraIds.size > 0 && (
+                <> , <strong className="text-amber-700">{extraIds.size} en supplément</strong> (+{formatDT(meta.pricePerExtraUserDT)}/mois chacun)</>
+              )}
+            </p>
+          )}
           {error && (
             <div className="bg-red-50 border-l-4 border-red-500 p-3 rounded-md">
               <p className="text-[12.5px] text-red-700 font-medium">{error}</p>
@@ -182,9 +219,19 @@ export const PlatformUsersModal: React.FC<PlatformUsersModalProps> = ({ companyI
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-[13.5px] font-semibold text-gray-800">{u.username}</div>
-                      <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${roleMeta(u.role).badgeClass}`}>
-                        {roleMeta(u.role).label}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${roleMeta(u.role).badgeClass}`}>
+                          {roleMeta(u.role).label}
+                        </span>
+                        {extraIds.has(u.id) && (
+                          <span className="inline-block px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-amber-50 text-amber-700">
+                            Siège supplémentaire
+                          </span>
+                        )}
+                        <span className="text-[11px] text-gray-400">
+                          {fmtCreated(u.createdAt) ? `Créé le ${fmtCreated(u.createdAt)}` : 'Date de création inconnue'}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button

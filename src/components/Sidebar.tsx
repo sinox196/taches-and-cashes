@@ -17,7 +17,7 @@ import {
   Gift
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { planAllowsModule, type PlanModule } from '../constants/plans';
+import { planAllowsModule, planModules, type PlanModule } from '../constants/plans';
 import { useLanguage } from '../context/LanguageContext';
 
 interface SidebarProps {
@@ -144,6 +144,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }))
     .filter(group => group.items.length > 0);
 
+  /**
+   * Une offre restreinte (RH & Paie, Facturation) ne vend que deux ou trois
+   * vues au total, réparties sur deux ou trois groupes qui n'en gardent
+   * chacun qu'une poignée après le filtre ci-dessus — « Pilotage &
+   * Production », « Finance & RH », « Outils & Collaboration » finissent par
+   * chapeauter une ou deux entrées, ce qui lit comme une hiérarchie que
+   * l'offre ne justifie pas. `planModules` renvoyant `null` pour une offre
+   * généraliste (Freelancer, Complet, toute offre retirée) : les en-têtes ne
+   * s'effacent que pour une offre qui vend explicitement un sous-ensemble de
+   * vues, pas par identifiant de pack en dur — une future offre restreinte
+   * hérite du même comportement sans y toucher.
+   */
+  const showGroupHeaders = planModules(user?.company?.plan) === null;
+
   // Orthogonal to any company-scoped permission: runs the platform itself
   // (confirms other companies' payments), not this user's own company. Kept
   // outside the three groups above — a platform-admin link isn't a question
@@ -200,13 +214,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             question: Pilotage & Production (piloter le travail), Finance &
             RH (l'argent et l'équipe), Outils & Collaboration (le reste). A
             group with no visible items (its own header included) simply
-            doesn't render — see `navGroups`'s filter above. */}
+            doesn't render — see `navGroups`'s filter above. A restricted
+            plan (RH & Paie, Facturation) hides the header text entirely —
+            see `showGroupHeaders` above — and keeps only the top-padding
+            rhythm between groups, so a lone item or two doesn't sit under a
+            heading the offer doesn't earn. */}
         <nav className="flex flex-col px-2.5">
           {navGroups.map((group, i) => (
-            <div key={group.header} className="flex flex-col gap-px">
-              <div className={`flex items-center gap-1.5 px-3 ${i === 0 ? 'pt-1' : 'pt-4'} pb-1.5 text-[12px] font-extrabold uppercase tracking-wider text-turquoise`}>
-                <span>•</span> {group.header}
-              </div>
+            <div key={group.header} className={`flex flex-col gap-px ${i === 0 ? 'pt-1' : 'pt-4'}`}>
+              {showGroupHeaders && (
+                <div className="flex items-center gap-1.5 px-3 pb-1.5 text-[12px] font-extrabold uppercase tracking-wider text-turquoise">
+                  <span>•</span> {group.header}
+                </div>
+              )}
               {group.items.map((item) => (
                 <NavButton key={item.id} item={item} isActive={activeItem === item.id} onSelect={() => { onSelectItem?.(item.id); onClose?.(); }} />
               ))}

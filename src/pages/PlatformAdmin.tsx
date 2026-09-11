@@ -566,6 +566,7 @@ export const PlatformAdmin: React.FC = () => {
         <PlatformUsersModal
           companyId={usersCompany.id}
           companyName={usersCompany.name}
+          plan={usersCompany.plan}
           onClose={() => setUsersCompany(null)}
         />
       )}

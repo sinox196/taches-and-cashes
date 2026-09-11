@@ -1802,6 +1802,11 @@ async function startServer() {
         password: hashed,
         role,
         permissions: JSON.stringify(permissions || []),
+        // Horodatage de création — jusqu'ici absent des comptes, il n'y avait
+        // donc aucun moyen de dire depuis la console plateforme quand un
+        // utilisateur avait été ajouté. Un compte antérieur à ce champ reste
+        // simplement sans date, comme toute forme héritée dans cette app.
+        createdAt: new Date().toISOString(),
         salaireBrut,
         regimeHoraire,
         cnss,
@@ -1856,6 +1861,37 @@ async function startServer() {
         const linkedClient = await db.getClientById(req.user.companyId, newUser.clientId);
         (puNew as any).clientName = linkedClient?.name || null;
       }
+
+      // Un utilisateur du back-office au-delà de `baseSeats` est un siège
+      // payant en plus du prix de base — seules les trois offres dynamiques
+      // (RH & Paie, Facturation, Complet) ont ce concept, via
+      // `pricePerExtraUserDT` ; Freelancer (un seul siège) et les offres
+      // retirées n'en ont aucun. Best-effort et jamais bloquant, même idiome
+      // que les autres notifications internes de cette route (inscription,
+      // RIB, confirmation) : un mail qui échoue ne doit jamais faire échouer
+      // une création de compte déjà aboutie.
+      if (role !== CLIENT_ROLE) {
+        const planMetaForSeat = planMeta(company?.plan);
+        if (planMetaForSeat?.pricePerExtraUserDT) {
+          const baseSeats = planMetaForSeat.baseSeats ?? 1;
+          const seatUsers = (await db.getAllUsers(req.user.companyId)).filter((u: any) => u.role !== CLIENT_ROLE);
+          if (seatUsers.length > baseSeats) {
+            sendMail({
+              to: 'contact@taches-and-cash.com',
+              subject: `Utilisateur supplémentaire — ${company?.name || ''}`,
+              html: `
+                <p><strong>Entreprise :</strong> ${escapeHtml(company?.name || '')}</p>
+                <p><strong>Contact :</strong> ${escapeHtml(company?.contactName || '')} — ${escapeHtml(company?.contactEmail || '')}</p>
+                <p><strong>Offre :</strong> ${escapeHtml(planLabel(company?.plan))} (${baseSeats} utilisateur${baseSeats > 1 ? 's' : ''} inclus, +${planMetaForSeat.pricePerExtraUserDT} DT/mois par utilisateur supplémentaire)</p>
+                <p><strong>Nouvel utilisateur :</strong> ${escapeHtml(username)}</p>
+                <p><strong>Date de création :</strong> ${formatDateFR(new Date())}</p>
+                <p><strong>Total utilisateurs back-office :</strong> ${seatUsers.length} (${seatUsers.length - baseSeats} au-delà de l'inclus)</p>
+              `,
+            }).catch(() => {});
+          }
+        }
+      }
+
       res.json(puNew);
     } catch (error) {
       console.error(error);
