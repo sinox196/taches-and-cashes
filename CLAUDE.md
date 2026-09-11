@@ -379,9 +379,9 @@ Facturation, Complet — chacune ouvrant un périmètre différent :
   RH et Gestion des paies, rien d'autre.
 - **Facturation** (`FACTURATION`) — même tarif, `modules: ['Clients', 'Cash',
   'Users']` — Équipe, Clients et Cash.
-- **Complet** (`COMPLET`) — 50 DT/mois pour 1 utilisateur, +10 DT par
-  utilisateur supplémentaire, `modules` absent (toutes les vues). Offre par
-  défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
+- **Complet** (`COMPLET`) — 50 DT/mois pour **5 utilisateurs inclus**, +10 DT
+  par utilisateur supplémentaire, `modules` absent (toutes les vues). Offre
+  par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
 
 **Pack 5/10/15 et l'ancien pack Facturation à 30 DT (un siège) ont été
 supprimés du catalogue purement et simplement**, pas seulement retirés
@@ -396,11 +396,14 @@ suit toujours le chemin `legacy: true` — voir `FREELANCE`/`EQUIPE`/
 
 **Le tarif par utilisateur supplémentaire est le cœur du nouveau catalogue.**
 `PlanMeta.pricePerExtraUserDT` (10 DT pour les trois offres non-Freelancer) et
-`PlanMeta.baseSeats` (1 pour les trois) définissent une offre **dynamique** —
-`planPriceForSeats(meta, seats)` dans plans.ts en est l'unique
-implémentation : `priceDT` tel quel si `pricePerExtraUserDT` est absent
-(Freelancer, ou une offre retirée), sinon `priceDT + (seats − baseSeats) ×
-pricePerExtraUserDT`. **Une seule fonction, appelée aux quatre endroits qui
+`PlanMeta.baseSeats` définissent une offre **dynamique** — 1 pour RH & Paie et
+Facturation, mais **5 pour Complet** : ses 50 DT couvrent d'emblée cinq
+comptes, pas un seul. `planPriceForSeats(meta, seats)` dans plans.ts n'a rien
+à savoir de cette différence — elle lit `baseSeats` par offre — et en est
+l'unique implémentation : `priceDT` tel quel si `pricePerExtraUserDT` est
+absent (Freelancer, ou une offre retirée), sinon `priceDT + (seats −
+baseSeats) × pricePerExtraUserDT`. **Une seule fonction, appelée aux quatre
+endroits qui
 doivent absolument s'accorder** — le calculateur de la page Tarifs, l'aperçu
 de prix dans la modale d'inscription, le mail de RIB
 (`POST /api/platform/companies/:id/send-rib`) et la confirmation de paiement
@@ -409,7 +412,8 @@ client et un montant encaissé finiraient tôt ou tard par diverger, exactement
 le piège que `computeInvoiceTotals()` évite déjà côté facturation.
 
 **`PlanMeta.seatLimit` sur une offre dynamique n'est qu'un repli
-d'affichage** (égal à `baseSeats`, donc 1) — **jamais** le nombre réellement
+d'affichage** (égal à `baseSeats` — 1 pour RH & Paie/Facturation, 5 pour
+Complet) — **jamais** le nombre réellement
 accordé à une entreprise. Ce nombre-là vit sur la fiche
 (`company.seatLimit`), posé au nombre demandé à l'inscription
 (`POST /api/signup`, champ `seats` du corps de la requête, borné par

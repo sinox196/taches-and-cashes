@@ -216,6 +216,12 @@ export const PLANS: PlanMeta[] = [
    * Le cabinet au complet — `modules` absent, donc toutes les vues, comme
    * Freelancer mais à plusieurs comptes. C'est le pack généraliste, offre
    * par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
+   * `baseSeats: 5` : les 50 DT couvrent d'emblée cinq utilisateurs, pas un
+   * seul — à la différence de RH & Paie et Facturation, qui partent d'un
+   * seul siège. Un sixième coûte le même +10 DT/utilisateur que les deux
+   * autres offres dynamiques ; `planPriceForSeats()` n'a rien à savoir de
+   * cette différence, elle lit `baseSeats` comme pour n'importe quelle
+   * offre.
    */
   {
     id: 'COMPLET',
@@ -223,8 +229,8 @@ export const PLANS: PlanMeta[] = [
     tagline: 'Le cabinet au complet, tous les modules',
     priceDT: 50,
     pricePerExtraUserDT: 10,
-    baseSeats: 1,
-    seatLimit: 1,
+    baseSeats: 5,
+    seatLimit: 5,
     portalSeatLimit: 0,
     features: CORE_FEATURES,
   },
