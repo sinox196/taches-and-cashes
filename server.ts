@@ -6819,6 +6819,38 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    */
   const ENTRIES_PAGE_SIZE = 200;
 
+  /**
+   * Nombre maximal de tâches en pause épinglées en plus de la page normale —
+   * un garde-fou anti-abus, pas une vraie limite : rien n'empêche un compte
+   * de laisser des centaines de tâches en pause indéfiniment sans jamais les
+   * reprendre ni les arrêter, et sans cette borne la page cesserait d'être
+   * bornée (la règle même que ce plafond de page existe pour faire
+   * respecter). Les tâches en cours ne sont volontairement pas plafonnées
+   * ici : au plus une par utilisateur (`pauseOtherRunningEntries()`), donc
+   * déjà bornées par l'effectif de l'entreprise.
+   */
+  const PINNED_PAUSED_CAP = 100;
+
+  /**
+   * Épingle les tâches en cours et en pause en tête de la page, même si elles
+   * sont plus anciennes que ce que `page` couvrirait normalement — sans quoi
+   * une tâche mise en pause puis oubliée devient inatteignable depuis
+   * Pointage (ni « Charger plus » ni l'export ne peuvent la retrouver) dès
+   * que l'équipe crée assez de nouvelles tâches pour la faire sortir de la
+   * fenêtre chargée. La date de la tâche n'est jamais touchée — seul l'ordre
+   * de cette réponse change. `all` doit déjà être triée du plus récent au
+   * plus ancien (l'invariant existant de `createTimeEntry`, prepend).
+   */
+  const withPinnedActiveEntries = (all: any[], page: any[]) => {
+    const pageIds = new Set(page.map((e: any) => e.id));
+    const running = all.filter((e: any) => e.statut === 'RUNNING' && !pageIds.has(e.id));
+    const paused = all
+      .filter((e: any) => e.statut === 'PAUSED' && !pageIds.has(e.id))
+      .slice(0, PINNED_PAUSED_CAP);
+    if (running.length === 0 && paused.length === 0) return page;
+    return [...running, ...paused, ...page];
+  };
+
   const doBroadcast = async () => {
     // Grouped by company so each company's data is fetched and its frames
     // built once — not once per subscriber, and never sent across a tenant
@@ -6836,7 +6868,8 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         const key = client.isAdmin ? 'admin' : 'plain';
         if (!cache[key]) {
           const visible = visibleEntriesFor(raw, client.isAdmin, adminIds);
-          const data = await enrichEntries(companyId, visible.slice(0, ENTRIES_PAGE_SIZE), client.isAdmin);
+          const page = withPinnedActiveEntries(visible, visible.slice(0, ENTRIES_PAGE_SIZE));
+          const data = await enrichEntries(companyId, page, client.isAdmin);
           cache[key] = `data: ${JSON.stringify({ data, total: visible.length })}\n\n`;
         }
         client.res.write(cache[key]);
@@ -6903,7 +6936,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const all = visibleEntriesFor(await db.getAllTimeEntries(req.user.companyId), isAdmin, await adminUserIds(req.user.companyId));
       const limit = Math.min(parseInt(req.query.limit, 10) || ENTRIES_PAGE_SIZE, 1000);
       const offset = parseInt(req.query.offset, 10) || 0;
-      const data = await enrichEntries(req.user.companyId, all.slice(offset, offset + limit), isAdmin);
+      const page = all.slice(offset, offset + limit);
+      // L'épinglage ne joue que sur la toute première page : une lecture qui
+      // parcourt déjà tout l'historique par tranches successives (l'export
+      // « toute la période », par exemple) retombe sur ces mêmes tâches à
+      // leur position naturelle — les épingler aussi là doublonnerait sans
+      // rien apporter, l'appelant dédoublonne déjà par id au besoin.
+      const withPinned = offset === 0 ? withPinnedActiveEntries(all, page) : page;
+      const data = await enrichEntries(req.user.companyId, withPinned, isAdmin);
       res.json({ data, total: all.length, limit, offset });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

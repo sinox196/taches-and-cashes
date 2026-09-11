@@ -46,7 +46,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   totalEntries,
   onLoadMore,
 }) => {
-  const { hasPermission, user } = useAuth();
+  const { hasPermission, user, token } = useAuth();
   const { presenceOf } = usePresence();
   const isAdmin = user?.role === 'ADMIN';
   const [collapsedMonths, setCollapsedMonths] = useState<Record<string, boolean>>({});
@@ -82,8 +82,12 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
     return day && month && year ? `${year}-${month}-${day}` : '';
   };
 
-  // Filter entries based on search & status
-  const filteredEntries = entries.filter((item) => {
+  /**
+   * Le même prédicat sert au filtrage de ce qui est déjà chargé et, plus bas,
+   * à l'export « toute la période » — une seule définition, pour que le
+   * fichier exporté ne puisse jamais s'écarter de ce que l'écran filtre.
+   */
+  const matchesFilters = (item: TimeEntry) => {
     const matchesStatus =
       statusFilter === 'ALL' ? true : item.statut === statusFilter;
 
@@ -96,7 +100,54 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
     const matchesDateTo = !dateTo || (!!dateKey && dateKey <= dateTo);
 
     return matchesStatus && matchesClient && matchesPole && matchesCollab && matchesDateFrom && matchesDateTo;
-  });
+  };
+
+  // Filter entries based on search & status
+  const filteredEntries = entries.filter(matchesFilters);
+
+  /**
+   * Pour « Exporter » — `entries` ne porte que ce qui est chargé à l'écran
+   * (200 par défaut, jusqu'à 1000 via « Charger plus »), donc un export basé
+   * dessus subirait la même troncature. La route plafonne `limit` à 1000 par
+   * appel (server.ts), donc on boucle par tranches de 1000 jusqu'à avoir tout
+   * ce que `total` annonce — même raisonnement que `fetchAllFilteredInvoices`
+   * dans CashManagement.tsx — puis on applique les mêmes filtres que l'écran
+   * sur l'ensemble complet, pas seulement sur la page chargée. Le filtre Du/Au
+   * n'est donc plus borné par ce qui est déjà chargé : n'importe quelle
+   * période s'exporte en entier, même au-delà de 1000 tâches au total.
+   */
+  const fetchAllFilteredEntries = async (): Promise<TimeEntry[]> => {
+    const CHUNK = 1000;
+    let offset = 0;
+    let all: TimeEntry[] = [];
+    // Bornée par le total annoncé par le premier appel, pour ne jamais
+    // boucler indéfiniment si la réponse venait à changer entre deux appels.
+    let total = Infinity;
+    while (offset < total) {
+      const res = await fetch(`/api/time-entries?limit=${CHUNK}&offset=${offset}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) break;
+      const body = await res.json();
+      const chunk = body.data ?? [];
+      if (chunk.length === 0) break;
+      all = all.concat(chunk);
+      total = typeof body.total === 'number' ? body.total : all.length;
+      offset += CHUNK;
+    }
+    // A tâche en cours/en pause épinglée en tête de la première page (voir
+    // server.ts) peut aussi apparaître à sa position naturelle dans une page
+    // suivante — dédoublonnée ici par id plutôt que d'exclure l'épinglage du
+    // calcul de pagination, ce qui serait plus fragile.
+    const seen = new Set<string | number>();
+    const deduped: TimeEntry[] = [];
+    for (const e of all) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id);
+      deduped.push(e);
+    }
+    return deduped.filter(matchesFilters);
+  };
 
   /** Libellés de statut, partagés par l'affichage et l'export. */
   const STATUT_LABEL: Record<string, string> = {
@@ -223,6 +274,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
           <ExportButton
             fileName="pointage"
             rows={filteredEntries}
+            fetchAllRows={fetchAllFilteredEntries}
             columns={[
               { header: 'Collaborateur', value: (e: TimeEntry) => e.userName || '' },
               { header: 'Date', value: (e: TimeEntry) => e.date },
