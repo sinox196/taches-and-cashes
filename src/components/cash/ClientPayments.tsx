@@ -354,6 +354,23 @@ export const ClientPayments: React.FC = () => {
                 <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Montant</th>
                 <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-center">Actions</th>
               </tr>
+              {/* Dans l'en-tête, pas en pied de tableau — même emplacement que
+                  le Total général du Brouillard de caisse juste à côté : le
+                  total se lit d'un coup d'œil en arrivant sur l'onglet plutôt
+                  qu'après avoir fait défiler toute la liste, et les deux
+                  sous-vues Cash partagent maintenant le même format. */}
+              {!isLoading && filtered.length > 0 && (
+                <tr className="bg-emerald-50 border-b-2 border-emerald-200 text-[12px] font-bold text-emerald-900">
+                  <td colSpan={6} className="px-3 py-2.5">
+                    Total des règlements
+                    <span className="ml-2 font-medium text-emerald-700">
+                      (dont {money(totals.caisse)} en caisse)
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono text-emerald-900">{money(totals.all)}</td>
+                  <td />
+                </tr>
+              )}
             </thead>
             <tbody className="text-[12px] divide-y divide-gray-100">
               {isLoading ? (
@@ -448,20 +465,6 @@ export const ClientPayments: React.FC = () => {
                 </>
               )}
             </tbody>
-            {!isLoading && filtered.length > 0 && (
-              <tfoot className="sticky bottom-0">
-                <tr className="bg-[#F9FAFB] border-t border-gray-200 text-[12px] font-bold text-gray-900">
-                  <td colSpan={6} className="px-3 py-2.5">
-                    Total des règlements
-                    <span className="ml-2 font-medium text-gray-500">
-                      (dont {money(totals.caisse)} en caisse)
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono">{money(totals.all)}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
           </table>
 
           {/* Outside the table, not a colSpan row: the columns are nowrap and

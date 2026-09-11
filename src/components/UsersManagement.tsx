@@ -61,6 +61,13 @@ const PERMISSIONS_GROUPED = [
     ]
   },
   {
+    group: 'Gestion des paies',
+    permissions: [
+      { id: 'VIEW_PAYROLL', label: 'Voir les bulletins', desc: 'Peut consulter et imprimer les bulletins de paie' },
+      { id: 'MANAGE_PAYROLL', label: 'Générer les bulletins', desc: 'Peut générer, modifier et supprimer les bulletins de paie' },
+    ]
+  },
+  {
     group: 'Administration',
     permissions: [
       { id: 'MANAGE_USERS', label: 'Gérer les utilisateurs', desc: 'Accès administrateur complet' },
@@ -75,7 +82,15 @@ export const UsersManagement: React.FC = () => {
   // écrit contre le siège plutôt que l'id de l'offre pour couvrir toute
   // future offre à un seul compte de la même façon. Le bouton ne fait
   // qu'anticiper le refus déjà posé par seatLimitError() côté serveur.
-  const singleSeatPlan = (planMeta(user?.company?.plan)?.seatLimit ?? Infinity) <= 1;
+  //
+  // Résolu fiche d'abord (`user.company.seatLimit`, le nombre réellement
+  // accordé), offre ensuite (`planMeta(...).seatLimit`) — même ordre que
+  // `seatLimitError()` côté serveur. Une offre dynamique (RH & Paie,
+  // Facturation, Complet) porte toujours `seatLimit: 1` au catalogue, qui
+  // n'est qu'un repli d'affichage ; s'arrêter à lui masquerait « Nouvel
+  // utilisateur »/« Exporter » pour une entreprise ayant réellement acheté
+  // plusieurs sièges sur l'une de ces offres.
+  const singleSeatPlan = (user?.company?.seatLimit ?? planMeta(user?.company?.plan)?.seatLimit ?? Infinity) <= 1;
   const { presenceOf } = usePresence();
   const { t } = useLanguage();
   const [users, setUsers] = useState<User[]>([]);
@@ -119,6 +134,31 @@ export const UsersManagement: React.FC = () => {
   const [formClientName, setFormClientName] = useState('');
   /** Days already consumed — read-only context so the admin sets the allowance knowingly. */
   const [formCongesUtilises, setFormCongesUtilises] = useState<number>(0);
+  /** Gestion des paies — dossier administratif/paie, purement déclaratif : aucun de ces champs n'entre dans employerHourlyRate() ni dans aucun calcul de pointage. */
+  const [paieCollapsed, setPaieCollapsed] = useState(true);
+  const [formMatricule, setFormMatricule] = useState('');
+  const [formNumCin, setFormNumCin] = useState('');
+  const [formNumCnss, setFormNumCnss] = useState('');
+  const [formQualification, setFormQualification] = useState('');
+  const [formDepartement, setFormDepartement] = useState('');
+  const [formBanque, setFormBanque] = useState('');
+  const [formNumeroCompte, setFormNumeroCompte] = useState('');
+  const [formSituationFamiliale, setFormSituationFamiliale] = useState('');
+  const [formNombreEnfants, setFormNombreEnfants] = useState<number | ''>('');
+  const [formCategorie, setFormCategorie] = useState('');
+  const [formEchelon, setFormEchelon] = useState('');
+  const [formSalHeure, setFormSalHeure] = useState<number | ''>('');
+  /** Paramètres de la paie — Tableau des Déductions Fiscales : chaque valeur
+   * saisie ici devient une déduction du salaire brut imposable, voir
+   * computePayslip() côté serveur. Marié(e) n'a pas de champ ici : il se lit
+   * sur « Situation familiale » ci-dessus (Gestion des paies), pour ne pas
+   * dupliquer la même information à deux endroits du formulaire. */
+  const [paieParamsCollapsed, setPaieParamsCollapsed] = useState(true);
+  const [formPaieEnfantsInfirmes, setFormPaieEnfantsInfirmes] = useState<number | ''>('');
+  const [formPaieEnfantsEtudiants, setFormPaieEnfantsEtudiants] = useState<number | ''>('');
+  const [formPaieParentsACharge, setFormPaieParentsACharge] = useState<number | ''>('');
+  const [formPaieAssuranceVie, setFormPaieAssuranceVie] = useState<number | ''>('');
+  const [formPaieCEA, setFormPaieCEA] = useState<number | ''>('');
   const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -178,6 +218,25 @@ export const UsersManagement: React.FC = () => {
     setFormBreakMinutes('');
     setFormClientId(null);
     setFormClientName('');
+    setFormMatricule('');
+    setFormNumCin('');
+    setFormNumCnss('');
+    setFormQualification('');
+    setFormDepartement('');
+    setFormBanque('');
+    setFormNumeroCompte('');
+    setFormSituationFamiliale('');
+    setFormNombreEnfants('');
+    setFormCategorie('');
+    setFormEchelon('');
+    setFormSalHeure('');
+    setPaieCollapsed(true);
+    setFormPaieEnfantsInfirmes('');
+    setFormPaieEnfantsEtudiants('');
+    setFormPaieParentsACharge('');
+    setFormPaieAssuranceVie('');
+    setFormPaieCEA('');
+    setPaieParamsCollapsed(true);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -203,6 +262,25 @@ export const UsersManagement: React.FC = () => {
     setFormClientId(user.clientId ?? null);
     setFormClientName(user.clientName ?? '');
     setFormBreakMinutes(typeof user.breakMinutes === 'number' ? user.breakMinutes : '');
+    setFormMatricule(user.matricule ?? '');
+    setFormNumCin(user.numCin ?? '');
+    setFormNumCnss(user.numCnss ?? '');
+    setFormQualification(user.qualification ?? '');
+    setFormDepartement(user.departement ?? '');
+    setFormBanque(user.banque ?? '');
+    setFormNumeroCompte(user.numeroCompte ?? '');
+    setFormSituationFamiliale(user.situationFamiliale ?? '');
+    setFormNombreEnfants(typeof user.nombreEnfants === 'number' ? user.nombreEnfants : '');
+    setFormCategorie(user.categorie ?? '');
+    setFormEchelon(user.echelon ?? '');
+    setFormSalHeure(typeof user.salHeure === 'number' ? user.salHeure : '');
+    setPaieCollapsed(true);
+    setFormPaieEnfantsInfirmes(typeof user.paieEnfantsInfirmes === 'number' ? user.paieEnfantsInfirmes : '');
+    setFormPaieEnfantsEtudiants(typeof user.paieEnfantsEtudiants === 'number' ? user.paieEnfantsEtudiants : '');
+    setFormPaieParentsACharge(typeof user.paieParentsACharge === 'number' ? user.paieParentsACharge : '');
+    setFormPaieAssuranceVie(typeof user.paieAssuranceVie === 'number' ? user.paieAssuranceVie : '');
+    setFormPaieCEA(typeof user.paieCEA === 'number' ? user.paieCEA : '');
+    setPaieParamsCollapsed(true);
     setFormError('');
     setIsModalOpen(true);
   };
@@ -264,6 +342,23 @@ export const UsersManagement: React.FC = () => {
         shiftEnd: formShiftEnd || null,
         breakMinutes: formBreakMinutes === '' ? null : Number(formBreakMinutes),
         clientId: formRole === CLIENT_ROLE ? formClientId : null,
+        matricule: formMatricule || null,
+        numCin: formNumCin || null,
+        numCnss: formNumCnss || null,
+        qualification: formQualification || null,
+        departement: formDepartement || null,
+        banque: formBanque || null,
+        numeroCompte: formNumeroCompte || null,
+        situationFamiliale: formSituationFamiliale || null,
+        nombreEnfants: formNombreEnfants === '' ? null : Number(formNombreEnfants),
+        categorie: formCategorie || null,
+        echelon: formEchelon || null,
+        salHeure: formSalHeure === '' ? null : Number(formSalHeure),
+        paieEnfantsInfirmes: formPaieEnfantsInfirmes === '' ? null : Number(formPaieEnfantsInfirmes),
+        paieEnfantsEtudiants: formPaieEnfantsEtudiants === '' ? null : Number(formPaieEnfantsEtudiants),
+        paieParentsACharge: formPaieParentsACharge === '' ? null : Number(formPaieParentsACharge),
+        paieAssuranceVie: formPaieAssuranceVie === '' ? null : Number(formPaieAssuranceVie),
+        paieCEA: formPaieCEA === '' ? null : Number(formPaieCEA),
       };
       if (formPassword) payload.password = formPassword;
       if (!editingUserId) payload.username = formUsername;
@@ -370,7 +465,6 @@ export const UsersManagement: React.FC = () => {
           rows={visibleUsers}
           columns={teamTab === 'clients' ? [
             { header: 'Utilisateur', value: (u: any) => u.username },
-            { header: 'Dossier client', value: (u: any) => u.clientName ?? '' },
           ] : [
             { header: 'Utilisateur', value: (u: any) => u.username },
             { header: 'Rôle', value: (u: any) => roleMeta(u.role).label },
@@ -444,9 +538,11 @@ export const UsersManagement: React.FC = () => {
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   Statut
                 </th>
-                <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  {teamTab === 'clients' ? 'Dossier client' : 'Rôle'}
-                </th>
+                {teamTab !== 'clients' && (
+                  <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    Rôle
+                  </th>
+                )}
                 <th className="px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right">
                   Actions
                 </th>
@@ -462,16 +558,14 @@ export const UsersManagement: React.FC = () => {
                     {(() => { const p = presenceOf(user.id);
                       return <PresenceBadge state={p.state} idleMs={p.idleMs} onLeaveUntil={p.onLeaveUntil} />; })()}
                   </td>
-                  <td className="px-5 py-3">
-                    {teamTab === 'clients' ? (
-                      <span className="text-[13px] text-gray-700">{user.clientName || '—'}</span>
-                    ) : (
+                  {teamTab !== 'clients' && (
+                    <td className="px-5 py-3">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${roleMeta(user.role).badgeClass}`}>
                         {roleMeta(user.role).hasShield && <Shield className="w-3 h-3" />}
                         {roleMeta(user.role).label}
                       </span>
-                    )}
-                  </td>
+                    </td>
+                  )}
                   <td className="px-5 py-3 text-right">
                     <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <button
@@ -508,7 +602,7 @@ export const UsersManagement: React.FC = () => {
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm">
-          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
               <h2 className="text-[16px] font-bold text-gray-900">
                 {editingUserId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur'}
@@ -526,55 +620,63 @@ export const UsersManagement: React.FC = () => {
               )}
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Nom d'utilisateur</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!!editingUserId}
-                    value={formUsername}
-                    onChange={e => setFormUsername(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
-                    placeholder="Ex: jean.dupont"
-                  />
-                </div>
+                {(() => {
+                  const usernameField = (
+                    <div key="username">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Nom d'utilisateur</label>
+                      <input
+                        type="text"
+                        required
+                        disabled={!!editingUserId}
+                        value={formUsername}
+                        onChange={e => setFormUsername(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
+                        placeholder="Ex: jean.dupont"
+                      />
+                    </div>
+                  );
 
-                <div>
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">
-                    Mot de passe {editingUserId && <span className="text-gray-400 font-normal">(laisser vide pour ne pas changer)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-1p-ignore
-                    data-form-type="other"
-                    required={!editingUserId}
-                    value={formPassword}
-                    onChange={e => setFormPassword(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
-                    placeholder="••••••••"
-                  />
-                </div>
+                  const passwordField = (
+                    <div key="password">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                        Mot de passe {editingUserId && <span className="text-gray-400 font-normal">(laisser vide pour ne pas changer)</span>}
+                      </label>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-1p-ignore
+                        data-form-type="other"
+                        required={!editingUserId}
+                        value={formPassword}
+                        onChange={e => setFormPassword(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                  );
 
-                <div className="pt-4 border-t border-gray-200 mt-4">
-                  <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
-                  <select
-                    value={formRole}
-                    onChange={e => setFormRole(e.target.value as Role)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
-                  >
-                    {ROLES.map(r => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
-                    ))}
-                  </select>
+                  const roleField = (
+                    <div key="role" className="pt-4 border-t border-gray-200 mt-4">
+                      <label className="block text-[12px] font-semibold text-gray-700 mb-1">Rôle</label>
+                      <select
+                        value={formRole}
+                        onChange={e => setFormRole(e.target.value as Role)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
+                      >
+                        {ROLES.map(r => (
+                          <option key={r.id} value={r.id}>{r.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
 
-                  {/* Un compte client n'a de sens que rattaché à un dossier :
-                      sans lui le portail n'a rien à montrer et le dit. Le
-                      choix passe par la recherche serveur, jamais par une
-                      liste complète — il y a des centaines de clients. */}
-                  {formRole === CLIENT_ROLE && (
-                    <div className="mt-3">
+                  // Un compte client n'a de sens que rattaché à un dossier :
+                  // sans lui le portail n'a rien à montrer et le dit. Le
+                  // choix passe par la recherche serveur, jamais par une
+                  // liste complète — il y a des centaines de clients.
+                  const dossierField = (
+                    <div key="dossier">
                       <label className="block text-[12px] font-semibold text-gray-700 mb-1">Dossier client rattaché</label>
                       {formClientId && !formClientName ? (
                         <div className="flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-lg text-[13px] bg-gray-50">
@@ -607,8 +709,19 @@ export const UsersManagement: React.FC = () => {
                         Ce compte ne verra que ce dossier. Plusieurs comptes peuvent viser le même client (gérant, comptable…).
                       </p>
                     </div>
-                  )}
-                </div>
+                  );
+
+                  // Pour un compte client, choisir le dossier remplit le nom
+                  // d'utilisateur juste en dessous (voir ClientSearchInput
+                  // ci-dessus) — le champ qui en alimente un autre doit donc
+                  // précéder celui qu'il remplit, pas le suivre. Le Rôle,
+                  // déjà posé sur Client par « Nouveau compte client », passe
+                  // en dernier : rien au-dessus de lui n'a plus besoin d'être
+                  // révélé par un choix qui est déjà fait.
+                  return formRole === CLIENT_ROLE
+                    ? <>{dossierField}{usernameField}{passwordField}{roleField}</>
+                    : <>{usernameField}{passwordField}{roleField}</>;
+                })()}
 
                 {/* Salaire, shift et congés n'ont aucun sens pour un client :
                     il n'est pas employé du cabinet. */}
@@ -833,6 +946,223 @@ export const UsersManagement: React.FC = () => {
                   <p className="text-[11px] text-gray-500 mt-2">
                     Modifier le solde annuel n'affecte pas les congés déjà pris.
                   </p>
+                </div>
+
+                {/* Dossier administratif de paie — purement déclaratif, ne
+                    nourrit ni employerHourlyRate() ni aucun calcul de
+                    pointage. Repliée par défaut : douze champs de plus
+                    grossiraient le formulaire pour tout le monde alors que
+                    seule la paie en a besoin au quotidien. */}
+                <div className="pt-4 border-t border-gray-200 mt-4">
+                  <div
+                    className="flex items-center gap-1.5 cursor-pointer select-none"
+                    onClick={() => setPaieCollapsed(prev => !prev)}
+                  >
+                    {paieCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
+                    <h3 className="text-[13px] font-bold text-gray-800">Gestion des paies</h3>
+                  </div>
+                  {!paieCollapsed && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Matricule</label>
+                        <input
+                          type="text"
+                          value={formMatricule}
+                          onChange={e => setFormMatricule(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">N° CIN</label>
+                        <input
+                          type="text"
+                          value={formNumCin}
+                          onChange={e => setFormNumCin(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">N° CNSS</label>
+                        <input
+                          type="text"
+                          value={formNumCnss}
+                          onChange={e => setFormNumCnss(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Qualification</label>
+                        <input
+                          type="text"
+                          value={formQualification}
+                          onChange={e => setFormQualification(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Département</label>
+                        <input
+                          type="text"
+                          value={formDepartement}
+                          onChange={e => setFormDepartement(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Banque / Poste</label>
+                        <input
+                          type="text"
+                          value={formBanque}
+                          onChange={e => setFormBanque(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Numéro de compte</label>
+                        <input
+                          type="text"
+                          value={formNumeroCompte}
+                          onChange={e => setFormNumeroCompte(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Situation familiale</label>
+                        <input
+                          type="text"
+                          value={formSituationFamiliale}
+                          onChange={e => setFormSituationFamiliale(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          placeholder="Ex: Marié(e)"
+                        />
+                        <p className="text-[10.5px] text-gray-500 mt-1">Sert aussi à la déduction « Marié(e) » (300 DT/an) dans « Paramètres de la paie » ci-dessous, dès qu'elle contient « Marié(e) ».</p>
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Catégorie</label>
+                        <input
+                          type="text"
+                          value={formCategorie}
+                          onChange={e => setFormCategorie(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Échelon</label>
+                        <input
+                          type="text"
+                          value={formEchelon}
+                          onChange={e => setFormEchelon(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-semibold text-gray-700 mb-1">Salaire / heure (DT)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={formSalHeure}
+                          onChange={e => setFormSalHeure(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tableau des Déductions Fiscales : ce qu'on coche/saisit ici
+                    devient une déduction du salaire brut imposable dans
+                    computePayslip() côté serveur — jamais un calcul côté
+                    client. Repliée par défaut, même raison que Gestion des
+                    paies juste au-dessus : six champs de plus grossiraient
+                    le formulaire pour tout le monde. */}
+                <div className="pt-4 border-t border-gray-200 mt-4">
+                  <div
+                    className="flex items-center gap-1.5 cursor-pointer select-none"
+                    onClick={() => setPaieParamsCollapsed(prev => !prev)}
+                  >
+                    {paieParamsCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
+                    <h3 className="text-[13px] font-bold text-gray-800">Paramètres de la paie</h3>
+                  </div>
+                  {!paieParamsCollapsed && (
+                    <div className="mt-4 space-y-4">
+                      <p className="text-[11px] text-gray-500">
+                        Marié(e) (déduction 300 DT/an) se déduit de « Situation familiale », dans « Gestion des paies » ci-dessus — pas de case à part ici, pour ne pas saisir la même information deux fois.
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                            Nombre d'enfants à charge
+                          </label>
+                          <input
+                            type="number" min="0" max="4" step="1"
+                            value={formNombreEnfants}
+                            onChange={e => setFormNombreEnfants(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">100/200/300/400 DT/an selon le nombre (1 à 4), plafonné à 4.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                            Enfants infirmes (handicapés)
+                          </label>
+                          <input
+                            type="number" min="0" step="1"
+                            value={formPaieEnfantsInfirmes}
+                            onChange={e => setFormPaieEnfantsInfirmes(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">2 000 DT/an par enfant, sans limite de nombre.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">
+                            Enfants étudiants non boursiers (&lt; 25 ans)
+                          </label>
+                          <input
+                            type="number" min="0" max="4" step="1"
+                            value={formPaieEnfantsEtudiants}
+                            onChange={e => setFormPaieEnfantsEtudiants(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">1 000 DT/an par enfant, plafonné à 4.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">Parents à charge</label>
+                          <select
+                            value={formPaieParentsACharge}
+                            onChange={e => setFormPaieParentsACharge(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy"
+                          >
+                            <option value="">Aucun</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                          </select>
+                          <p className="text-[10.5px] text-gray-500 mt-1">5 % du revenu imposable par parent, plafonné à 450 DT/an chacun.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">Assurance vie (DT/an)</label>
+                          <input
+                            type="number" min="0" step="0.001"
+                            value={formPaieAssuranceVie}
+                            onChange={e => setFormPaieAssuranceVie(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">Plafonné à 100 000 DT/an.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-gray-700 mb-1">Compte épargne en actions (CEA) (DT/an)</label>
+                          <input
+                            type="number" min="0" step="0.001"
+                            value={formPaieCEA}
+                            onChange={e => setFormPaieCEA(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                          />
+                          <p className="text-[10.5px] text-gray-500 mt-1">Plafonné à 100 000 DT/an.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 </>
                 )}

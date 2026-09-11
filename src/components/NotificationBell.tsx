@@ -63,6 +63,25 @@ const TASK_TAB_FOR_TYPE: Record<string, string> = {
 };
 
 /**
+ * Same idea as `TASK_TAB_FOR_TYPE`, for RH's six tabs: `nav: 'HR'` above only
+ * opens the RH page, whose active tab (`HRManagement.tsx`) is local state
+ * defaulting to « Congés » — so a notification about an autorisation
+ * d'absence landed on « Congés » instead of « Autorisations d'absence », the
+ * reported bug. Each request/decision type points at the tab that actually
+ * shows it.
+ */
+const HR_TAB_FOR_TYPE: Record<string, string> = {
+  LEAVE_REQUEST: 'leaves',
+  LEAVE_DECISION: 'leaves',
+  ABSENCE_REQUEST: 'absences',
+  ABSENCE_DECISION: 'absences',
+  LOAN_REQUEST: 'loans',
+  LOAN_DECISION: 'loans',
+  ADVANCE_REQUEST: 'advances',
+  ADVANCE_DECISION: 'advances',
+};
+
+/**
  * Which status colour the in-app toast wears.
  *
  * The two *_DECISION types deliberately map to a neutral `info`: the server
@@ -364,6 +383,12 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
       // event for when it's already sitting there open on another tab.
       sessionStorage.setItem('open_task_subview', taskTab);
       window.dispatchEvent(new CustomEvent('open-task-subview', { detail: taskTab }));
+    }
+    const hrTab = HR_TAB_FOR_TYPE[n.type];
+    if (hrTab) {
+      // Same two-path idiom, for HRManagement.tsx's own local `activeTab`.
+      sessionStorage.setItem('open_hr_subview', hrTab);
+      window.dispatchEvent(new CustomEvent('open-hr-subview', { detail: hrTab }));
     }
     onNavigate(TYPE_META[n.type]?.nav ?? 'Dashboard');
     if (!n.readAt) {

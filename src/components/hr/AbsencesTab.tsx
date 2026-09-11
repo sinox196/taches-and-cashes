@@ -225,15 +225,15 @@ export const AbsencesTab: React.FC = () => {
 
       <div className="overflow-auto flex-1 min-h-0 sm:min-h-[260px] border border-gray-200 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50 sticky top-0">
+          <thead className="bg-rose-50 sticky top-0">
             <tr>
-              {hasPermission('MANAGE_ABSENCE_AUTHORIZATIONS') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employé</th>}
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Responsable</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Horaire</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Motif</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Statut</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              {hasPermission('MANAGE_ABSENCE_AUTHORIZATIONS') && <th className="px-6 py-3 text-left text-xs font-medium text-rose-700 uppercase tracking-wider">Employé</th>}
+              <th className="px-6 py-3 text-left text-xs font-medium text-rose-700 uppercase tracking-wider">Responsable</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-rose-700 uppercase tracking-wider">Date</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-rose-700 uppercase tracking-wider">Horaire</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-rose-700 uppercase tracking-wider">Motif</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-rose-700 uppercase tracking-wider">Statut</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-rose-700 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">

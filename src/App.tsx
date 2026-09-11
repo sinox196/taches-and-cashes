@@ -21,6 +21,7 @@ import { planAllowsModule, planModules, type PlanModule } from './constants/plan
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
 import { ResourcesManagement } from './components/resources/ResourcesManagement';
+import { PayrollManagement } from './components/payroll/PayrollManagement';
 import { useEscapeToClose } from './hooks/useEscapeToClose';
 import { closeLingeringTimerNotification } from './utils/osNotifications';
 import { useAuth } from './context/AuthContext';
@@ -61,7 +62,7 @@ export default function App() {
 
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Parrainage', 'Plateforme'];
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Payroll', 'Users', 'Parrainage', 'Plateforme'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     // Clicking a pushed notification with no tab open makes the service
     // worker open the app at `/?nav=<section>` — there's no router to read a
@@ -888,6 +889,8 @@ export default function App() {
           <CashManagement />
         ) : activeNav === 'HR' && hasPermission('VIEW_HR') ? (
           <HRManagement />
+        ) : activeNav === 'Payroll' && hasPermission('VIEW_PAYROLL') ? (
+          <PayrollManagement />
         ) : activeNav === 'Time Tracking' ? (
           <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col sm:min-h-0 space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
             

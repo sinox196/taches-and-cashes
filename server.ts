@@ -13,6 +13,7 @@ import {
   PLAN_SEAT_LIMITS, PLAN_PORTAL_SEAT_LIMITS, SELLABLE_PLANS, isSellablePlan, DEFAULT_PLAN_ID,
   planMeta, planLabel, formatDT, REFERRAL_DISCOUNT_PERCENT, discountedPriceDT,
   planAllowsPermission, documentQuotaFor, planAllowsModule, planModules, type PlanModule,
+  planPriceForSeats, clampSeatsForPlan,
 } from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
@@ -194,6 +195,218 @@ const employerHourlyRate = (user: any, settings: any): number | null => {
   return heuresMensuelles > 0 ? total / heuresMensuelles : null;
 };
 
+/**
+ * Gestion des paies — le moteur de calcul du bulletin, reproduisant tel quel
+ * le cahier des charges Excel remis par le cabinet (barème IRPP, CNSS
+ * salariale, CSS LF2018, abattement forfaitaire, déductions communes). Une
+ * seule implémentation : `POST /api/payslips/preview` et
+ * `POST`/`PUT /api/payslips` l'appellent tous, pour qu'un bulletin
+ * enregistré ne puisse jamais afficher un chiffre que l'aperçu n'avait pas
+ * déjà montré — même principe que `computeInvoiceTotals()`.
+ *
+ * Le barème IRPP est annuel et progressif — chaque tranche ne taxe que la
+ * part du revenu qui lui appartient. Le calcul a besoin d'une base annuelle
+ * stable pour que la retenue à la source ne varie pas d'un mois à l'autre au
+ * gré des primes ; cette base est le salaire brut *de ce bulletin* multiplié
+ * par `nombreMois` (12 par défaut, saisi par l'admin à la génération) — pas
+ * un salaire annuel réel qu'on ne demande pas de saisir. C'est ce que
+ * `nombreMois` représente : sur combien de mois annualiser ce bulletin pour
+ * la progressivité de l'impôt, pas une durée de contrat.
+ *
+ * **« Jours fériés » se chiffre à 8 h/jour au taux horaire** (`salHeure` ×
+ * `HEURES_PAR_JOUR`) — une hypothèse, pas une valeur du cahier des charges :
+ * le document modèle remis ne donne aucune formule pour cette ligne, et 8 h
+ * est ce qui reproduit exactement son propre exemple chiffré (1 jour × 8 h ×
+ * 4,783 DT/h = 38,264, la valeur imprimée).
+ *
+ * **Les déductions communes couvrent tout le barème du « Tableau des
+ * Déductions Fiscales »** remis par le cabinet — Marié(e), enfants à charge
+ * (plafonné à 4), enfants infirmes (sans plafond), enfants étudiants non
+ * boursiers de moins de 25 ans (plafonné à 4), parents à charge (0 à 2,
+ * 5 % du revenu imposable par parent, plafonné à 450 DT/an chacun),
+ * assurance vie et compte épargne en actions (chacun plafonné à
+ * 100 000 DT/an) — via `deductionsCommunesAnnuelles()`. Chaque paramètre
+ * vit sur la fiche Équipe, section « Paramètres de la paie » (voir
+ * CLAUDE.md), et est figé sur le bulletin à la génération comme le reste de
+ * l'identité de paie.
+ *
+ * **Marié(e) n'est pas une case à cocher séparée** : elle se lit sur
+ * `situationFamiliale`, le champ texte libre déjà présent dans « Gestion des
+ * paies » (ex. « Marié(e) »), repéré par une correspondance insensible à la
+ * casse sur « mari… ». Un second champ dédié aurait dupliqué exactement la
+ * même information à deux endroits du même formulaire, avec le risque
+ * qu'ils finissent par se contredire (situation familiale dit « Marié(e) »,
+ * la case dit non-coché). Une seule source, lue à deux fins (le dossier
+ * administratif *et* la déduction fiscale).
+ *
+ * **Parents à charge se calcule sur le revenu imposable *avant* déductions
+ * communes**, pas sur `(11)` du cahier des charges à la lettre : la formule
+ * qui y est écrite (`Min((11)*5%, 450)`) référence la base *après* le total
+ * des déductions communes, alors que parents à charge en fait lui-même
+ * partie — une définition circulaire dans le document source. La base
+ * retenue ici (salaire imposable annuel après abattement forfaitaire, avant
+ * toute déduction commune) est ce qui rend le calcul possible sans boucler,
+ * et c'est cohérent avec la logique du barème : une part de l'imposable
+ * *avant* qu'on ne le réduise pour charges de famille.
+ */
+const CNSS_TAUX_DEFAUT = 9.68; // %, cahier des charges (modifiable par bulletin)
+const CSS_TAUX = 0.5; // %, flat, cahier des charges (contribution sociale de solidarité, LF 2018)
+const ABATTEMENT_TAUX = 10; // %, abattement forfaitaire pour frais professionnels
+const ABATTEMENT_PLAFOND_ANNUEL = 2000; // DT/an
+const HEURES_PAR_JOUR = 8; // pour chiffrer un jour férié payé à partir du taux horaire
+
+/** Barème IRPP annuel (tranches, taux) — cahier des charges Excel. */
+const IRPP_BRACKETS: { upTo: number; rate: number }[] = [
+  { upTo: 5000, rate: 0 },
+  { upTo: 10000, rate: 0.15 },
+  { upTo: 20000, rate: 0.25 },
+  { upTo: 30000, rate: 0.30 },
+  { upTo: 40000, rate: 0.33 },
+  { upTo: 50000, rate: 0.36 },
+  { upTo: 70000, rate: 0.38 },
+  { upTo: Infinity, rate: 0.40 },
+];
+
+/** Impôt annuel progressif : chaque tranche ne taxe que la part qui lui appartient. */
+const irppAnnuel = (imposable: number): number => {
+  if (imposable <= 0) return 0;
+  let total = 0;
+  let lower = 0;
+  for (const { upTo, rate } of IRPP_BRACKETS) {
+    if (imposable <= lower) break;
+    total += (Math.min(imposable, upTo) - lower) * rate;
+    lower = upTo;
+  }
+  return total;
+};
+
+/** Marié(e) : +300 DT/an. Enfants à charge, plafonnés à 4 : 100/200/300/400 DT/an. */
+const DEDUCTION_ENFANTS: Record<number, number> = { 0: 0, 1: 100, 2: 200, 3: 300, 4: 400 };
+const DEDUCTION_ENFANT_INFIRME = 2000; // DT/an, par enfant, sans plafond de nombre
+const DEDUCTION_ENFANT_ETUDIANT = 1000; // DT/an, par enfant, plafonné à 4
+const PARENT_A_CHARGE_TAUX = 5; // %, par parent, plafonné à 450 DT/an chacun
+const PARENT_A_CHARGE_PLAFOND = 450; // DT/an, par parent
+const PLAFOND_ASSURANCE_VIE = 100000; // DT/an
+const PLAFOND_CEA = 100000; // DT/an
+
+/**
+ * Le total des déductions communes annuelles — tout le « Tableau des
+ * Déductions Fiscales » remis par le cabinet, chaque paramètre venant de la
+ * fiche Équipe (« Paramètres de la paie »), figé sur le bulletin à la
+ * génération. `baseAvantDeductionsCommunes` est le revenu imposable annuel
+ * après abattement forfaitaire mais avant toute déduction commune — c'est
+ * sur cette base, non circulaire, que se calcule Parents à charge (voir le
+ * commentaire de `computePayslip()`).
+ */
+const deductionsCommunesAnnuelles = (params: {
+  situationFamiliale: string | null | undefined;
+  nombreEnfants: number | null | undefined;
+  enfantsInfirmes: number | null | undefined;
+  enfantsEtudiants: number | null | undefined;
+  parentsACharge: number | null | undefined;
+  assuranceVie: number | null | undefined;
+  cea: number | null | undefined;
+  baseAvantDeductionsCommunes: number;
+}): number => {
+  // Dérivé de « Situation familiale » (Gestion des paies) plutôt que d'une
+  // case à cocher dédiée — voir le commentaire au-dessus de computePayslip().
+  const marie = /mari/i.test(String(params.situationFamiliale || ''));
+  const enfants = Math.max(0, Math.min(4, Math.round(Number(params.nombreEnfants) || 0)));
+  const infirmes = Math.max(0, Math.round(Number(params.enfantsInfirmes) || 0));
+  const etudiants = Math.max(0, Math.min(4, Math.round(Number(params.enfantsEtudiants) || 0)));
+  const parents = Math.max(0, Math.min(2, Math.round(Number(params.parentsACharge) || 0)));
+  const assuranceVie = Math.min(Math.max(0, Number(params.assuranceVie) || 0), PLAFOND_ASSURANCE_VIE);
+  const cea = Math.min(Math.max(0, Number(params.cea) || 0), PLAFOND_CEA);
+  const parentDeduction = Math.min(params.baseAvantDeductionsCommunes * (PARENT_A_CHARGE_TAUX / 100), PARENT_A_CHARGE_PLAFOND);
+
+  return (marie ? 300 : 0)
+    + DEDUCTION_ENFANTS[enfants]
+    + infirmes * DEDUCTION_ENFANT_INFIRME
+    + etudiants * DEDUCTION_ENFANT_ETUDIANT
+    + parents * parentDeduction
+    + assuranceVie
+    + cea;
+};
+
+/**
+ * Calcule un bulletin de paie mensuel à partir des gains saisis pour ce mois
+ * et de la situation familiale/nombre d'enfants figés sur le bulletin. Rend
+ * toutes les lignes du modèle — jamais de valeur que l'admin aurait à
+ * recalculer à la main pour vérifier le document.
+ */
+function computePayslip(input: {
+  salaireBase: number; salHeure: number;
+  joursFeries: number;
+  primePresence: number; primeTransport: number; primeEncouragement: number;
+  tauxCnss: number;
+  nombreMois: number;
+  situationFamiliale: string | null | undefined;
+  nombreEnfants: number | null | undefined;
+  // Paramètres de la paie — Tableau des Déductions Fiscales, voir CLAUDE.md.
+  paieEnfantsInfirmes: number | null | undefined;
+  paieEnfantsEtudiants: number | null | undefined;
+  paieParentsACharge: number | null | undefined;
+  paieAssuranceVie: number | null | undefined;
+  paieCEA: number | null | undefined;
+}) {
+  // « Salaire de base » n'est pas dérivé d'heures : c'est le salaire brut
+  // mensuel de la fiche Équipe (`user.salaireBrut`), repris tel quel — la
+  // demande explicite était de le prendre depuis Équipe, pas de le recalculer
+  // à partir d'un taux horaire. Modifiable sur ce bulletin sans toucher la
+  // fiche : un mois peut différer (absence, avenant…) sans réécrire le
+  // salaire de référence de l'employé.
+  const salaireBase = round3(num(input.salaireBase, 0));
+  const gainsJoursFeries = round3(num(input.joursFeries, 0) * HEURES_PAR_JOUR * num(input.salHeure, 0));
+  const primePresence = round3(num(input.primePresence, 0));
+  const primeTransport = round3(num(input.primeTransport, 0));
+  const primeEncouragement = round3(num(input.primeEncouragement, 0));
+
+  const salaireBrut = round3(salaireBase + gainsJoursFeries + primePresence + primeTransport + primeEncouragement);
+
+  const tauxCnss = typeof input.tauxCnss === 'number' && input.tauxCnss >= 0 ? input.tauxCnss : CNSS_TAUX_DEFAUT;
+  const retenueCnss = round3(salaireBrut * (tauxCnss / 100));
+  const salaireBrutImposable = round3(salaireBrut - retenueCnss);
+
+  const nombreMois = num(input.nombreMois, 12) > 0 ? num(input.nombreMois, 12) : 12;
+  const imposableAnnuelRef = salaireBrutImposable * nombreMois;
+  const abattement = Math.min(imposableAnnuelRef * (ABATTEMENT_TAUX / 100), ABATTEMENT_PLAFOND_ANNUEL);
+  const baseAvantDeductionsCommunes = imposableAnnuelRef - abattement;
+  const deductionsCommunes = deductionsCommunesAnnuelles({
+    situationFamiliale: input.situationFamiliale,
+    nombreEnfants: input.nombreEnfants,
+    enfantsInfirmes: input.paieEnfantsInfirmes,
+    enfantsEtudiants: input.paieEnfantsEtudiants,
+    parentsACharge: input.paieParentsACharge,
+    assuranceVie: input.paieAssuranceVie,
+    cea: input.paieCEA,
+    baseAvantDeductionsCommunes,
+  });
+  const imposableIrppAnnuel = Math.max(0, imposableAnnuelRef - abattement - deductionsCommunes);
+  const imposableIrppArrondi = Math.ceil(imposableIrppAnnuel);
+
+  const impotSurLeRevenu = round3(irppAnnuel(imposableIrppArrondi) / nombreMois);
+  const contributionSocialeSolidarite = round3((imposableIrppArrondi * (CSS_TAUX / 100)) / nombreMois);
+
+  const salaireNet = round3(salaireBrutImposable - impotSurLeRevenu);
+  const salaireNetAPayer = round3(salaireNet - contributionSocialeSolidarite);
+
+  return {
+    salaireBase, gainsJoursFeries, primePresence, primeTransport, primeEncouragement,
+    salaireBrut,
+    tauxCnss, retenueCnss,
+    salaireBrutImposable,
+    abattement: round3(abattement),
+    deductionsCommunes,
+    imposableIrppAnnuel: round3(imposableIrppAnnuel),
+    imposableIrppArrondi,
+    impotSurLeRevenu,
+    contributionSocialeSolidarite,
+    salaireNet,
+    salaireNetAPayer,
+    nombreMois,
+  };
+}
+
 /** DD/MM/YYYY (how entries are stored) → epoch ms. */
 const parseFrenchDateTs = (dateStr: string) => {
   if (!dateStr) return 0;
@@ -232,6 +445,20 @@ const filterKpiEntries = (entries: any[], body: any) => {
  */
 const countsAsBilled = (inv: any) =>
   inv.documentKind !== 'AUTRE_NON_FACTURABLE' && inv.status !== 'DRAFT';
+
+/**
+ * `currency` est un texte libre saisi sur le document ; on ne stocke aucun
+ * taux de change, donc mélanger des devises dans une même somme produirait
+ * un chiffre faux et crédible — 1 500 USD compté comme 1 500 TND, par
+ * exemple. Un champ vide vaut TND (c'est la devise par défaut de l'éditeur).
+ * Point unique : la ligne « montant facturé » d'un client (fiche, page
+ * Clients, tableau de bord, portail) ne doit sommer que les documents en
+ * TND, exactement comme le grand-livre du tableau de bord Direction — avant
+ * ce helper partagé, chaque autre écran resommait `totalNetToPay` sans ce
+ * filtre et affichait un total plausible mais faux dès qu'un client avait ne
+ * serait-ce qu'une facture en devise étrangère.
+ */
+const isTnd = (inv: any) => String(inv.currency || 'TND').toUpperCase() === 'TND';
 
 /**
  * Le mois où un document a été **émis**, au format `YYYY-MM` et dans le
@@ -339,6 +566,9 @@ const PLAN_MODULE_ROUTES: [string, PlanModule][] = [
   ['/api/useful-links', 'Ressources'],
 
   ['/api/messages', 'Messages'],
+
+  ['/api/payslips', 'Payroll'],
+  ['/api/payroll', 'Payroll'],
 
   ['/api/users', 'Users'],
   ['/api/settings', 'Users'],
@@ -853,7 +1083,12 @@ async function startServer() {
         breakMinutes: user.breakMinutes ?? null,
         clientId: user.clientId ?? null,
         isPlatformAdmin: !!user.isPlatformAdmin,
-        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null } : null,
+        // `seatLimit` est le nombre réellement accordé à l'entreprise — pour
+        // une offre dynamique (prix par utilisateur), ce n'est PAS la valeur
+        // de repli du catalogue (`planMeta(plan).seatLimit`, toujours 1), et
+        // le client en a besoin pour des décisions comme « Nouvel
+        // utilisateur »/« Exporter » sur Équipe (voir UsersManagement.tsx).
+        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null, seatLimit: company.seatLimit ?? null } : null,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -928,7 +1163,7 @@ async function startServer() {
    * without this the figures still ship over the wire, the same rule the
    * ADMIN-only cost on time entries already follows.
    */
-  const LEDGER_FIELDS = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer', 'journalEncaissements'];
+  const LEDGER_FIELDS = ['soldeAnterieur', 'montantFacture', 'montantFactureDevises', 'encaissements', 'resteAPayer', 'journalEncaissements'];
   const stripLedger = (client: any) => {
     const out = { ...client };
     for (const f of LEDGER_FIELDS) delete out[f];
@@ -1104,6 +1339,240 @@ async function startServer() {
   });
 
   // ---------------------------------------------------------
+  // Gestion des paies
+  // ---------------------------------------------------------
+
+  /**
+   * L'émetteur du bulletin (nom, adresse, logo) est la même identité que
+   * celle de Cash (`companyBlock(getSettings())`) — ce n'est pas une donnée
+   * de facturation, c'est l'identité de l'entreprise, donc une deuxième copie
+   * n'aurait fait que diverger de la première la première fois que l'une des
+   * deux serait corrigée. Route à part et non `/api/cash/company` : un
+   * titulaire de `VIEW_PAYROLL` sans `VIEW_CASH` doit pouvoir imprimer un
+   * bulletin.
+   */
+  app.get('/api/payroll/company', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      res.json(companyBlock(await db.getSettings(req.user.companyId)));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Liste blanche des champs de paie d'un collaborateur — jamais la fiche
+   * complète (permissions, coût employeur détaillé…) à un titulaire de
+   * `VIEW_PAYROLL` qui n'a pas forcément `MANAGE_USERS`. Exclut les comptes
+   * `CLIENT` : un dossier client n'est pas un employé.
+   */
+  app.get('/api/payroll/employees', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const users = await db.getAllUsers(req.user.companyId);
+      const rows = users
+        .filter((u: any) => u.role !== CLIENT_ROLE)
+        .map((u: any) => ({
+          id: u.id, username: u.username, role: u.role,
+          salaireBrut: u.salaireBrut ?? null, regimeHoraire: u.regimeHoraire ?? null,
+          matricule: u.matricule ?? null, numCin: u.numCin ?? null, numCnss: u.numCnss ?? null,
+          qualification: u.qualification ?? null, departement: u.departement ?? null,
+          banque: u.banque ?? null, numeroCompte: u.numeroCompte ?? null,
+          situationFamiliale: u.situationFamiliale ?? null, nombreEnfants: u.nombreEnfants ?? null,
+          categorie: u.categorie ?? null, echelon: u.echelon ?? null, salHeure: u.salHeure ?? null,
+          // Paramètres de la paie — voir CLAUDE.md « Tableau des Déductions Fiscales ».
+          // Marié(e) n'est pas projeté ici : il se lit sur situationFamiliale,
+          // déjà présent ci-dessus.
+          paieEnfantsInfirmes: u.paieEnfantsInfirmes ?? null,
+          paieEnfantsEtudiants: u.paieEnfantsEtudiants ?? null,
+          paieParentsACharge: u.paieParentsACharge ?? null,
+          paieAssuranceVie: u.paieAssuranceVie ?? null,
+          paieCEA: u.paieCEA ?? null,
+        }))
+        .sort((a: any, b: any) => a.username.localeCompare(b.username));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Dernier jour civil d'un mois — pour la « Période du / au » imprimée sur le bulletin. */
+  const lastDayOfMonth = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  /**
+   * Construit les entrées communes à l'aperçu et à l'enregistrement : la
+   * copie figée de l'identité de paie de l'employé (au moment de l'appel) et
+   * le résultat de `computePayslip()`. Ni l'aperçu ni l'enregistrement n'ont
+   * de deuxième façon de calculer un bulletin.
+   */
+  const buildPayslipDraft = (employee: any, body: any) => {
+    const year = parseInt(body.year, 10);
+    const month = parseInt(body.month, 10);
+    const nombreMois = num(body.nombreMois, 12) || 12;
+    const salHeure = typeof body.salHeure === 'number' ? body.salHeure : num(employee.salHeure, 0);
+    // Prérempli depuis la fiche Équipe (`user.salaireBrut`), modifiable sur ce
+    // bulletin — voir le commentaire de `computePayslip()`.
+    const salaireBase = typeof body.salaireBase === 'number' ? body.salaireBase : num(employee.salaireBrut, 0);
+    const computed = computePayslip({
+      salaireBase,
+      salHeure,
+      joursFeries: num(body.joursFeries, 0),
+      primePresence: num(body.primePresence, 0),
+      primeTransport: num(body.primeTransport, 0),
+      primeEncouragement: num(body.primeEncouragement, 0),
+      tauxCnss: typeof body.tauxCnss === 'number' ? body.tauxCnss : CNSS_TAUX_DEFAUT,
+      nombreMois,
+      situationFamiliale: employee.situationFamiliale,
+      nombreEnfants: employee.nombreEnfants,
+      paieEnfantsInfirmes: employee.paieEnfantsInfirmes,
+      paieEnfantsEtudiants: employee.paieEnfantsEtudiants,
+      paieParentsACharge: employee.paieParentsACharge,
+      paieAssuranceVie: employee.paieAssuranceVie,
+      paieCEA: employee.paieCEA,
+    });
+    return {
+      userId: employee.id,
+      employeeName: employee.username,
+      year, month,
+      periodeDu: Number.isFinite(year) && Number.isFinite(month) ? `01/${String(month).padStart(2, '0')}/${year}` : '',
+      periodeAu: Number.isFinite(year) && Number.isFinite(month)
+        ? `${String(lastDayOfMonth(year, month)).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`
+        : '',
+      // Copie figée — voir le commentaire de `getAllPayslips` dans db-types.ts.
+      matricule: employee.matricule ?? null, numCin: employee.numCin ?? null, numCnss: employee.numCnss ?? null,
+      qualification: employee.qualification ?? null, departement: employee.departement ?? null,
+      banque: employee.banque ?? null, numeroCompte: employee.numeroCompte ?? null,
+      situationFamiliale: employee.situationFamiliale ?? null, nombreEnfants: employee.nombreEnfants ?? null,
+      categorie: employee.categorie ?? null, echelon: employee.echelon ?? null,
+      // Copie figée des paramètres de la paie — c'est ce qui a déterminé les
+      // déductions communes de ce bulletin, gardé pour trace même si la
+      // fiche Équipe change ensuite. Marié(e) n'a pas de copie séparée : elle
+      // se relit depuis `situationFamiliale`, déjà figé juste au-dessus.
+      paieEnfantsInfirmes: employee.paieEnfantsInfirmes ?? null,
+      paieEnfantsEtudiants: employee.paieEnfantsEtudiants ?? null,
+      paieParentsACharge: employee.paieParentsACharge ?? null,
+      paieAssuranceVie: employee.paieAssuranceVie ?? null,
+      paieCEA: employee.paieCEA ?? null,
+      salHeure,
+      nbHeures: num(body.nbHeures, 0),
+      joursFeries: num(body.joursFeries, 0),
+      primePresence: num(body.primePresence, 0),
+      primeTransport: num(body.primeTransport, 0),
+      primeEncouragement: num(body.primeEncouragement, 0),
+      // Informatif seulement — voir CLAUDE.md « Gestion des paies ».
+      nHeures: num(body.nHeures, 0),
+      joursConges: num(body.joursConges, 0),
+      joursAbsences: num(body.joursAbsences, 0),
+      soldeConge: typeof body.soldeConge === 'number' ? body.soldeConge : null,
+      ...computed,
+    };
+  };
+
+  /** Aperçu à la volée — aucune écriture, purement le résultat de `computePayslip()` sur les valeurs saisies. */
+  app.post('/api/payslips/preview', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const employee = await db.getUserById(req.user.companyId, Number(req.body.userId));
+      if (!employee || employee.role === CLIENT_ROLE) return res.status(404).json({ error: 'Collaborateur introuvable' });
+      res.json(buildPayslipDraft(employee, req.body || {}));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Année optionnelle en filtre (`?year=2026`) — un cabinet accumule un bulletin par employé et par mois, potentiellement des années d'historique. */
+  app.get('/api/payslips', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      let rows = await db.getAllPayslips(req.user.companyId);
+      if (req.query.year) rows = rows.filter((p: any) => String(p.year) === String(req.query.year));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/payslips', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const employee = await db.getUserById(req.user.companyId, Number(req.body.userId));
+      if (!employee || employee.role === CLIENT_ROLE) return res.status(404).json({ error: 'Collaborateur introuvable' });
+
+      const year = parseInt(req.body.year, 10);
+      const month = parseInt(req.body.month, 10);
+      if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+        return res.status(400).json({ error: 'Période invalide' });
+      }
+      const existing = (await db.getAllPayslips(req.user.companyId))
+        .find((p: any) => p.userId === employee.id && p.year === year && p.month === month);
+      if (existing) {
+        return res.status(400).json({ error: 'Un bulletin existe déjà pour ce collaborateur sur cette période.' });
+      }
+
+      const draft = buildPayslipDraft(employee, req.body || {});
+      const row = await db.createPayslip(req.user.companyId, {
+        id: Date.now(),
+        ...draft,
+        createdAt: new Date().toISOString(),
+        createdBy: req.user.id,
+      });
+      res.json(row);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** La période et le collaborateur ne se corrigent pas depuis cette route — supprimer et régénérer pour ceux-là, comme un document Cash mal daté. */
+  app.put('/api/payslips/:id', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = await db.getPayslipById(req.user.companyId, id);
+      if (!existing) return res.status(404).json({ error: 'Bulletin introuvable' });
+
+      // L'identité de paie reste celle figée à la génération — modifier les
+      // gains du mois ne doit pas aller rechercher une fiche Équipe
+      // éventuellement changée depuis.
+      const computed = computePayslip({
+        salaireBase: typeof req.body.salaireBase === 'number' ? req.body.salaireBase : num(existing.salaireBase, 0),
+        salHeure: typeof req.body.salHeure === 'number' ? req.body.salHeure : num(existing.salHeure, 0),
+        joursFeries: num(req.body.joursFeries, existing.joursFeries),
+        primePresence: num(req.body.primePresence, existing.primePresence),
+        primeTransport: num(req.body.primeTransport, existing.primeTransport),
+        primeEncouragement: num(req.body.primeEncouragement, existing.primeEncouragement),
+        tauxCnss: typeof req.body.tauxCnss === 'number' ? req.body.tauxCnss : existing.tauxCnss,
+        nombreMois: num(req.body.nombreMois, existing.nombreMois),
+        situationFamiliale: existing.situationFamiliale,
+        nombreEnfants: existing.nombreEnfants,
+        paieEnfantsInfirmes: existing.paieEnfantsInfirmes,
+        paieEnfantsEtudiants: existing.paieEnfantsEtudiants,
+        paieParentsACharge: existing.paieParentsACharge,
+        paieAssuranceVie: existing.paieAssuranceVie,
+        paieCEA: existing.paieCEA,
+      });
+
+      const updated = await db.updatePayslip(req.user.companyId, id, {
+        nHeures: num(req.body.nHeures, existing.nHeures),
+        joursConges: num(req.body.joursConges, existing.joursConges),
+        joursAbsences: num(req.body.joursAbsences, existing.joursAbsences),
+        soldeConge: typeof req.body.soldeConge === 'number' ? req.body.soldeConge : existing.soldeConge,
+        salHeure: typeof req.body.salHeure === 'number' ? req.body.salHeure : existing.salHeure,
+        ...computed,
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/payslips/:id', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deletePayslip(req.user.companyId, parseInt(req.params.id, 10));
+      if (!ok) return res.status(404).json({ error: 'Bulletin introuvable' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
   // User Management API Routes
   // ---------------------------------------------------------
 
@@ -1173,7 +1642,7 @@ async function startServer() {
   // POST /api/users
   app.post('/api/users', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
-      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId } = req.body;
+      const { username, password, role, permissions, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure, paieEnfantsInfirmes, paieEnfantsEtudiants, paieParentsACharge, paieAssuranceVie, paieCEA } = req.body;
 
       const existing = await db.getUserByUsername(username);
       if (existing) {
@@ -1221,6 +1690,30 @@ async function startServer() {
         // même client — le gérant et son comptable — sans table pivot, et un
         // compte ne peut par construction en viser qu'un seul.
         clientId: role === CLIENT_ROLE && clientId != null ? Number(clientId) : null,
+        // Gestion des paies — dossier administratif de l'employé, purement
+        // déclaratif : rien ici n'entre dans employerHourlyRate() ni dans
+        // aucun calcul de pointage.
+        matricule: matricule || null,
+        numCin: numCin || null,
+        numCnss: numCnss || null,
+        qualification: qualification || null,
+        departement: departement || null,
+        banque: banque || null,
+        numeroCompte: numeroCompte || null,
+        situationFamiliale: situationFamiliale || null,
+        nombreEnfants: typeof nombreEnfants === 'number' && Number.isFinite(nombreEnfants) ? nombreEnfants : null,
+        categorie: categorie || null,
+        echelon: echelon || null,
+        salHeure: typeof salHeure === 'number' && Number.isFinite(salHeure) ? salHeure : null,
+        // Paramètres de la paie — Tableau des Déductions Fiscales, voir
+        // CLAUDE.md : ce que déclare l'admin ici alimente les déductions
+        // communes de computePayslip(), rien d'autre. Marié(e) n'a pas de
+        // champ à part — il se lit sur situationFamiliale ci-dessus.
+        paieEnfantsInfirmes: typeof paieEnfantsInfirmes === 'number' && Number.isFinite(paieEnfantsInfirmes) ? paieEnfantsInfirmes : null,
+        paieEnfantsEtudiants: typeof paieEnfantsEtudiants === 'number' && Number.isFinite(paieEnfantsEtudiants) ? paieEnfantsEtudiants : null,
+        paieParentsACharge: typeof paieParentsACharge === 'number' && Number.isFinite(paieParentsACharge) ? paieParentsACharge : null,
+        paieAssuranceVie: typeof paieAssuranceVie === 'number' && Number.isFinite(paieAssuranceVie) ? paieAssuranceVie : null,
+        paieCEA: typeof paieCEA === 'number' && Number.isFinite(paieCEA) ? paieCEA : null,
       });
 
       // The admin sets the annual leave allowance from this same form.
@@ -1244,7 +1737,7 @@ async function startServer() {
   app.put('/api/users/:id', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId } = req.body;
+      const { role, permissions, password, salaireBrut, regimeHoraire, cnss, tfp, foprolos, accidentTravail, primesFraisNonCotisables, soldeConge, shiftStart, shiftEnd, breakMinutes, clientId, matricule, numCin, numCnss, qualification, departement, banque, numeroCompte, situationFamiliale, nombreEnfants, categorie, echelon, salHeure, paieEnfantsInfirmes, paieEnfantsEtudiants, paieParentsACharge, paieAssuranceVie, paieCEA } = req.body;
 
       // Changer de panier — d'un compte du back-office vers le portail client
       // ou l'inverse — revient à prendre un siège dans l'autre panier. Sans ce
@@ -1290,6 +1783,23 @@ async function startServer() {
         // même client — le gérant et son comptable — sans table pivot, et un
         // compte ne peut par construction en viser qu'un seul.
         clientId: role === CLIENT_ROLE && clientId != null ? Number(clientId) : null,
+        matricule: matricule || null,
+        numCin: numCin || null,
+        numCnss: numCnss || null,
+        qualification: qualification || null,
+        departement: departement || null,
+        banque: banque || null,
+        numeroCompte: numeroCompte || null,
+        situationFamiliale: situationFamiliale || null,
+        nombreEnfants: typeof nombreEnfants === 'number' && Number.isFinite(nombreEnfants) ? nombreEnfants : null,
+        categorie: categorie || null,
+        echelon: echelon || null,
+        salHeure: typeof salHeure === 'number' && Number.isFinite(salHeure) ? salHeure : null,
+        paieEnfantsInfirmes: typeof paieEnfantsInfirmes === 'number' && Number.isFinite(paieEnfantsInfirmes) ? paieEnfantsInfirmes : null,
+        paieEnfantsEtudiants: typeof paieEnfantsEtudiants === 'number' && Number.isFinite(paieEnfantsEtudiants) ? paieEnfantsEtudiants : null,
+        paieParentsACharge: typeof paieParentsACharge === 'number' && Number.isFinite(paieParentsACharge) ? paieParentsACharge : null,
+        paieAssuranceVie: typeof paieAssuranceVie === 'number' && Number.isFinite(paieAssuranceVie) ? paieAssuranceVie : null,
+        paieCEA: typeof paieCEA === 'number' && Number.isFinite(paieCEA) ? paieCEA : null,
       };
 
       if (password) {
@@ -1422,12 +1932,23 @@ async function startServer() {
   const enrichClientLedger = async (companyId: string, client: any) => {
     const invoices = await db.getAllInvoices(companyId);
     let montantFacture = 0;
+    // Les factures en devise étrangère n'entrent pas dans `montantFacture`
+    // (TND uniquement, voir `isTnd()`), mais elles restent facturées : la
+    // page Clients doit pouvoir les montrer plutôt que les faire disparaître
+    // purement et simplement. `montantFactureDevises` porte donc les deux —
+    // TND compris, pour que l'écran n'ait qu'un seul champ à lire.
+    const montantFactureDevises: Record<string, number> = {};
     for (const inv of invoices) {
       if (!countsAsBilled(inv)) continue;
       const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
-      if (key === String(client.id) || key === `name:${client.name}`) {
-        montantFacture += num(Number(inv.totalNetToPay), 0);
-      }
+      if (key !== String(client.id) && key !== `name:${client.name}`) continue;
+      const devise = String(inv.currency || 'TND').toUpperCase();
+      montantFactureDevises[devise] = round3((montantFactureDevises[devise] || 0) + num(Number(inv.totalNetToPay), 0));
+      // Seule la TND s'additionne dans `montantFacture` — voir `isTnd()`.
+      // Sans ce garde, une seule facture en devise étrangère faisait grimper
+      // le total du client d'un montant qui n'était ni des dinars ni la
+      // bonne devise.
+      if (isTnd(inv)) montantFacture += num(Number(inv.totalNetToPay), 0);
     }
     montantFacture = round3(montantFacture);
     const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
@@ -1439,6 +1960,7 @@ async function startServer() {
     return {
       ...client,
       montantFacture,
+      montantFactureDevises,
       journalEncaissements,
       resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
     };
@@ -1552,11 +2074,21 @@ async function startServer() {
       // same fallback `clientBucketKey()` already uses for the KPI dashboard,
       // so a document like that isn't silently dropped from the total.
       const allInvoices = await db.getAllInvoices(req.user.companyId);
-      const montantFactureByClient = new Map<string, number>();
+      // Une facture en devise étrangère n'entre pas dans `montantFacture`
+      // (TND uniquement — voir `isTnd()` : sans ce garde, une facture en GBP
+      // ou en USD gonflait le total du client et la ligne "Total Général"
+      // d'un chiffre qui n'était ni en dinars ni convertible, faute de taux
+      // stocké) mais reste facturée : `montantFactureDevisesByClient` garde
+      // donc le détail par devise (TND comprise) pour que l'écran puisse la
+      // montrer plutôt que la faire simplement disparaître.
+      const montantFactureDevisesByClient = new Map<string, Record<string, number>>();
       for (const inv of allInvoices) {
         if (!countsAsBilled(inv)) continue;
         const key = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
-        montantFactureByClient.set(key, round3((montantFactureByClient.get(key) || 0) + num(Number(inv.totalNetToPay), 0)));
+        const devise = String(inv.currency || 'TND').toUpperCase();
+        const byDevise = montantFactureDevisesByClient.get(key) || {};
+        byDevise[devise] = round3((byDevise[devise] || 0) + num(Number(inv.totalNetToPay), 0));
+        montantFactureDevisesByClient.set(key, byDevise);
       }
       // Enriched over every client matching the current search/filters, not
       // just the current page — the "Total Général" row needs the ledger
@@ -1565,16 +2097,20 @@ async function startServer() {
       // read once for the whole request, then looked up per client.
       const journalByClient = journalEncaissementsByClient(await db.getAllCashJournalEntries(req.user.companyId));
       const enrichedAll = clients.map((c: any) => {
-        const montantFacture = round3(
-          (montantFactureByClient.get(String(c.id)) || 0) +
-          (montantFactureByClient.get(`name:${c.name}`) || 0),
-        );
+        const devisesA = montantFactureDevisesByClient.get(String(c.id)) || {};
+        const devisesB = montantFactureDevisesByClient.get(`name:${c.name}`) || {};
+        const montantFactureDevises: Record<string, number> = { ...devisesA };
+        for (const [d, v] of Object.entries(devisesB)) {
+          montantFactureDevises[d] = round3((montantFactureDevises[d] || 0) + v);
+        }
+        const montantFacture = round3(montantFactureDevises.TND || 0);
         const soldeAnterieur = num(Number(c.soldeAnterieur), 0);
         const journalEncaissements = journalFor(journalByClient, c);
         const encaissements = round3(sumEncaissements(c) + sumAmounts(journalEncaissements));
         return {
           ...c,
           montantFacture,
+          montantFactureDevises,
           journalEncaissements,
           resteAPayer: round3(soldeAnterieur - encaissements + montantFacture),
         };
@@ -1598,12 +2134,18 @@ async function startServer() {
         const totals = enrichedAll.reduce((acc: any, c: any) => {
           acc.soldeAnterieur = round3(acc.soldeAnterieur + num(Number(c.soldeAnterieur), 0));
           acc.montantFacture = round3(acc.montantFacture + num(Number(c.montantFacture), 0));
+          // Même détail par devise que chaque ligne, sommé — la ligne Total
+          // Général peut ainsi montrer les autres devises facturées comme
+          // Facturation le fait déjà pour son propre Total Général.
+          for (const [d, v] of Object.entries(c.montantFactureDevises || {})) {
+            acc.montantFactureDevises[d] = round3((acc.montantFactureDevises[d] || 0) + (v as number));
+          }
           // c.journalEncaissements is already attached above — reuse it rather
           // than re-deriving, so the total can never drift from the rows.
           acc.encaissements = round3(acc.encaissements + sumEncaissements(c) + sumAmounts(c.journalEncaissements || []));
           acc.resteAPayer = round3(acc.resteAPayer + num(Number(c.resteAPayer), 0));
           return acc;
-        }, { soldeAnterieur: 0, montantFacture: 0, encaissements: 0, resteAPayer: 0 });
+        }, { soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {} as Record<string, number>, encaissements: 0, resteAPayer: 0 });
         res.json({ data: page_, total: clients.length, page, limit, ...(seesLedger ? { totals } : {}) });
       } else {
         res.json(page_);
@@ -2242,8 +2784,11 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     for (const inv of allInvoices) {
       // "Autre document (non facturable)" is explicitly excluded from the
       // client's running balance and from the billing activity below — it
-      // exists in Cash but isn't billing.
-      if (!countsAsBilled(inv)) continue;
+      // exists in Cash but isn't billing. A foreign-currency document is
+      // excluded the same way `isTnd()` excludes it from the executive
+      // dashboard's own grand-livre — no rate is stored, so mixing it into
+      // this TND figure would just be a wrong number that looks plausible.
+      if (!countsAsBilled(inv) || !isTnd(inv)) continue;
       const k = clientBucketKey({ clientId: inv.clientId, client: inv.clientName });
       montantFactureByClient.set(k, round3((montantFactureByClient.get(k) || 0) + num(Number(inv.totalNetToPay), 0)));
       const ts = parseIsoDate(inv.issueDate);
@@ -2470,7 +3015,6 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     // que la TND et on compte ce qui a été écarté, plutôt que de convertir à
     // un taux qu'on ne stocke pas (Q-07).
     const isBillable = countsAsBilled;
-    const isTnd = (inv: any) => String(inv.currency || 'TND').toUpperCase() === 'TND';
     const invoiceTs = (inv: any) => (inv.issueDate ? new Date(inv.issueDate).getTime() : 0);
 
     let devisesExclues = 0;
@@ -3511,9 +4055,24 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     // Échéances) est visible — en écrire pour les autres serait un rappel
     // vers un écran qu'ils ne voient pas.
     if (!companyHasResourcesModule(company.secteur)) return;
+    // Même garde côté offre que le reste de la route : un pack qui ne vend
+    // pas le module Ressources (RH & Paie, Facturation) ne voit pas l'écran
+    // Échéances non plus, donc pas plus de sens d'y renvoyer un rappel que
+    // pour un secteur qui ne l'a jamais eu.
+    if (planModules(company.plan) && !planAllowsModule(company.plan, 'Ressources')) return;
 
     const month = formatDateISO(new Date()).slice(0, 7);
     if (company.echeanceReminderSentMonth === month) return;
+
+    // Une entreprise tout juste créée n'a encore aucun client, donc rien à
+    // porter sur une grille de suivi par client — le rappel se lisait comme
+    // une notification arrivée avant même la moindre saisie. Tant qu'aucun
+    // client n'existe, on ne marque pas non plus le mois comme fait : le
+    // premier client créé fait naître le rappel à la requête suivante, dans
+    // le mois civil en cours, plutôt que de marquer le mois comme fait à
+    // tort pendant que la garde était encore fermée.
+    const clients = await db.getAllClients(company.id);
+    if (!clients || clients.length === 0) return;
 
     const inFlight = echeanceReminderInFlight.get(company.id);
     if (inFlight) return inFlight;
@@ -5496,7 +6055,9 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
       const invoices = await portalInvoicesFor(req.user.companyId, client);
       const encaissements = await portalEncaissementsFor(req.user.companyId, client);
-      const montantFacture = round3(invoices.reduce((s: number, i: any) => s + num(Number(i.totalNetToPay), 0), 0));
+      // Seule la TND s'additionne — voir `isTnd()` — pour rester d'accord avec
+      // la page Clients du back-office, qui applique le même garde.
+      const montantFacture = round3(invoices.filter(isTnd).reduce((s: number, i: any) => s + num(Number(i.totalNetToPay), 0), 0));
       const totalEncaisse = round3(encaissements.reduce((s: number, e: any) => s + num(Number(e.amount), 0), 0));
       const soldeAnterieur = num(Number(client.soldeAnterieur), 0);
 
@@ -5527,7 +6088,12 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const client = await requirePortalClient(req, res);
       if (!client) return;
 
-      const invoices = await portalInvoicesFor(req.user.companyId, client);
+      // Seule la TND entre dans le relevé — voir `isTnd()`. Le solde qui
+      // court ici doit rester d'accord avec `montantFacture`/`soldeGlobal`
+      // de /api/portal/summary, qui applique déjà ce même garde : mélanger
+      // une facture en devise étrangère dans ce calcul lui aurait fait
+      // annoncer un solde différent de celui du résumé pour le même dossier.
+      const invoices = (await portalInvoicesFor(req.user.companyId, client)).filter(isTnd);
       const encaissements = await portalEncaissementsFor(req.user.companyId, client);
 
       type StatementLine = {
@@ -6268,6 +6834,49 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    */
   const ENTRIES_PAGE_SIZE = 200;
 
+  /**
+   * Nombre maximal de tâches en pause épinglées en plus de la page normale —
+   * un garde-fou anti-abus, pas une vraie limite : rien n'empêche un compte
+   * de laisser des centaines de tâches en pause indéfiniment sans jamais les
+   * reprendre ni les arrêter, et sans cette borne la page cesserait d'être
+   * bornée (la règle même que ce plafond de page existe pour faire
+   * respecter). Les tâches en cours ne sont volontairement pas plafonnées
+   * ici : au plus une par utilisateur (`pauseOtherRunningEntries()`), donc
+   * déjà bornées par l'effectif de l'entreprise.
+   */
+  const PINNED_PAUSED_CAP = 100;
+
+  /**
+   * Épingle les tâches en cours et en pause en tête de la page, même si elles
+   * sont plus anciennes que ce que `page` couvrirait normalement — sans quoi
+   * une tâche mise en pause puis oubliée devient inatteignable depuis
+   * Pointage (ni « Charger plus » ni l'export ne peuvent la retrouver) dès
+   * que l'équipe crée assez de nouvelles tâches pour la faire sortir de la
+   * fenêtre chargée. La date de la tâche n'est jamais touchée — seul l'ordre
+   * de cette réponse change. `all` doit déjà être triée du plus récent au
+   * plus ancien (l'invariant existant de `createTimeEntry`, prepend).
+   *
+   * **Toutes** les tâches en cours/en pause remontent en tête, pas seulement
+   * celles que `page` aurait autrement laissées dehors. La première version
+   * ne déplaçait que ces dernières — une tâche en pause assez récente pour
+   * tenir dans `page` restait à sa position naturelle, mêlée aux tâches
+   * terminées : le tableau montrait alors certaines tâches en pause tout en
+   * haut et d'autres au milieu, ce qui se lisait comme un épinglage à moitié
+   * fait plutôt que comme une règle. Cette version calcule d'abord
+   * l'ensemble complet des tâches épinglées (dans `all`, donc sans jamais en
+   * manquer une qui serait dans `page`), puis retire de `page` celles qui y
+   * figurent déjà pour ne jamais les compter deux fois — la taille totale de
+   * la réponse ne change donc pas, seul l'ordre se resserre.
+   */
+  const withPinnedActiveEntries = (all: any[], page: any[]) => {
+    const running = all.filter((e: any) => e.statut === 'RUNNING');
+    const paused = all.filter((e: any) => e.statut === 'PAUSED').slice(0, PINNED_PAUSED_CAP);
+    if (running.length === 0 && paused.length === 0) return page;
+    const pinnedIds = new Set([...running, ...paused].map((e: any) => e.id));
+    const rest = page.filter((e: any) => !pinnedIds.has(e.id));
+    return [...running, ...paused, ...rest];
+  };
+
   const doBroadcast = async () => {
     // Grouped by company so each company's data is fetched and its frames
     // built once — not once per subscriber, and never sent across a tenant
@@ -6285,7 +6894,8 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         const key = client.isAdmin ? 'admin' : 'plain';
         if (!cache[key]) {
           const visible = visibleEntriesFor(raw, client.isAdmin, adminIds);
-          const data = await enrichEntries(companyId, visible.slice(0, ENTRIES_PAGE_SIZE), client.isAdmin);
+          const page = withPinnedActiveEntries(visible, visible.slice(0, ENTRIES_PAGE_SIZE));
+          const data = await enrichEntries(companyId, page, client.isAdmin);
           cache[key] = `data: ${JSON.stringify({ data, total: visible.length })}\n\n`;
         }
         client.res.write(cache[key]);
@@ -6352,7 +6962,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const all = visibleEntriesFor(await db.getAllTimeEntries(req.user.companyId), isAdmin, await adminUserIds(req.user.companyId));
       const limit = Math.min(parseInt(req.query.limit, 10) || ENTRIES_PAGE_SIZE, 1000);
       const offset = parseInt(req.query.offset, 10) || 0;
-      const data = await enrichEntries(req.user.companyId, all.slice(offset, offset + limit), isAdmin);
+      const page = all.slice(offset, offset + limit);
+      // L'épinglage ne joue que sur la toute première page : une lecture qui
+      // parcourt déjà tout l'historique par tranches successives (l'export
+      // « toute la période », par exemple) retombe sur ces mêmes tâches à
+      // leur position naturelle — les épingler aussi là doublonnerait sans
+      // rien apporter, l'appelant dédoublonne déjà par id au besoin.
+      const withPinned = offset === 0 ? withPinnedActiveEntries(all, page) : page;
+      const data = await enrichEntries(req.user.companyId, withPinned, isAdmin);
       res.json({ data, total: all.length, limit, offset });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -6559,6 +7176,46 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // resuming someone else's) pauses whatever else that person had running.
       if (req.body.statut === 'RUNNING' && existing.statut !== 'RUNNING') {
         await pauseOtherRunningEntries(req.user.companyId, existing.userId, entryId);
+      }
+
+      // Corriger l'heure de début et/ou de fin depuis « Modifier » (EditTaskModal)
+      // doit se répercuter sur la durée affichée — et donc sur le coût, dérivé de
+      // la durée à chaque lecture (`enrichEntries`) plutôt que stocké. Sans ça,
+      // corriger les heures d'une tâche déjà en pause ou terminée ne changeait
+      // rien à l'écran : `dureeSeconds` restait celui accumulé pendant que la
+      // tâche tournait, ce que ni l'un ni l'autre champ heure ne touche par
+      // eux-mêmes.
+      //
+      // Ne se déclenche que si l'une des deux heures a **réellement changé**
+      // par rapport à la valeur enregistrée — jamais sur leur simple présence
+      // dans le corps de la requête. Le formulaire d'édition renvoie toujours
+      // les deux champs, modifiés ou non (il repart d'une copie de la tâche
+      // entière) : recalculer à chaque fois qu'ils sont présents aurait faussé
+      // la durée d'une tâche qu'on se contente de clôturer sans toucher à ses
+      // heures. C'est aussi pour ça que ce n'est *pas* la même mesure que
+      // `dureeSeconds` : une tâche mise en pause puis reprise plusieurs fois a
+      // un écart heureDebut→heureFin plus large que son temps de travail actif
+      // (il inclut les pauses), donc ce recalcul ne doit s'appliquer qu'à une
+      // correction délibérée, jamais en silence à côté d'une transition normale.
+      const parseHm = (s: any): number | null => {
+        const m = /^(\d{1,2}):(\d{2})$/.exec(String(s ?? '').trim());
+        if (!m) return null;
+        const h = Number(m[1]), min = Number(m[2]);
+        if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+        return h * 60 + min;
+      };
+      const heureDebutChanged = req.body.heureDebut !== undefined && req.body.heureDebut !== existing.heureDebut;
+      const heureFinChanged = req.body.heureFin !== undefined && req.body.heureFin !== existing.heureFin;
+      if (heureDebutChanged || heureFinChanged) {
+        const debutMin = parseHm(updates.heureDebut ?? existing.heureDebut);
+        const finMin = parseHm(updates.heureFin ?? existing.heureFin);
+        // `finMin` reste `null` pour une tâche encore RUNNING (heureFin vide) —
+        // pas de durée à corriger pour une tâche toujours en cours. Une fin
+        // antérieure au début est une saisie incohérente : on laisse la durée
+        // enregistrée plutôt que d'écrire un nombre négatif ou inventé.
+        if (debutMin !== null && finMin !== null && finMin > debutMin) {
+          updates.dureeSeconds = (finMin - debutMin) * 60;
+        }
       }
 
       // Who last touched this task, from what kind of device, and when.
@@ -7664,9 +8321,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   });
 
   // --- Public landing page.
-  // "Sur mesure" (>10 seats) stays a lead-capture request — a custom deal is
-  // inherently a conversation, not a self-serve signup. The three standard
-  // packs go through /api/signup below instead, which provisions a real
+  // "Sur mesure" (beyond the pricing page's own seat-stepper cap — see
+  // SEAT_STEPPER_MAX in Landing.tsx) stays a lead-capture request — a custom
+  // deal is inherently a conversation, not a self-serve signup. The sellable
+  // plans go through /api/signup below instead, which provisions a real
   // isolated company immediately.
   const escapeHtml = (v: string) => v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
@@ -7943,6 +8601,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const password = String(req.body?.password ?? '');
       const confirmPassword = String(req.body?.confirmPassword ?? '');
       const plan = isSellablePlan(req.body?.plan) ? req.body.plan : DEFAULT_PLAN_ID;
+      const planMetaForSignup = planMeta(plan);
+      // Pour une offre dynamique (prix par utilisateur), le nombre demandé
+      // ici *est* le nombre de sièges accordé — écrit une fois pour toutes
+      // sur la fiche ci-dessous, jamais réécrit depuis le catalogue statique
+      // ensuite (voir le commentaire de `seatLimit` dans plans.ts). Pour une
+      // offre à prix plat, `clampSeatsForPlan` ignore la valeur envoyée et
+      // retombe sur le `seatLimit` fixe de l'offre.
+      const requestedSeats = clampSeatsForPlan(planMetaForSignup, req.body?.seats);
       const secteur: Secteur = SECTEURS.some(s => s.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
 
       if (!companyName || !contactName || !contactEmail || !phone) {
@@ -7997,7 +8663,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         name: companyName,
         status: isFreePlan ? 'ACTIVE' : 'TRIAL',
         plan,
-        seatLimit: PLAN_SEAT_LIMITS[plan] || 1,
+        // `requestedSeats` est déjà le bon nombre pour une offre à prix plat
+        // (clampSeatsForPlan l'y ramène) comme pour une offre dynamique (le
+        // nombre demandé) — un seul champ, pas une branche par type d'offre.
+        seatLimit: requestedSeats,
         portalSeatLimit: PLAN_PORTAL_SEAT_LIMITS[plan] || 0,
         secteur,
         createdAt: new Date().toISOString(),
@@ -8056,7 +8725,8 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
           <p><strong>Contact :</strong> ${escapeHtml(contactName)}</p>
           <p><strong>Email :</strong> ${escapeHtml(contactEmail)}</p>
           <p><strong>Téléphone :</strong> ${escapeHtml(phone)}</p>
-          <p><strong>Offre visée :</strong> ${escapeHtml(plan)}</p>
+          <p><strong>Offre visée :</strong> ${escapeHtml(plan)} (${requestedSeats} utilisateur${requestedSeats > 1 ? 's' : ''})</p>
+          <p><strong>Prix visé :</strong> ${escapeHtml(formatDT(planPriceForSeats(planMetaForSignup, requestedSeats)))}/mois</p>
           <p><strong>Fin de la période d'essai :</strong> ${trialEndsAt ? trialEndsAt.slice(0, 10) : 'Aucune — offre Freelancer gratuite'}</p>
         `,
       }).catch(() => {});
@@ -8370,19 +9040,22 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const plan = isSellablePlan(req.body?.plan) ? req.body.plan : company.plan;
       const bank = await db.getPlatformSettings();
 
-      // Le prix annoncé est celui de l'offre, remise de parrainage déduite si
-      // l'entreprise en porte une : c'est le montant qu'on lui demande de
-      // virer, donc c'est celui qui doit figurer dans le mail. L'annoncer plein
-      // puis facturer moins (ou l'inverse) est la seule façon sûre de rater un
-      // encaissement.
+      // Le prix annoncé est celui de l'offre **pour le nombre de sièges déjà
+      // sur la fiche** (voir `planPriceForSeats`) — le nombre demandé à
+      // l'inscription, ou négocié depuis la console entre-temps — remise de
+      // parrainage déduite si l'entreprise en porte une : c'est le montant
+      // qu'on lui demande de virer, donc c'est celui qui doit figurer dans le
+      // mail. L'annoncer plein puis facturer moins (ou l'inverse) est la
+      // seule façon sûre de rater un encaissement.
       const meta = planMeta(plan);
       const discount = pendingReferralDiscount(company);
-      const net = meta ? discountedPriceDT(meta.priceDT, discount) : 0;
+      const basePrice = meta ? planPriceForSeats(meta, company.seatLimit) : 0;
+      const net = meta ? discountedPriceDT(basePrice, discount) : 0;
       const priceHtml = meta
         ? (discount > 0
           ? `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(net))} / mois
-               <span style="color:#8A93A0;"> (au lieu de ${escapeHtml(formatDT(meta.priceDT))} — remise parrainage de ${discount} % sur votre premier abonnement)</span></p>`
-          : `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(meta.priceDT))} / mois</p>`)
+               <span style="color:#8A93A0;"> (au lieu de ${escapeHtml(formatDT(basePrice))} — remise parrainage de ${discount} % sur votre premier abonnement)</span></p>`
+          : `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(basePrice))} / mois</p>`)
         : '';
 
       const { sent } = await sendMail({
@@ -8434,18 +9107,28 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // paie : c'est la première échéance qu'elle concerne, et le prix retenu
       // est figé sur la fiche (`subscriptionPriceDT`) pour que la console
       // n'ait pas à le recalculer plus tard, quand le catalogue aura bougé.
+      // Le prix se calcule pour le nombre de sièges **déjà sur la fiche** —
+      // celui demandé à l'inscription (offre dynamique) ou négocié depuis la
+      // console entre-temps — jamais pour le prix de base seul.
       const discount = pendingReferralDiscount(company);
-      const price = meta ? discountedPriceDT(meta.priceDT, discount) : null;
+      const price = meta ? discountedPriceDT(planPriceForSeats(meta, company.seatLimit), discount) : null;
 
       const updated = await db.updateCompany(company.id, {
         status: 'ACTIVE',
         plan,
-        seatLimit: PLAN_SEAT_LIMITS[plan] || company.seatLimit,
+        // Une offre dynamique (prix par utilisateur) ne réécrit jamais le
+        // nombre de sièges depuis le catalogue statique : celui de la fiche
+        // est déjà le nombre réellement demandé ou négocié, et c'est lui qui
+        // vient de servir à calculer `price` juste au-dessus — les deux
+        // doivent rester le même chiffre. Seule une offre à prix plat encore
+        // reprend son `seatLimit` fixe du catalogue.
+        ...(meta && !meta.pricePerExtraUserDT ? { seatLimit: PLAN_SEAT_LIMITS[plan] || company.seatLimit } : {}),
         // Seule une offre encore vendue pose un quota de comptes portail.
         // L'écrire depuis une offre retirée (qui n'en donne aucun) fixerait un
         // zéro sur la fiche — donc « aucun compte portail » — là où
-        // l'entreprise n'a jamais rien souscrit de tel.
-        ...(meta && !meta.legacy ? { portalSeatLimit: meta.portalSeatLimit } : {}),
+        // l'entreprise n'a jamais rien souscrit de tel. Même raison que
+        // ci-dessus pour ne pas y toucher sur une offre dynamique.
+        ...(meta && !meta.legacy && !meta.pricePerExtraUserDT ? { portalSeatLimit: meta.portalSeatLimit } : {}),
         trialEndsAt: null,
         confirmedAt: new Date().toISOString(),
         // L'échéance de l'abonnement, dérivée de l'offre : les trois packs

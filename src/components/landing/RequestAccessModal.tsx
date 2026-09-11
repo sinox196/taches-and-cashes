@@ -4,10 +4,14 @@ import { X, Loader2, Mail, CheckCircle2, Lock, Phone, Building2 } from 'lucide-r
 import { friendlyError } from '../../utils/errors';
 import { useAuth } from '../../context/AuthContext';
 import { SECTEURS, type Secteur } from '../../constants/secteurs';
-import { SELLABLE_PLANS, REFERRAL_DISCOUNT_PERCENT } from '../../constants/plans';
+import {
+  SELLABLE_PLANS, REFERRAL_DISCOUNT_PERCENT, planMeta, planPriceForSeats, formatDT,
+} from '../../constants/plans';
 
 interface RequestAccessModalProps {
   plan: string;
+  /** Le nombre d'utilisateurs choisi sur la carte cliquée — la modale démarre dessus plutôt que de repartir de zéro. */
+  initialSeats?: number;
   onClose: () => void;
 }
 
@@ -35,10 +39,20 @@ const PLAN_CODES: Record<string, string> =
  *   inherently a conversation, not a form. POST /api/orders records it and
  *   notifies contact@taches-and-cash.com.
  */
-export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, onClose }) => {
+export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, initialSeats, onClose }) => {
   useEscapeToClose(onClose);
   const { login } = useAuth();
   const isSignup = plan in PLAN_CODES;
+
+  // Une offre dynamique (prix par utilisateur) affiche un champ de plus et
+  // un aperçu de prix qui se recalcule en direct — les deux via
+  // `planPriceForSeats()`, la même fonction que la carte de tarifs et le
+  // serveur, pour que ce que la modale annonce ne puisse jamais diverger de
+  // ce que `POST /api/signup` accordera réellement.
+  const meta = isSignup ? planMeta(PLAN_CODES[plan]) : null;
+  const dynamicPlan = !!meta?.pricePerExtraUserDT;
+  const baseSeats = meta?.baseSeats ?? 1;
+  const [seats, setSeats] = useState<number>(() => Math.max(baseSeats, initialSeats || baseSeats));
 
   const [companyName, setCompanyName] = useState('');
   const [contactName, setContactName] = useState('');
@@ -86,6 +100,10 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
             companyName, contactName, contactEmail, phone, password, confirmPassword,
             plan: PLAN_CODES[plan], website, secteur,
             referralCode: referralCodeInput.trim(),
+            // Ignoré côté serveur pour une offre à prix plat (clampSeatsForPlan
+            // retombe alors sur son seatLimit fixe) — envoyé quand même, le
+            // serveur décide, pas ce composant.
+            seats,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -158,6 +176,40 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, on
                 Accès complet et gratuit pendant votre période d'essai — aucune carte bancaire requise. Nous vous
                 appellerons pour choisir votre offre définitive.
               </p>
+            )}
+
+            {/* Le curseur d'utilisateurs et l'aperçu de prix ne concernent
+                que les trois offres à tarif dynamique — Freelancer est
+                gratuit à un siège, rien à ajuster. */}
+            {isSignup && dynamicPlan && (
+              <div className="rounded-lg border border-gray-200 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-[12.5px] font-semibold text-gray-700">Nombre d'utilisateurs</label>
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setSeats(s => Math.max(baseSeats, s - 1))}
+                      disabled={seats <= baseSeats}
+                      aria-label="Retirer un utilisateur"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-[15px] font-bold bg-gray-100 text-navy disabled:opacity-30"
+                    >
+                      −
+                    </button>
+                    <span className="text-[14px] font-bold text-navy w-6 text-center">{seats}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSeats(s => s + 1)}
+                      aria-label="Ajouter un utilisateur"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-[15px] font-bold bg-gray-100 text-navy"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[13px] text-navy font-semibold">
+                  {formatDT(planPriceForSeats(meta, seats))} / mois
+                </p>
+              </div>
             )}
 
             {isSignup && referralCodeInput.trim() && (

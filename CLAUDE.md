@@ -77,6 +77,10 @@ A running task is stored as `dureeSeconds` (accumulated) plus `lastStartedAt` (e
 
 `heureFin` is only ever set on a task that has actually completed — the server stamps it on the `RUNNING → COMPLETED` transition and blanks it again if the task resumes. The table renders `—` for an empty one. Don't let the client invent `date`, `heureDebut`, or `heureFin`; the server owns all three so there is one clock and one format.
 
+**The one deliberate exception is a manual correction from [EditTaskModal.tsx](src/components/EditTaskModal.tsx) ("Modifier"), and it now updates `dureeSeconds` (and therefore the cost, which is derived from it at every read) to match.** Retyping the start and/or end time used to be cosmetic — the table kept showing whatever duration/cost had already accumulated, so correcting an entry's hours looked like the Enregistrer button did nothing. `PUT /api/time-entries/:id` now detects a genuine edit by comparing the incoming `heureDebut`/`heureFin` against the stored values (`heureDebutChanged`/`heureFinChanged`), never by their mere presence in the body — the modal always resends both, touched or not, since it starts from a copy of the whole entry, and recomputing on every save (rather than only on an actual change) would have overwritten a task's real accumulated duration with its wall-clock span just for being marked "Terminée" without editing its hours. Those two are deliberately not the same measure: a task paused and resumed several times has a `heureDebut`→`heureFin` gap wider than the time it was actually worked, since the gap includes every pause. So the recompute (`(finMinutes − debutMinutes) × 60`, both parsed from `HH:MM`) only fires when at least one of the two fields actually changed, and only when both resolve to a valid time with the end after the start — a still-`RUNNING` task's blank `heureFin` or a reversed pair leaves `dureeSeconds` untouched rather than writing a negative or invented number.
+
+`EditTaskModal`'s Statut `<select>` was also missing a `PAUSED` option — opening "Modifier" on a paused task left the field's React state correctly at `'PAUSED'`, but a controlled `<select>` with no matching `<option>` falls back to showing the *first* option as selected, `Terminée`. That read as "the task is already set to Terminée" when nothing had actually been chosen yet: saving without touching the dropdown sent the unchanged `PAUSED` status, which is what made an edit look like it silently did nothing. `PAUSED` (« En pause ») is now a real option, so the dropdown shows what the task actually is until the admin deliberately picks something else.
+
 **An admin's own tasks are hidden from everyone else.** `visibleEntriesFor()` drops ADMIN-owned rows for non-admin viewers, in both `GET /api/time-entries` and the broadcast, and **before pagination** so `total` describes what the viewer can actually see. Both the cost split and this visibility split are admin/non-admin, so the broadcast still builds exactly two frames.
 
 **The server owns the entry id.** The client sends one so it can insert optimistically, but a body without it no longer produces a row with `id: undefined` — such a row could never be updated or deleted (every route looks it up by id) and broke React's keys in the table. `statut` defaults to `RUNNING` the same way.
@@ -98,6 +102,8 @@ Admins get per-row pause / resume / stop controls on *any* collaborator's task (
 **The chronometer is reachable from every page**, not just Pointage — [FloatingTimer.tsx](src/components/FloatingTimer.tsx), a corner card mounted in App.tsx *outside* the page switch, carrying the clock plus pause / resume / stop. It does **not** open an SSE stream to stay fresh: that broadcast carries a whole page of every user's entries and holding it open on every screen is exactly the payload the scale rules forbid. Off Pointage it polls `GET /api/time-entries/active` every 30 s instead — one row, the caller's own, so it stays bounded however large the history grows — and merges it into the same `timeEntries` state, which is why the existing local 1s tick, `updateTimeEntryApi` and the overtime alert all keep working unchanged. The 30 s cadence only has to catch changes made *elsewhere* (another device, an admin pausing your task); the tick does the counting.
 
 With nothing running it falls back to a task paused **in this session only** (`justPausedId`), so pausing from the card doesn't make it vanish and strand you with no way to resume without walking back to Pointage. Deliberately not "the most recent paused entry" — that would park a task paused days ago in the corner of every page forever.
+
+**[PausedTasksList.tsx](src/components/PausedTasksList.tsx) — "Tâches en pause" on Pointage — carries its own client-name search**, shown only past one entry (`entries.length > 1`; a single paused task needs no filter). It is a self-contained live filter over `myPausedEntries` (the caller's own PAUSED entries, already in memory — no network round-trip), not `SearchableSelect`: that component picks *one* option and writes it into a form field, closing on selection, whereas this narrows a list of *rows* as you type and has no "selected value" to hold. Typing folds accents the same way (`fold()`, duplicated locally rather than imported — the app's other accent-folding filters, the Échéances vocabulary picker included, each keep their own copy too) and matches anywhere in the client name, not just its start. A dropdown beneath the field lists the distinct client names still matching (derived from `entries`, deduplicated) — click one to fill the field exactly rather than retype it. An empty result shows "Aucune tâche en pause ne correspond à « … »" rather than silently emptying the card, so a stray character doesn't read as every paused task having vanished.
 
 **The overtime alert fires on the task's own duration — at 2h, then 4h, 6h, …** ([App.tsx](src/App.tsx)). Once a running task crosses a 2h milestone it prompts "Toujours sur cette tâche ?"; no answer within the 2-minute grace pauses it automatically.
 
@@ -149,6 +155,38 @@ Default charge percentages come from `defaultSettings()` in [src/server/db-types
 
 **Cost configuration lives only in the user form** ([UsersManagement.tsx](src/components/UsersManagement.tsx)). There is deliberately no Settings page: it was removed so there is exactly one place to reason about employer cost. `GET /api/settings` survives purely to seed that form's defaults — don't rebuild a global settings UI on top of it, and keep the form's `?? 2.0` style fallbacks in step with `defaultSettings()`.
 
+### Gestion des paies
+
+A monthly payslip (bulletin de paie) per (employee, year, month), generated from the "Gestion des paies" nav item ([PayrollManagement.tsx](src/components/payroll/PayrollManagement.tsx)), gated on `VIEW_PAYROLL` (read/print) / `MANAGE_PAYROLL` (generate/edit/delete) — its own permission group, not folded into `MANAGE_USERS`: a cabinet may want its accountant to print bulletins without being able to touch the Équipe roster. Reproduces the cabinet's own "Modèle de fiche de paie" template and its accompanying Excel cahier des charges (progressive IRPP barème, CNSS salariale, CSS LF2018, abattement forfaitaire, déductions communes) — both supplied by the user, not invented.
+
+**`computePayslip()` in [server.ts](server.ts) is the single implementation of the calculation** — the same "one cascade, not N copies that drift" rule as `computeInvoiceTotals()`. `POST /api/payslips/preview` (no write) and `POST`/`PUT /api/payslips` (write) all call it, so a saved bulletin can never show a figure the preview hadn't already shown, and the client carries no second copy of the tax logic — the generation modal's "Calculer l'aperçu" button is a round-trip to the server, not a local mirror.
+
+**« Salaire de base » comes from the Équipe fiche, not from a rate × hours.** `user.salaireBrut` (the existing monthly-gross field the employer-cost calculation already reads) prefills the bulletin's gains line the moment a collaborator is picked in the generator — this was the explicit ask, over deriving it from `salHeure`. It stays editable per bulletin without touching the employee's own record: a month can differ (an unpaid day, an avenant) without rewriting the reference salary. `salHeure` (one of the twelve "Gestion des paies" fields on the Équipe form — see below) is still snapshotted and still used, but only for the "Jours fériés" line.
+
+**« Jours fériés » is chiffré at 8h/jour × `salHeure`** — an assumption, not a rule from the cahier des charges: the template gives no formula for that line, and 8h is what exactly reproduces the sample bulletin's own worked example (1 jour × 8h × 4,783 DT/h = 38,264, the printed value). Every other gains line (primes de présence/transport/encouragement) is a plain amount typed by the admin — inventing a proration formula the source documents don't give would be exactly the "un chiffre faux et crédible" trap `isTnd()`/`countsAsBilled()` exist to avoid elsewhere in this app.
+
+**`nombreMois` (admin-entered, default 12) is not a contract duration — it's what the bulletin's gross salary is annualized over for the progressive brackets.** IRPP and CSS are bracket-based on an *annual* taxable base; computing that base from this month's own fluctuating gains (primes vary, a short month happens) would make the withholding see-saw month to month, which is not how a payslip's retenue à la source is supposed to behave. So the annual reference is `salaireBrutImposable(this bulletin) × nombreMois` — stable, and exactly what the Excel's own Annuel/Mensuel columns describe once accounted for `salaireBrut` being monthly-first in this app rather than annual-first like the spreadsheet. CNSS itself is *not* annualized — it is a flat rate on the actual monthly brut, per the cahier des charges' own `Retenue CNSS = (5) × (6)` at both granularities.
+
+**The IRPP barème (`IRPP_BRACKETS`) is hardcoded from the cahier des charges Excel** — 0% to 5 000 DT, 15% to 10 000, 25% to 20 000, 30% to 30 000, 33% to 40 000, 36% to 50 000, 38% to 70 000, 40% beyond — applied progressively (`irppAnnuel()`): each bracket taxes only the slice of income that falls in it. CSS is a flat 0.5% on the same rounded-up taxable base as IRPP (`imposableIrppArrondi`, `Math.ceil` of the annual taxable income) — verified against the Excel's own worked example, not assumed. The abattement forfaitaire is 10% of the taxable base, capped at 2 000 DT/an.
+
+**Déductions communes now cover the barème's full family-quotient table, via `deductionsCommunesAnnuelles()` in server.ts** — Marié(e) (300 DT/an, derived from the existing free-text `situationFamiliale` field — a case-insensitive match on "mari…" — rather than a separate checkbox: `situationFamiliale` already says whether someone is married, on the very same form, and a second field for the identical fact would have been the same information typed twice, one copy of which could drift from the other), Nombre d'enfants (`nombreEnfants`, 100/200/300/400 DT/an, capped at 4), Enfants infirmes/handicapés (`paieEnfantsInfirmes`, 2 000 DT/an **per child, no cap on count**), Enfants étudiants non boursiers <25 ans (`paieEnfantsEtudiants`, 1 000 DT/an per child, **capped at 4**), Parents à charge (`paieParentsACharge`, 0/1/2, each min(5% of a reference base, 450 DT/an)), Assurance vie and Compte épargne en actions (`paieAssuranceVie`/`paieCEA`, plain amounts each capped at 100 000 DT/an). "Ajouter déduction" — the Tableau's own open-ended extra-deduction row with no worked example and no fixed rule — is deliberately not built, same "not built, not guessed" line as the rest of this app's deferred scope.
+
+**The IRPP barème above was verified line-by-line against the cabinet's own "Barème de l'Impôt sur le Revenu" sheet** — its eight tranches (0 % to 5 000 DT, 15 % to 10 000, 25 % to 20 000, 30 % to 30 000, 33 % to 40 000, 36 % to 50 000, 38 % to 70 000, 40 % beyond) match `IRPP_BRACKETS` exactly, threshold for threshold and rate for rate; no code change was needed there, since the two were already identical.
+
+**Parents à charge's own formula (`Min((11) × 5%, 450)`) is circular as written** — "(11)" is the taxable base *after* déductions communes, and parents à charge is itself one of those déductions. Read literally it would require the total to compute one of its own parts. `deductionsCommunesAnnuelles()` resolves this by computing the 5% on `baseAvantDeductionsCommunes` — the annual taxable base after the abattement forfaitaire but **before** any déduction commune (including parents à charge itself) — a deliberate, documented interpretation rather than a literal transcription, since the Excel's own worked example doesn't exercise this case to disambiguate it.
+
+**The fields live on the Équipe user form**, grouped in a collapsible "Gestion des paies" section (chevron toggle, own `useState`, collapsed by default — the same idiom the dashboard's five collapsible cards and the permission groups just below it already use) gated `formRole !== CLIENT_ROLE`: matricule, n° CIN, n° CNSS, qualification, département, banque/poste, numéro de compte, situation familiale, catégorie, échelon, salaire/heure — eleven purely-declarative dossier fields, none of which feed `employerHourlyRate()` or the pointage gate, only the bulletin. `nombreEnfants` used to sit here too but moved to "Paramètres de la paie" below (see next paragraph) — unlike the other eleven, it was never purely declarative: it has fed the enfants-à-charge deduction tier since before this section existed, so leaving it in the dossier-only group implied it did nothing to the calculation, which was never true. The modal widened from `max-w-md` to `max-w-2xl` to hold the two-column grid these fields need — a single column would have made an already long form scroll far past what a password/role/coût-employeur form used to require.
+
+**A second collapsible section, "Paramètres de la paie", sits right below "Gestion des paies"** on the same form, same chevron idiom, own `useState`, collapsed by default, same `formRole !== CLIENT_ROLE` gate — the six déductions communes inputs above: `nombreEnfants` (moved here from "Gestion des paies", since it is a déduction parameter, not a dossier fact — see above), `paieEnfantsInfirmes`, `paieEnfantsEtudiants`, `paieParentsACharge` as a 0/1/2 `<select>`, `paieAssuranceVie`, `paieCEA` — each carrying its exact rule/cap as helper text so the admin never has to guess what a field does from its name alone. There is deliberately no "Marié(e)" input here: a note at the top of the section says the 300 DT/an deduction reads `situationFamiliale` in "Gestion des paies" instead, and that field's own helper text points back the other way — so the dependency is visible from wherever the admin happens to look first. The modal widened again, `max-w-2xl` → `max-w-4xl`, to keep the two-column grid legible with two stacked payroll sections instead of one.
+
+**A bulletin snapshots the employee's payroll identity *and* payroll deduction parameters at generation time** — matricule, CIN, CNSS, qualification, département, banque, compte, situation familiale, nombre d'enfants, catégorie, échelon, salHeure, plus the six `paieXxx` fields — the same "copie figée" rule the mission/task-type snapshot on time entries and the client-flag snapshot on invoices already follow: correcting an employee's CIN, or their marital status, in Équipe next year must not silently rewrite a bulletin already handed out. Editing a saved bulletin (`PUT /api/payslips/:id`) only ever touches the editable gains/rates and re-runs `computePayslip()` against its own stored snapshot, never re-reads the employee row — a bulletin's year/month/employee are fixed at creation, like an invoice's number; regenerate rather than reassign. Creating a second bulletin for the same (employee, year, month) is refused server-side.
+
+**`GET /api/payroll/employees` is a liste blanche projection**, not the full user row — id, username, role, and the payroll-relevant fields only (the eleven dossier fields plus `nombreEnfants` and the five other `paieXxx` déduction params), never permissions or the rest of the coût-employeur block, so a `VIEW_PAYROLL` holder without `MANAGE_USERS` can still pick an employee and see their payroll identity without being handed the whole Équipe fiche. `GET /api/payroll/company` reuses the exact same issuer identity as Cash (`companyBlock(getSettings())`) rather than a second copy — it is company identity, not invoicing-specific — behind its own `VIEW_PAYROLL` gate so a payroll-only viewer isn't forced through `VIEW_CASH` to print a bulletin's header.
+
+**[payslipPdf.ts](src/components/payroll/payslipPdf.ts) draws the bulletin with jsPDF text primitives**, the same "real vector text, one renderer for download and print" rule [invoicePdf.ts](src/components/cash/invoicePdf.ts) already follows — reusing its `CompanyBlock` type and the print-via-hidden-iframe pattern rather than inventing a second one. **It reproduces the cabinet's own template literally, not a restyled adaptation of it**: a bordered Excel-style grid throughout (every cell its own bordered rect via a shared `box()` helper — never a separate divider line drawn on top of already-bordered cells, which the first version did and which crossed straight through "COMPTE BANQ / POSTE"'s text), plain black text and thin borders everywhere except the navy "BULLETIN DE PAIE" title, no filled dark header bars or colour-coded cards like the rest of this app's PDFs use. The identity grid matches the model's own row/column merges exactly — NOM ET PRENOM and the BANQUE/COMPTE BANQ POSTE row each span the full row width instead of splitting into a label/value pair, since that's what the model does. The RUBRIQUES table's TAUX column holds plain numbers as the model types them (`176`, `6.99`, `0.5`) — **never run through `money()`**, which forces a comma and three decimals and turned "6.99" into "6,990"; only GAINS/RETENUES are money-formatted. Every row prints at the same plain weight the model uses — no bolding on SALAIRE BRUTE/BRUTE IMPOSABLE/NET — except the header row and the final SALAIRE NET A PAYER row, which merges RUBRIQUES+TAUX into the label and GAINS+RETENUES into the amount, matching the model's own merge there.
+
+**Nb Heures, N Heures, J.Congés, J.Absences and Solde Congé are purely informational** — admin-typed numbers printed on the bulletin's footer strip, exactly as the template has them, entering no calculation. `Jours fériés` is the one exception: the same number both prices the "Jours fériés" gains line and prints in the footer, since the template shows the identical figure in both places.
+
 ### Presence (actif / absent / inactif)
 
 Three states, defined in [src/constants/presence.ts](src/constants/presence.ts) and shared by both sides: **ACTIVE** (mouse or keyboard in use), **AWAY** (no input for `AWAY_AFTER_MS`, 10 min), **INACTIVE** (no heartbeat for `OFFLINE_AFTER_MS`, ~95 s — tab closed, logged out, or machine off).
@@ -180,6 +218,10 @@ Implements workflow #1 of the cahier des charges (`Facturation-Tous-les-types-de
 Numbering splits by document kind. A **facture légale** takes the next value of the legal sequence (`nextInvoiceNumber()`), which is never reassigned on edit. **Numbering and chronology must agree**: `legalSequenceDateError()` is the single implementation, called on create *and* on edit — editing skipped it entirely, so an invoice created in order could be moved to any date afterwards. It checks **both** neighbours by number: a new invoice is always last so it only has a predecessor, but an edited one sits mid-sequence and moving n° 2 past n° 3 breaks the ordering just as much as moving it before n° 1. Two invoices **may share a date** — only going backwards is refused. An **autre document** carries a free reference typed by the user: it does not follow the sequence, deliberately does not consume a number from it (that would punch gaps in the legal numbering), is exempt from the date rule, and may be corrected later. Both kinds reject a duplicate number. All of it is enforced server-side — a client-supplied number on a legal invoice is ignored.
 
 **`countsAsBilled(inv)` in [server.ts](server.ts) is the single definition of « ce document compte comme des honoraires »** — `documentKind !== 'AUTRE_NON_FACTURABLE' && status !== 'DRAFT'`. It replaced five scattered copies of the same two conditions, in the client ledger, the batched `GET /api/clients`, the KPI dashboard and the executive endpoint: three screens that all claim to show the same figure, so a rule spelled out five times is a rule that will eventually disagree with itself. Anything new that sums invoices goes through it.
+
+**`isTnd(inv)` is `countsAsBilled`'s companion guard, for the same reason.** `currency` is free text with no stored exchange rate, so summing `totalNetToPay` across documents in different currencies produces a number that is neither TND nor any other currency — plausible-looking and wrong. The executive dashboard's own "Grand-livre client" already excluded non-TND invoices this way; `enrichClientLedger()`, the batched `GET /api/clients` list (and its "Total Général" row), `/api/kpi/dashboard`'s per-client block, and the client portal's `/api/portal/summary`/`/api/portal/statement` did not, so a client with even one foreign-currency document showed a "Montant de facture" on the Clients page that silently included GBP or USD amounts as if they were dinars — visibly disagreeing with Facturation's own per-currency Total Général, which has always kept the three currencies apart. All five now filter through the same `isTnd()` before summing, so a client's ledger total is always TND-only, matching Facturation.
+
+**A foreign-currency invoice isn't dropped from the Clients page, just kept out of the TND total.** `enrichClientLedger()` and the batched `GET /api/clients` list also build `montantFactureDevises` — the same per-client sum as `montantFacture`, but keyed by every currency the client was actually billed in (TND included, so the screen has one field to read). `ClientsManagement.tsx`'s `montantFacture` cell shows the TND figure as before, with a small line per other currency underneath (`otherCurrencies()`, alphabetical so the order doesn't reshuffle as documents come and go) — same treatment on the "Total Général" row, summed the same way across every client matching the current filters. The View Drawer's "Facturation par devise" section is the fuller version of the same data, one row per currency, and only renders when there's a non-TND amount to show. `montantFactureDevises` is stripped by `stripLedger()` like every other money field — `VIEW_CLIENT_FINANCIALS` gates it exactly like `montantFacture`. `/api/kpi/dashboard` and the portal routes were deliberately left TND-only: this breakdown answers "what did the Clients page hide," and only the Clients page hides anything here.
 
 **A document can be saved as a brouillon** (`status: 'DRAFT'`, drawn amber with a left border in the Cash table). The point of the draft is the *numbering*: a brouillon carries a provisional `BR-<timestamp>` reference, takes **no** number from the legal sequence, is exempt from the chronology rule, and is excluded from every total by `countsAsBilled()`. Preparing an invoice in advance therefore cannot punch a gap in the legal numbering nor inflate the turnover with documents that do not exist yet. `POST /api/invoices/:id/issue` is what assigns the real number — the legal sequence's next value for a facture légale (re-checking `legalSequenceDateError()` at *that* moment, since the draft may have sat for weeks), or a free reference it demands from the caller for an autre document. Editing a draft deliberately cannot change its status or its number: `PUT` forces `merged.status = existing.status` and keeps the provisional reference, so there is exactly one route that can put a number on a document.
 
@@ -328,15 +370,97 @@ Deliberately deferred to V2/V3 per the spec's own phasing table (do not build wi
 
 Le catalogue vit dans [src/constants/plans.ts](src/constants/plans.ts) — une
 seule liste, lue par la page publique, la console plateforme et `server.ts`,
-comme `roles.ts` et `paymentModes.ts`. Trois packs : **Pack 5 / 70 DT**,
-**Pack 10 / 100 DT**, **Pack 15 / 130 DT**, chacun avec dix fois son nombre de
-sièges en comptes portail client (50 / 100 / 150) et l'intégralité des vues,
-factures comprises et sans plafond. Changer un prix, c'est éditer une ligne :
-une valeur corrigée sur la page de tarifs mais pas côté serveur produirait une
-page qui annonce un montant et un e-mail de RIB qui en demande un autre.
+comme `roles.ts` et `paymentModes.ts`. Changer un prix, c'est éditer une
+ligne : une valeur corrigée sur la page de tarifs mais pas côté serveur
+produirait une page qui annonce un montant et un e-mail de RIB qui en
+demande un autre.
+
+**Quatre offres, dans cet ordre** — Freelancer en tête, puis RH & Paie,
+Facturation, Complet — chacune ouvrant un périmètre différent :
+
+- **Freelancer** — gratuit, un siège, ADMIN, toutes les vues (`modules`
+  absent). Voir plus bas.
+- **RH & Paie** (`RH_PAIE`) — 20 DT/mois pour 1 utilisateur, +10 DT par
+  utilisateur supplémentaire. `modules: ['HR', 'Payroll', 'Users']` — Équipe,
+  RH et Gestion des paies, rien d'autre.
+- **Facturation** (`FACTURATION`) — même tarif, `modules: ['Clients', 'Cash',
+  'Users']` — Équipe, Clients et Cash.
+- **Complet** (`COMPLET`) — 50 DT/mois pour **5 utilisateurs inclus**, +10 DT
+  par utilisateur supplémentaire, `modules` absent (toutes les vues). Offre
+  par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
+
+**Pack 5/10/15 et l'ancien pack Facturation à 30 DT (un siège) ont été
+supprimés du catalogue purement et simplement**, pas seulement retirés
+(`legacy: true`) — décision explicite prise en connaissance du risque :
+toute entreprise encore inscrite sous l'un de ces identifiants voit
+`planMeta()` renvoyer `null`, ce qui la fait retomber sur les replis déjà en
+place pour une offre inconnue (`planLabel()` affiche l'id brut,
+`planAllowsModule()`/`planAllowsPermission()` ouvrent tout). Une offre
+retirée qu'on veut au contraire préserver pour ses entreprises existantes
+suit toujours le chemin `legacy: true` — voir `FREELANCE`/`EQUIPE`/
+`CROISSANCE` ci-dessous, inchangé.
+
+**Le tarif par utilisateur supplémentaire est le cœur du nouveau catalogue.**
+`PlanMeta.pricePerExtraUserDT` (10 DT pour les trois offres non-Freelancer) et
+`PlanMeta.baseSeats` définissent une offre **dynamique** — 1 pour RH & Paie et
+Facturation, mais **5 pour Complet** : ses 50 DT couvrent d'emblée cinq
+comptes, pas un seul. `planPriceForSeats(meta, seats)` dans plans.ts n'a rien
+à savoir de cette différence — elle lit `baseSeats` par offre — et en est
+l'unique implémentation : `priceDT` tel quel si `pricePerExtraUserDT` est
+absent (Freelancer, ou une offre retirée), sinon `priceDT + (seats −
+baseSeats) × pricePerExtraUserDT`. **Une seule fonction, appelée aux quatre
+endroits qui
+doivent absolument s'accorder** — le calculateur de la page Tarifs, l'aperçu
+de prix dans la modale d'inscription, le mail de RIB
+(`POST /api/platform/companies/:id/send-rib`) et la confirmation de paiement
+(`POST /api/platform/companies/:id/confirm`) — sinon un montant annoncé au
+client et un montant encaissé finiraient tôt ou tard par diverger, exactement
+le piège que `computeInvoiceTotals()` évite déjà côté facturation.
+
+**`PlanMeta.seatLimit` sur une offre dynamique n'est qu'un repli
+d'affichage** (égal à `baseSeats` — 1 pour RH & Paie/Facturation, 5 pour
+Complet) — **jamais** le nombre réellement
+accordé à une entreprise. Ce nombre-là vit sur la fiche
+(`company.seatLimit`), posé au nombre demandé à l'inscription
+(`POST /api/signup`, champ `seats` du corps de la requête, borné par
+`clampSeatsForPlan()` — entre `baseSeats` et `MAX_DYNAMIC_SEATS`, un
+garde-fou anti-abus de 200, pas une vraie limite commerciale) ou négocié
+ensuite depuis la console (`CompanyEditModal.tsx`, déjà éditable comme tout
+le reste des sièges). `POST /api/platform/companies/:id/confirm` **ne
+réécrit jamais `seatLimit`/`portalSeatLimit` depuis le catalogue statique
+pour une offre dynamique** — seule une offre à prix plat (aucune sellable
+aujourd'hui hormis Freelancer) reprend encore son `seatLimit` fixe à la
+confirmation ; sans cette garde, confirmer une entreprise sur RH & Paie à 4
+sièges l'aurait silencieusement ramenée à 1.
+
+**Toute lecture de `seatLimit` côté client doit suivre le même ordre de
+résolution que `seatLimitError()` côté serveur : la fiche d'abord, l'offre
+ensuite.** `GET /api/me` porte donc `company.seatLimit` (le nombre réel, pas
+le repli du catalogue) précisément pour ça —
+[UsersManagement.tsx](src/components/UsersManagement.tsx)'s `singleSeatPlan`
+(qui masque « Nouvel utilisateur »/« Exporter » d'Équipe sur un siège
+unique) lit `user.company.seatLimit ?? planMeta(...).seatLimit`, jamais
+`planMeta(...).seatLimit` seul — s'arrêter au catalogue aurait masqué ces
+deux boutons pour *toute* entreprise sur une offre dynamique, même celle
+ayant payé pour dix sièges, puisque le catalogue n'en affiche jamais que 1.
+Même règle appliquée dans [PlatformAdmin.tsx](src/pages/PlatformAdmin.tsx),
+qui affiche `c.seatLimit ?? meta.seatLimit` (jamais `meta.seatLimit` seul) à
+côté du prix recalculé pour ce nombre de sièges.
+
+**La page de tarifs porte un calculateur par carte** — un curseur
+« Utilisateurs » (`+`/`−`, borné entre `baseSeats` et `SEAT_STEPPER_MAX`, une
+limite d'affichage locale à Landing.tsx fixée à 50, bien en-deçà du
+`MAX_DYNAMIC_SEATS` serveur) qui recalcule le prix affiché **instantanément**
+via `planPriceForSeats()` — aucun aller-retour réseau, la même fonction que
+le serveur rappelée à chaque clic. Le nombre choisi sur la carte est porté
+jusqu'à la modale d'inscription (`initialSeats`), qui garde son propre champ
+éditable et son propre aperçu de prix : le visiteur peut affiner le chiffre
+là aussi sans revenir à la carte. `POST /api/signup` reçoit ce nombre dans
+`seats` et l'écrit tel quel (borné) comme `seatLimit` de la nouvelle
+entreprise — voir plus haut.
 
 **Le pack Freelancer est gratuit pour de bon, pas seulement à l'essai.** Un
-siège, ADMIN, `priceDT: 0`, et les mêmes vues que les trois packs (`modules`
+siège, ADMIN, `priceDT: 0`, et les mêmes vues que le pack Complet (`modules`
 absent) — un indépendant y trouve tout le cabinet, juste sans personne
 d'autre à ajouter, ce que le siège unique impose déjà par `seatLimitError()`
 sans règle à part. « Gratuit, sans période d'essai » n'est pas ce que
@@ -348,18 +472,6 @@ n'y entre jamais n'expire jamais, et `documentQuotaFor()` rend `null` (aucun
 plafond) exactement comme pour un abonnement payé confirmé. La page de
 tarifs affiche « Gratuit » plutôt que « 0 DT/mois » pour la même offre — un
 prix à zéro se lit comme un champ oublié, pas comme une promesse.
-
-**« Nouvel utilisateur » et « Exporter » disparaissent tous les deux d'Équipe
-sur un siège unique.** [UsersManagement.tsx](src/components/UsersManagement.tsx)
-lit `planMeta(user?.company?.plan)?.seatLimit <= 1` plutôt que de comparer
-littéralement `plan === 'FREELANCER'` — le Freelancer est aujourd'hui la
-seule offre à un siège qui ouvre encore cette vue (Facturation aussi est à un
-siège, mais `modules` lui ferme Équipe avant qu'on y arrive), mais une future
-offre à un seul compte suivrait la même règle sans y toucher. « Nouvel
-utilisateur » n'empêche rien côté serveur — `seatLimitError()` refuserait de
-toute façon la création — il évite seulement d'offrir un geste qui échouera à
-coup sûr ; « Exporter » n'a simplement rien à exporter d'utile quand la seule
-ligne du tableau est soi-même.
 
 **Les offres retirées restent dans la liste** (`legacy: true`) — `FREELANCE`,
 `EQUIPE`, `CROISSANCE`. Une entreprise inscrite sous l'ancien catalogue les
@@ -373,37 +485,37 @@ la réécrit pas.
 **Une offre peut n'ouvrir qu'une partie de l'application.** `PlanMeta.modules`
 porte les vues qu'elle vend, désignées par l'identifiant que porte déjà leur
 entrée de barre latérale (`Cash`, `Clients`, `HR`…) — **absent = toutes**, ce
-qui est le cas des trois packs (et du Freelancer) et ce qui fait qu'ajouter
-une offre restreinte n'a touché à rien de ce qui existait. Le pack
-**Facturation** (30 DT, un siège, aucun compte portail) déclare
-`['Clients', 'Cash']` — dans cet ordre : Clients en tête et non Cash, parce
-que c'est le premier module de cette liste qu'App.tsx ouvre par défaut, et
-c'est le fichier clients qu'on veut voir en arrivant, pas un formulaire de
-facture sans dossier encore choisi — le fichier clients qu'il faut bien
-pouvoir facturer, rien d'autre — **Équipe non plus**, l'offre étant à un
-siège, il n'y a personne à gérer (le mot de passe se change alors par « mot
-de passe oublié », que `PLAN_NEUTRAL_PREFIXES` laisse ouvert à toute offre).
+qui est le cas de Freelancer et de Complet, et ce qui fait qu'ajouter une
+offre restreinte n'a touché à rien de ce qui existait. Les deux offres
+restreintes (RH & Paie, Facturation) suivent la même règle littérale que
+l'ancien pack Facturation à un siège : **seules les vues explicitement
+listées s'ouvrent**, Tableau de bord, Pointage, Ressources métier et
+Messages compris — ce n'est pas un oubli, c'est ce que l'utilisateur a
+demandé (« ken », *seulement*, dans sa description des deux offres). L'ordre
+compte dans chaque liste : Facturation déclare `Clients` avant `Cash` avant
+`Users`, parce que c'est le premier module de la liste qu'App.tsx ouvre par
+défaut, et c'est le fichier clients qu'on veut voir en arrivant — pas un
+formulaire de facture sans dossier encore choisi ; RH & Paie déclare `HR`
+avant `Payroll` avant `Users`, parce que c'est l'écran de travail quotidien
+de cette offre, la paie se générant moins souvent que les congés ne se
+posent, et Équipe étant un écran de réglage plutôt qu'un écran d'usage
+courant. `Users` (Équipe) figurant désormais dans ces deux offres — à la
+différence de l'ancien pack Facturation à un siège, qui l'excluait faute de
+personne à gérer — un cabinet sur l'une d'elles peut ajouter des
+collaborateurs, ce qui est précisément ce que le tarif par utilisateur
+supplémentaire vend.
 
-`standalone: true` la sort de l'échelle des sièges : elle est **en tête** de
-`PLANS` et la page de tarifs lui donne son propre ton (`TONES.accent`, le fond
-turquoise clair de la charte). Quatre cartes identiques feraient lire « 30 DT »
-comme le pack le moins cher, alors que ce n'est pas le même produit — d'où
-trois tons et non deux : `navy` met une offre **en avant** parmi ses pareilles,
-`accent` dit qu'une offre **n'est pas de la même famille**. Les encres du ton
-accent sont assombries pour tenir sur ce fond : le gris `#8A93A0` des cartes
-blanches y tombe à 2,6:1.
-
-**Sa carte a été retirée de la page Tarifs, à la demande de l'utilisateur** —
-[Landing.tsx](src/pages/Landing.tsx) filtre `FACTURATION` hors de la liste
-affichée (`SELLABLE_PLANS.filter(p => p.id !== 'FACTURATION')`) avant de la
-mettre en forme de cartes, et le paragraphe d'en-tête qui la présentait
-(« L'offre Facturation est un autre produit… ») a été retiré avec elle. Ce
-n'est **pas** la même chose qu'un `legacy: true` : l'offre reste dans
-`SELLABLE_PLANS` et donc `isSellablePlan` — une inscription qui la demande
-encore (console plateforme, lien direct) fonctionne toujours, seule sa carte
-publique a disparu. Si elle doit redevenir visible sur la page, retirer le
-`.filter()` suffit — ne pas la remarquer `legacy`, qui produirait un tout
-autre comportement (refusée à toute nouvelle inscription).
+**`Parrainage` figure en dernier dans les deux listes**, à côté de `Users` —
+contrairement aux autres vues restreintes, ce n'est pas une fonctionnalité du
+métier mais l'abonnement de l'entreprise lui-même qui est en jeu
+(`canRefer`/`settleReferralOnPayment()`, voir « Parrainage » plus bas), donc
+il n'y avait aucune raison de le réserver aux deux offres généralistes :
+n'importe quel abonnement `ACTIVE` peut parrainer, quelle que soit l'offre
+qu'il vend. Manquait initialement des deux listes — l'écran restait donc
+invisible sur RH & Paie et Facturation alors que la logique serveur
+(`/api/referral`, gardée par `MANAGE_USERS` et par `PLAN_MODULE_ROUTES` qui
+mappe déjà `/api/referral` sur `Parrainage`) n'avait jamais rien d'autre à
+changer pour l'ouvrir.
 
 L'éditeur de document reste capable de se passer du fichier clients : il
 demande `hasPermission('VIEW_CLIENTS')` — qui consulte déjà l'offre — et sans
@@ -443,20 +555,26 @@ Le périmètre se ferme à **trois endroits, et les trois sont nécessaires** :
 App.tsx dérive de tout ça la section réellement affichée (`activeNav`) : la
 section mémorisée peut être fermée par l'offre — et l'est par défaut, le repli
 du sélecteur étant « Équipe » —, auquel cas on retombe sur **la première vue
-déclarée par l'offre** (`Clients` pour le pack Facturation, puisque « Équipe »
-n'y figure pas — un siège unique n'a personne à gérer), pas sur la première
-entrée de `NAV_IDS` qui se trouve autorisée. `canShowNav` traite le même refus
-pour une seconde raison, indépendante de l'offre : « Équipe » ferme aussi pour
-un utilisateur sans `MANAGE_USERS`, exactement comme elle fermerait pour une
-offre qui ne la vend pas — un collaborateur en première connexion retombe donc
-sur la même chaîne de secours qu'un compte Facturation, plutôt que sur
-« section en cours de développement ».
+déclarée par l'offre** (`Clients` pour le pack Facturation, en tête de
+`['Clients', 'Cash', 'Users']` ; `HR` pour RH & Paie, en tête de
+`['HR', 'Payroll', 'Users']`), pas sur la première entrée de `NAV_IDS` qui se
+trouve autorisée. `canShowNav` traite le même refus pour une seconde raison,
+indépendante de l'offre : « Équipe » ferme aussi pour un utilisateur sans
+`MANAGE_USERS`, exactement comme elle fermerait pour une offre qui ne la vend
+pas — un collaborateur en première connexion sans ce droit retombe donc sur
+la même chaîne de secours qu'un compte sur une offre qui ne vend pas Équipe,
+plutôt que sur « section en cours de développement ».
 
-**Le plafond de documents est ce que lève l'abonnement.**
-`PlanMeta.trialDocumentQuota` (10 pour le pack Facturation) plafonne les
+**Le plafond de documents est ce que lève l'abonnement — aucune offre du
+catalogue actuel n'en pose un.** `PlanMeta.trialDocumentQuota` plafonne les
 documents **émis** par mois tant que l'entreprise n'est pas `ACTIVE` ;
 `documentQuotaFor()` rend `null` dès qu'elle l'est — c'est précisément ce
-qu'on vend. Trois précisions qui décident du comportement :
+qu'on vend. L'ancien pack Facturation à un siège en portait un (10/mois) ;
+le pack Facturation qui l'a remplacé n'en a délibérément pas, comme les
+trois autres offres — rien dans la demande n'en redemandait un, et le champ
+reste disponible pour la prochaine offre qui en aura besoin. Trois
+précisions qui décident du comportement, pour l'offre qui viendrait en
+poser un :
 
 - **Un brouillon ne compte pas** (`countsAgainstQuota` : tout sauf `DRAFT`).
   On en prépare autant qu'on veut ; c'est à l'**émission** que la place est
@@ -485,6 +603,17 @@ un oubli : une entreprise sur une offre retirée, ou l'entreprise historique,
 n'a jamais souscrit de quota de comptes portail et lui en imposer un
 casserait un portail déjà en service. Un `0` écrit sur la fiche, lui, veut bien
 dire zéro : c'est une valeur saisie, pas une absence.
+
+**Les trois offres dynamiques posent `portalSeatLimit: 0` au catalogue —
+aucun chiffre n'a été demandé pour ce panier-là, seul le tarif par
+utilisateur du back-office l'a été.** Zéro est le même défaut sûr que
+« aucune offre » ci-dessus : ça n'empêche personne de négocier un quota par
+fiche via `CompanyEditModal.tsx`, et ça n'invente pas un nombre qui
+tromperait un vrai client sur ce qu'il achète. Facturation et Complet
+ouvrent tous deux le module Clients (donc le portail client a un sens
+fonctionnel pour eux, contrairement à RH & Paie) — si un chiffre est
+souhaité pour ce panier, c'est une ligne à ajouter dans plans.ts, pas une
+correction de bug.
 
 ### Parrainage
 
@@ -634,9 +763,17 @@ sur la même liste déjà chargée (`GET /api/users`) — « Équipe » (tout sa
 `CLIENT_ROLE`) et « Comptes clients » (uniquement `CLIENT_ROLE`), avec un
 compteur sur le second. Les deux populations ne se lisent jamais ensemble :
 noyer une poignée de comptes portail parmi des dizaines de collaborateurs (ou
-l'inverse) ne montre rien d'utile. La colonne « Rôle » devient « Dossier
-client » dans cet onglet — le rôle y est toujours `CLIENT`, donc l'afficher
-répéterait ce que l'onglet dit déjà — et « Nouvel utilisateur » devient
+l'inverse) ne montre rien d'utile. La colonne « Rôle » n'existe pas dans cet
+onglet — le rôle y est toujours `CLIENT`, donc l'afficher répéterait ce que
+l'onglet dit déjà — et le tableau n'affiche que Utilisateur / Statut /
+Actions, `<th>` et `<td>` conditionnés sur `teamTab !== 'clients'` de part et
+d'autre. Elle portait un temps le dossier client rattaché à sa place (« La
+colonne devient Dossier client »), **retirée à la demande de l'utilisateur** :
+le nom d'utilisateur d'un compte client se pré-remplit sur le nom du dossier
+choisi (voir plus bas), donc la colonne Utilisateur porte déjà quasiment
+toujours la même information. `user.clientName` reste lu ailleurs — il
+pré-remplit le sélecteur de dossier à l'édition — ce n'est que la colonne du
+tableau qui a disparu, pas le champ. « Nouvel utilisateur » devient
 « Nouveau compte client », qui ouvre le formulaire avec `Rôle` déjà sur
 `Client`. Une recherche par nom d'utilisateur filtre les deux onglets.
 
@@ -653,7 +790,60 @@ identifiant que l'admin invente — mais reste modifiable avant la création.
 après tout le bloc coût employeur / shift / congés : c'est lui qui décide si
 ce bloc s'affiche ou s'efface au profit du sélecteur de dossier client, donc
 le choisir en dernier obligeait à faire défiler tout un formulaire non
-pertinent avant de trouver le réglage qui en changeait le contenu.
+pertinent avant de trouver le réglage qui en changeait le contenu. Ce n'est
+vrai que pour un collaborateur — voir l'ordre inversé ci-dessous pour un
+compte client, où le rôle est déjà tranché avant même d'ouvrir la modale.
+
+**Pour un compte client, le formulaire s'ouvre déjà tranché sur le rôle**
+(`handleOpenCreate(CLIENT_ROLE)`, ce que « Nouveau compte client » appelle) —
+le dossier client rattaché passe donc **en tête**, avant nom d'utilisateur et
+mot de passe, et Rôle redescend en dernier. Ce n'est pas l'inverse arbitraire
+de l'ordre collaborateur : choisir le dossier **remplit** le nom
+d'utilisateur juste en dessous (`ClientSearchInput`'s `onChange`), donc le
+champ qui en alimente un autre doit le précéder, pas le suivre — la
+dépendance était déjà là, seul l'ordre à l'écran ne la suivait pas. Les deux
+séquences (`usernameField`/`passwordField`/`roleField`/`dossierField`, dans
+[UsersManagement.tsx](src/components/UsersManagement.tsx)) sont des fragments
+JSX assemblés une seule fois par rendu, pas deux copies du formulaire : rien
+ne duplique le balisage entre les deux ordres. Le rôle reste modifiable en
+cours de saisie (l'admin peut rebasculer un `Nouvel utilisateur` en `Client`
+depuis le `<select>` Rôle) et la réorganisation suit en direct, puisqu'elle
+ne dépend que de `formRole`.
+
+**La modale de création/édition porte une section « Gestion des paies »**,
+douze champs (matricule, n° CIN, n° CNSS, qualification, département,
+banque/poste, numéro de compte, situation familiale, nombre d'enfants,
+catégorie, échelon, salaire/heure) purement déclaratifs — un dossier
+administratif de paie, pas un calcul : aucun d'eux n'entre dans
+`employerHourlyRate()`, dans le pointage ou dans quoi que ce soit d'autre
+dans l'app. C'est délibéré : le cabinet a besoin de les *conserver* quelque
+part, pas de les faire agir. Repliée par défaut (`paieCollapsed`, même
+idiome chevron `ChevronRight`/`ChevronDown` que le tableau de bord et les
+groupes de permissions juste en dessous — chaque section garde son propre
+`useState`, pas d'abstraction partagée) : douze champs de plus, dépliés
+d'office, auraient allongé le formulaire pour tout le monde alors que seule
+la paie les consulte au quotidien. Gated `formRole !== CLIENT_ROLE` comme
+Coût employeur/Shift/Congés — un compte portail n'est pas un employé du
+cabinet. La modale elle-même est passée de `max-w-md` à `max-w-2xl` pour
+cette section : douze champs sur une seule colonne auraient rendu le
+formulaire interminable à faire défiler, la grille à deux colonnes n'a de
+sens que sur une modale plus large. Les douze champs sont stockés tels
+quels sur la fiche utilisateur (`matricule`, `numCin`, `numCnss`,
+`qualification`, `departement`, `banque`, `numeroCompte`,
+`situationFamiliale`, `nombreEnfants`, `categorie`, `echelon`, `salHeure` —
+voir l'interface `User` dans [AuthContext.tsx](src/context/AuthContext.tsx))
+et traversent `POST`/`PUT /api/users` par la même liste blanche explicite que
+le reste du formulaire ; `publicUser()` les renvoie sans traitement
+particulier puisqu'il ne fait que retirer `password` et parser
+`permissions`.
+
+**`nombreEnfants` a depuis migré vers « Paramètres de la paie »** (voir
+« Gestion des paies » plus haut) : contrairement aux onze autres, il n'a
+jamais été purement déclaratif — il alimente la tranche de déduction
+enfants à charge depuis avant même que cette section existe — donc le
+laisser ici à côté de champs qui, eux, n'agissent sur rien laissait croire
+qu'il ne faisait rien non plus. Les onze champs restants de ce paragraphe
+sont, eux, inchangés et toujours purement déclaratifs.
 
 **La sécurité est un périmètre global, pas un filtre par route.** Un compte
 `CLIENT` n'a aucune permission, donc `requirePermission` le refuse déjà partout
@@ -871,6 +1061,7 @@ Two details decide whether the file opens correctly in the cabinet's Excel, and 
 
 - **`ClientsManagement.tsx`'s `fetchAllFilteredClients()`** builds the same query params as the normal fetch but omits `page` — `GET /api/clients` already has a bare-array branch for exactly that case (`req.query.page ? enrichedAll.slice(...) : enrichedAll`, kept for other unpaginated callers like the autocomplete), so omitting `page` alone gets the whole filtered set in one request, unsliced.
 - **`CashManagement.tsx`'s `fetchAllFilteredInvoices()`** loops instead: `GET /api/invoices` caps `limit` at 500 per call with no unpaginated branch, so it pages through in chunks of 500 (same `q`/`kind` filters each time) until it's pulled everything the first response's `total` promised — the same "keep asking for more until you have it all" shape `App.tsx`'s "Charger plus" uses for the 200-row time-entries cap, just automatic instead of a button click.
+- **`TimeTrackingTable.tsx`'s `fetchAllFilteredEntries()`** is the same chunked-loop shape as Cash's, against `GET /api/time-entries?limit=1000&offset=…` (1000 being that route's own per-call ceiling — see Scale constraints). Pointage's Export was the one screen left out when `fetchAllRows` was first built here: it kept exporting `filteredEntries`, capped by whatever "Charger plus" had loaded, which is the same 1000-row screen ceiling this section otherwise exists to route around. The loop's result is run back through the loaded page's own `matchesFilters()` predicate (status/client/mission/collaborateur/date range) — one function, not a second copy that could disagree with what's on screen — and deduplicated by id, since a RUNNING/PAUSED entry the server pins to the front of `offset=0` (see Scale constraints) would otherwise also turn up again at its natural position in a later chunk.
 
 ### Filtres de période et pagination (RH)
 
@@ -891,6 +1082,14 @@ Sized for **hundreds of clients and dozens of users**. The rules that keep it th
   **The cap was already lifted server-side (`?limit=`, up to 1000) — Pointage's "Suivi des tâches de l'équipe" just never asked for more than the default 200.** Past that count the table quietly dropped the oldest entries with no way to reach them from the screen — reported as tasks that showed up in the dashboard's aggregates (computed over the *whole* filtered set, never capped) but not in this table's own list. The fix stays client-side, not a bigger default: `App.tsx` tracks `entriesLimit` (starts at `ENTRIES_PAGE_SIZE`) and a **"Charger plus"** button in `TimeTrackingTable.tsx`'s footer — shown only while `totalEntries > entries.length` and the page hasn't hit the server's own 1000-row ceiling — raises it by another `ENTRIES_PAGE_SIZE` and re-fetches. A single `?limit=N` re-fetch can safely replace `timeEntries` wholesale (it's a superset of what's already shown), but the **SSE frame can't**: it always carries only the newest 200 regardless of what the client last asked for, so a live push right after "Charger plus" used to snap the list back down to 200. `onmessage` now merges instead of replacing — the fresh frame plus whatever was already loaded beyond it (`prev.filter(e => !frameIds.has(e.id))`), so a live update to a recent row can't silently evict older ones the user just pulled in. This is the "load more" shape, not the `PeriodPager` prev/next pagination the HR tabs and Brouillard use — that idiom assumes a static filtered set, and this table's head is constantly rewritten by the broadcast, which a page-flip UI can't represent cleanly.
 
   **A Du/Au date range sits in the same header**, the same idiom as the dashboard's own range picker — two `<input type="date">`, ISO by construction, compared as plain strings against `entry.date` rearranged from `DD/MM/YYYY` to `YYYY-MM-DD` (`toIsoDateKey()`), never through a `Date` object — the same "no timezone to get wrong" reasoning as `civilDateKeyTN` elsewhere. Like the status/client/mission filters already in this header, it's client-side over whatever's currently loaded: it doesn't fetch a narrower page from the server, so reaching further back than what's loaded means clicking "Charger plus" first, same as it always did before there was a date filter at all.
+
+  **Pointage's own Export button used to be capped by this same 1000-row screen ceiling — it exported `filteredEntries`, i.e. only what "Charger plus" had already pulled into the browser.** A cabinet with 10 000 activities and a Du/Au range of "1 janvier – 31 mars" would export at most whatever was loaded, silently missing anything past it — the exact `fetchAllRows`-shaped gap the Export CSV section documents for Clients/Cash, just not yet fixed here. `TimeTrackingTable.tsx` now passes `fetchAllRows={fetchAllFilteredEntries}` to `<ExportButton>`, mirroring `CashManagement.tsx`'s `fetchAllFilteredInvoices()`: it loops `GET /api/time-entries?limit=1000&offset=…` in chunks of 1000 (the server's own per-call ceiling) until it has pulled everything `total` promised, then applies the *same* `matchesFilters()` predicate the loaded page already uses (status/client/mission/collaborateur/date range) — refactored out of the inline `filteredEntries` assignment into a named function so the loaded-page filter and the full-export filter can't drift apart. The 1000-row screen cap governs what "Charger plus" can reach on-screen; it no longer governs what Exporter can put in a file — a filtered export can cover the whole history regardless of how many activities exist.
+
+  **Two time entries can never become unreachable inside the 1000-row window, however far back "Charger plus" would otherwise have to page to find them: whichever one is `RUNNING`, and every `PAUSED` one up to a cap of 100 — and all of them group together at the very top of the table, not just the ones that would otherwise have fallen outside the loaded page.** `withPinnedActiveEntries(all, page)` in server.ts runs on `GET /api/time-entries` (only at `offset === 0` — "Charger plus" and the initial load never ask for a nonzero offset, so this always covers the real default page without ever distorting an offset-walked page mid-scroll) and inside `doBroadcast()`'s per-role SSE frame. Nothing about the entry changes — not its `date`, not its position in the underlying array — only the *order of what this one response returns*; `total` still reports the true unbounded count for pagination. `PINNED_PAUSED_CAP = 100` is a safety valve the RUNNING side doesn't need: at most one entry per user can ever be RUNNING (`pauseOtherRunningEntries()`), but nothing bounds how many a user leaves PAUSED over time, and "nothing unbounded crosses the wire" (this section's own first rule) would otherwise be exactly what an unpaused backlog violates.
+
+  **The first version only pinned RUNNING/PAUSED entries the natural newest-first slice had left out — one still in reach of `page` on its own stayed at its natural position, mixed in among `COMPLETED` rows.** That read as a half-applied rule: some paused tasks sat at the very top, others further down the table, with nothing distinguishing which got which treatment except how much other activity had happened since. `withPinnedActiveEntries()` now always computes the *full* set of RUNNING/PAUSED entries from `all` first — whether or not they were already inside `page` — and only then removes any of `page`'s own rows that duplicate one of those (`rest = page.filter(e => !pinnedIds.has(e.id))`), so nothing is ever counted or sent twice. The response length is unchanged either way; only the grouping is — every active/paused task now sits together at the top, always, and only `COMPLETED` rows can end up further down.
+
+  **`TimeTrackingTable.tsx` used to re-group the server's own order into collapsible month buckets (newest month first), and that grouping quietly undid the pinning guarantee above.** A `RUNNING` task dated in an older calendar month sorted *under* `COMPLETED` rows from a newer month, because the table grouped by `entry.date` before it ever looked at `statut` — the exact "some tasks pinned to the top, some not" symptom the pinning fix above exists to prevent, reintroduced one layer up. Removed outright at the user's request: the table now renders `filteredEntries` as one flat `<tbody>`, in the order the server already sent, with no grouping, no month header row, and no collapse state (`collapsedMonths`/`toggleMonth`/`MONTHS`/`groupedEntries`/`sortedMonthKeys` are gone, not merely hidden). `filteredEntries = entries.filter(matchesFilters)` — `Array.prototype.filter` never reorders — so RUNNING-then-PAUSED-then-rest survives filtering intact; a single-status filter (e.g. "Terminées") makes the ordering moot for that view, same as before.
 - **Filters live in `filterKpiEntries()`**, shared by the summary and both drill-down endpoints, so a drill-down can never disagree with the row it came from.
 - **SSE broadcasts are coalesced** (~120 ms) and built once per role, not per subscriber. Five rapid mutations produce two frames, not five.
 - **No linear scans inside per-task loops** — index into a `Map` first (`usersById`, `clientsById`).
@@ -1047,7 +1246,11 @@ Atterrir sur la bonne page ne suffit pas : **Tâches** n'a pas de sous-onglet da
 
 Notifications (`notifications` collection, `GET/PUT /api/notifications*`) are generic — `type` decides both the icon and where the bell sends you on click (`TYPE_META` in [NotificationBell.tsx](src/components/NotificationBell.tsx)). Wired at four more places besides task assignment: a leave/absence request notifies its chosen `approverId` directly (no need to scan every user's permissions — the requester already picked one approver), and an approve/reject decision notifies the requester back. The `notify()` helper in server.ts is a `function` declaration, not a `const` arrow — it has to be callable from the HR routes, which are registered earlier in `startServer()` than the point where it is defined; declarations are hoisted through the whole function body, a `const` would not be visible yet at that point in execution.
 
+**Une notification RH atterrissait sur RH, mais pas forcément sur le bon onglet.** `nav: 'HR'` dans `TYPE_META` n'ouvre que la page — comme pour Tâches (voir juste au-dessus), RH n'a pas de sous-onglet dans l'URL : [HRManagement.tsx](src/components/hr/HRManagement.tsx) garde `activeTab` en état local, par défaut sur « Congés ». Une notification `ABSENCE_REQUEST`/`ABSENCE_DECISION` cliquée retombait donc systématiquement sur « Congés » au lieu de « Autorisations d'absence » — le bug remonté. `HR_TAB_FOR_TYPE` dans NotificationBell.tsx mappe chaque type RH vers l'onglet qui le montre réellement (`LEAVE_REQUEST`/`LEAVE_DECISION` → `leaves`, `ABSENCE_REQUEST`/`ABSENCE_DECISION` → `absences`, `LOAN_REQUEST`/`LOAN_DECISION` → `loans`, `ADVANCE_REQUEST`/`ADVANCE_DECISION` → `advances`), et `openNotification()` le pousse par les **mêmes deux voies** que `open-task-subview` : un `sessionStorage` (`open_hr_subview`) lu une fois par l'état initial d'`activeTab` — pour le cas où RH n'est pas encore montée — et un événement `open-hr-subview` sur `window`, écouté en plus, pour le cas où elle l'est déjà (l'utilisateur regardait un autre onglet RH, ou une autre page ouverte dans un second onglet du navigateur, quand la notification est arrivée). Aucune notification ne cible aujourd'hui Pointage/Prêts/Jours fériés autrement qu'en tombant sur leur onglet par défaut respectif, donc rien de plus n'était à câbler pour l'instant ; le même schéma (type de notification → sous-onglet, sessionStorage + événement `window`) s'applique tel quel si une nouvelle sous-vue en a un jour besoin.
+
 **Un rappel mensuel prévient ADMIN et SUPERVISEUR de mettre à jour la grille des échéances.** Même idiome que le rappel de tâche planifiée et que les semis de catalogue : il n'existe aucun balayage périodique dans cette application, donc « un nouveau mois a commencé » se détecte paresseusement — dans `authenticate`, à la prochaine requête de **n'importe quel** compte de l'entreprise, pas seulement celle d'un administrateur, exactement comme `seedSectorMissions`/`seedResourceLibraryFor` juste à côté. `maybeSendEcheanceReminder()` compare le mois civil courant (`formatDateISO`, donc dans `APP_TIMEZONE`) à `company.echeanceReminderSentMonth` ; s'ils diffèrent, une notification `ECHEANCE_REMINDER` part vers chaque compte `DASHBOARD_ROLES` (ADMIN + SUPERVISEUR — le même duo que le tableau de bord, pas une nouvelle liste), puis le mois est écrit sur la fiche entreprise **après coup**, comme les autres semis, pour qu'une exécution interrompue avant d'avoir notifié tout le monde se rejoue plutôt que de marquer le mois comme fait à tort. Une pose en vol par entreprise (`echeanceReminderInFlight`) évite qu'une rafale de requêtes simultanées au tout début du mois n'envoie chacune sa propre salve. Réservé aux secteurs où `companyHasResourcesModule` ouvre déjà Ressources métier — écrire ce rappel pour un secteur qui n'a pas cet écran n'aurait aucun sens. `ECHEANCE_REMINDER` suit le même câblage que tout le reste : `TYPE_META`/`TOAST_VARIANT` dans NotificationBell.tsx, `PUSH_NAV_FOR_TYPE` côté serveur, tous les deux pointant vers Ressources métier.
+
+**Deux gardes de plus, ajoutées après coup.** Le rappel partait pour une entreprise tout juste créée — sur son tout premier login, avant même la moindre fiche client — parce que la seule garde jusque-là était sectorielle. Deux cas manquaient : une offre restreinte (RH & Paie, Facturation) qui ne vend pas le module Ressources ne voit pas l'écran Échéances non plus, donc `maybeSendEcheanceReminder()` refuse maintenant aussi quand `planAllowsModule(company.plan, 'Ressources')` est faux — même garde que celle qui ferme déjà les routes du module dans `authenticate`, juste répétée ici puisque le rappel part en dehors du chemin des routes. Et une entreprise sans le moindre client n'a rien à porter sur une grille qui se lit par client : le rappel attend maintenant `(await db.getAllClients(company.id)).length > 0` avant d'envoyer quoi que ce soit. Les deux `return` précoces sautent aussi l'écriture d'`echeanceReminderSentMonth` — sans client, le mois n'est jamais marqué fait, donc le premier client créé fait naître le rappel à la requête suivante, dans le mois civil en cours, sans qu'il ait fallu attendre le mois d'après.
 
 **Chat unread counts are not duplicated into notifications.** The bell reads `GET /api/messages/contacts` directly (the same endpoint ChatPage already uses) and synthesizes a "message" row per contact with unread messages, rather than writing a notification row on every message sent that would then need to be kept in sync with `readAt` on the thread. One source of truth for "is this message read", not two.
 
@@ -1077,7 +1280,7 @@ La date est une date civile pure, saisie via `<input type="date">` (ISO `YYYY-MM
 
 ### Navigation has no router
 
-[App.tsx](src/App.tsx) is a chain of ternaries on the `activeSidebarItem` string (`'Dashboard' | 'Clients' | 'Time Tracking' | 'Messages' | 'Missions' | 'Ressources' | 'Cash' | 'HR' | 'Users'`), persisted to `localStorage.active_nav` so a refresh keeps you in place. Adding a page = add an entry to `mainNavItems` in [Sidebar.tsx](src/components/Sidebar.tsx) (with its permission guard), a branch in App.tsx with the matching guard, **and** the id to `NAV_IDS` — an id missing from that list silently fails to restore. (A "Reports" nav entry existed with no matching App.tsx branch — clicking it rendered nothing — and was removed outright rather than wired up, since nothing had asked for a Reports page.)
+[App.tsx](src/App.tsx) is a chain of ternaries on the `activeSidebarItem` string (`'Dashboard' | 'Clients' | 'Time Tracking' | 'Messages' | 'Missions' | 'Ressources' | 'Cash' | 'HR' | 'Payroll' | 'Users'`), persisted to `localStorage.active_nav` so a refresh keeps you in place. Adding a page = add an entry to `mainNavItems` in [Sidebar.tsx](src/components/Sidebar.tsx) (with its permission guard), a branch in App.tsx with the matching guard, **and** the id to `NAV_IDS` — an id missing from that list silently fails to restore. (A "Reports" nav entry existed with no matching App.tsx branch — clicking it rendered nothing — and was removed outright rather than wired up, since nothing had asked for a Reports page.)
 
 Because there is no URL state, anything that remounts the app loses the current page. That is why the watcher note above matters.
 
@@ -1229,12 +1432,16 @@ design file carries no equivalently validated categorical ramp.
 **Cash, RH and Tâches (Pointage) were brought in line with a newer pass of the same design file, each keeping its own accent colour.** The refresh only ever restyles existing screens — no field, route or flow changed:
 
 - **Cash's header carries an icon badge** (a `w-10 h-10 rounded-lg bg-gray-100` box around the `Receipt` icon) instead of the icon sitting inline with the `<h1>` text — the same treatment [HRManagement.tsx](src/components/hr/HRManagement.tsx) and Tâches already used elsewhere, now consistent across all three.
-- **Each section keeps its own accent colour on its tab bar's active state**: Cash is `border-blue-600 text-blue-600`, Tâches (`TaskSubviews.tsx`) is `border-amber-700 text-amber-700`, RH stays neutral (`border-gray-900 text-gray-900`) — RH's tab bar is unchanged in colour, only rebuilt (below) to read the same way as the other two.
-- **A shared "accent card" pattern**: a white `rounded-xl` card with a 3px coloured top border (`border-t-[3px] border-t-{accent}`) and a tinted header strip (`bg-{accent}-50/60 border-b border-{accent}-100`) carrying a bold label. Two instances exist so far — Cash's **Total Général** ([CashManagement.tsx](src/components/cash/CashManagement.tsx), blue) and Tâches' **TÂCHES EN PAUSE** ([PausedTasksList.tsx](src/components/PausedTasksList.tsx), amber) — and any new "headline figure" card in these sections should follow it rather than inventing a new treatment.
-  - Cash's version replaced a sticky `<tr>` that used to live inside the table's `<thead>` (pinned with a `top-[42px]` offset under the column headers). Moving it to a standalone card above the table means the headline figures read before any horizontal scrolling, and collapses to a **"Voir le détail"** toggle (`showTotalDetail` state) that reveals the per-currency document count — the one figure the two totals alone don't answer. The two always-visible figures (Total HT, Montant de facture) and the sum-per-filtered-set behaviour are unchanged from the old sticky row.
-  - The amber used here (Tâches' accent, and the resume button in `PausedTasksList.tsx`, now solid-filled `bg-amber-500` by default rather than only on hover) is **not** the reserved `pause` status-pill token (`oklch(95% 0.005 260)` — a near-neutral gray) — it is the same "attention/warning" role the app already uses elsewhere outside the pill system (Cash's document-quota badge, RH's "Congés pris" stat-card icon). The reservation rule only forbids reusing `run`/`done`/`pause`/`late`/`admin`/`collab` as a *categorical* colour; this is a distinct UI role.
+- **Cash's three subviews each carry their own colour, on both the tab bar and their own total** (`CASH_TAB_COLOR` in [CashManagement.tsx](src/components/cash/CashManagement.tsx)) — Facturation blue, Règlements clients emerald, Brouillard de caisse violet. An earlier pass gave Cash a single shared accent on the grounds that the three tabs are views onto the same underlying data; that read as the layout itself changing shape when switching tabs (a card above the table on Facturation, nothing of the kind on the other two) rather than as one section with three views, so it was dropped in favour of the same per-subview idiom Tâches and RH already use — see below.
+- **A shared "accent card" pattern**: a white `rounded-xl` card with a 3px coloured top border (`border-t-[3px] border-t-{accent}`) and a tinted header strip (`bg-{accent}-50/60 border-b border-{accent}-100`) carrying a bold label. Two instances exist so far — Cash's **Total Général** ([CashManagement.tsx](src/components/cash/CashManagement.tsx), blue) and Tâches' **TÂCHES EN PAUSE** ([PausedTasksList.tsx](src/components/PausedTasksList.tsx), sky, matching the "Mon chrono" tab it lives under) — and any new "headline figure" card in these sections should follow it rather than inventing a new treatment.
+  - Cash's version replaced a sticky `<tr>` that used to live inside the table's `<thead>` (pinned with a `top-[42px]` offset under the column headers). Moving it to a standalone card above the table means the headline figures read before any horizontal scrolling, and collapses to a **"Voir le détail"** toggle (`showTotalDetail` state) that reveals the per-currency document count — the one figure the two totals alone don't answer. The two always-visible figures (Total HT, Montant de facture) and the sum-per-filtered-set behaviour are unchanged from the old sticky row. Règlements clients and Brouillard de caisse don't need the same standalone-card treatment — a single total line, no per-currency breakdown to collapse — so they instead sit as a row inside the table's own `<thead>` (see below), which is what "respecting the layout from one subview to the next" actually meant here: the total is always reachable without scrolling, on every one of the three tabs, not necessarily drawn with the exact same markup.
+  - `PausedTasksList.tsx`'s card used to be amber — a leftover from before Tâches' subviews were colour-coded, which put "Tâches en pause" (drawn under the "Mon chrono" tab) at odds with that tab's own sky accent. It now matches: `border-t-sky-600`, `bg-sky-50/60`, the pulse dot and the "Reprendre" button both `bg-sky-500`.
 - **RH's stat-card grid dropped `lg:grid-cols-4` for a plain `grid-cols-2`** — there are only ever two cards (congés disponibles / congés pris), and the four-column grid left the right half of a desktop-width row empty instead of letting the pair fill it.
-- **RH's six tabs (Congés, Autorisations d'absence, Pointage, Prêts, Avances, Jours fériés) are now generated from an array of `{id, label, icon}` and mapped**, rather than six hand-written buttons, each carrying an icon the same way Cash's and Tâches' tab bars already did — RH's tabs previously had no icons at all. The row is left-aligned and horizontally scrolling (`overflow-x-auto`, not `flex-1`) — the same idiom Cash and Tâches already used — instead of stretching to fill the row, which used to wrap "Autorisations d'absence" onto two lines on a narrower desktop window.
+- **RH's six tabs (Congés, Autorisations d'absence, Pointage, Prêts, Avances, Jours fériés) are now generated from an array of `{id, label, icon, border, text}` and mapped**, rather than six hand-written buttons, each carrying an icon the same way Cash's and Tâches' tab bars already did — RH's tabs previously had no icons at all. The row is left-aligned and horizontally scrolling (`overflow-x-auto`, not `flex-1`) — the same idiom Cash and Tâches already used — instead of stretching to fill the row, which used to wrap "Autorisations d'absence" onto two lines on a narrower desktop window.
+
+**Cash's, Tâches' and RH's sub-tabs each carry their own colour, matched on the table header (or standalone total) of the content they show** — so a glance at either the active tab or the table underneath says which subview you're in without reading the label. Cash (`CASH_TAB_COLOR` in [CashManagement.tsx](src/components/cash/CashManagement.tsx)) is `documents` blue, `reglements` emerald, `journal` violet. Tâches (`TAB_COLOR` in [TaskSubviews.tsx](src/components/TaskSubviews.tsx)) is `chrono` sky, `planned` amber, `assigned` violet, `delegatedByMe` emerald — the same record also colours the `border-l-4` accent on `AssignmentList`'s and `DelegatedByMeList`'s cards. RH is `leaves` indigo, `absences` rose, `attendance` orange, `loans` teal, `advances` cyan, `holidays` fuchsia (tab-bar only — [HolidaysTab.tsx](src/components/hr/HolidaysTab.tsx) is a card list with no `<thead>` to match); each of the other five colours is also applied to that tab's own `<thead>` in [LeavesTab.tsx](src/components/hr/LeavesTab.tsx)/[AbsencesTab.tsx](src/components/hr/AbsencesTab.tsx)/[AttendanceTab.tsx](src/components/hr/AttendanceTab.tsx)/[LoansTab.tsx](src/components/hr/LoansTab.tsx)/[AdvancesTab.tsx](src/components/hr/AdvancesTab.tsx) (`bg-{color}-50`/`text-{color}-700`, scoped to the header row only — the body stays neutral). None of these reuse the reserved `run`/`done`/`pause`/`late`/`admin`/`collab` tokens.
+
+**Règlements clients' and Brouillard de caisse's totals both live inside the table's own `<thead>`, immediately under the column headers — never a `<tfoot>` at the bottom.** Règlements clients used to carry its total as a sticky `<tfoot>` row, reachable only after scrolling to the end of a long list; it's now a second `<tr>` inside the same `<thead>` as [CashJournal.tsx](src/components/cash/CashJournal.tsx)'s own "Total général" row, both pinned together by the `sticky top-0` on the `<thead>` element itself (not per-`<th>`, unlike Facturation's table). Règlements clients' total is emerald (`bg-emerald-50 border-emerald-200`), matching its tab; Brouillard de caisse's is violet (`bg-violet-50 border-violet-200`) — both used to blend into (or hide below) the rows they summed. Brouillard's entrée/sortie cells keep their `done`/`late` status colours inside that violet row; only the row's own background and label change.
 
 - Path alias `@/*` maps to the project root (both [vite.config.ts](vite.config.ts) and [tsconfig.json](tsconfig.json)). Tailwind v4 is configured entirely through the Vite plugin — there is no `tailwind.config.js`.
 - `DISABLE_HMR=true` turns off HMR *and* file watching in [vite.config.ts](vite.config.ts) — it exists so agent edits don't cause flicker.

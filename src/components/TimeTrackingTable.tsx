@@ -6,8 +6,6 @@ import {
   Filter,
   ArrowUpDown,
   Download,
-  ChevronDown,
-  ChevronRight,
   Play,
   Pause,
   Square,
@@ -46,18 +44,11 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   totalEntries,
   onLoadMore,
 }) => {
-  const { hasPermission, user } = useAuth();
+  const { hasPermission, user, token } = useAuth();
   const { presenceOf } = usePresence();
   const isAdmin = user?.role === 'ADMIN';
-  const [collapsedMonths, setCollapsedMonths] = useState<Record<string, boolean>>({});
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RUNNING' | 'PAUSED'>('ALL');
 
-  const toggleMonth = (monthKey: string) => {
-    setCollapsedMonths(prev => ({
-      ...prev,
-      [monthKey]: !prev[monthKey]
-    }));
-  };
   // Multi-select: an empty array means "no filter applied", not "match nothing".
   const [clientFilter, setClientFilter] = useState<string[]>([]);
   const [poleFilter, setPoleFilter] = useState<string[]>([]);
@@ -82,8 +73,12 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
     return day && month && year ? `${year}-${month}-${day}` : '';
   };
 
-  // Filter entries based on search & status
-  const filteredEntries = entries.filter((item) => {
+  /**
+   * Le même prédicat sert au filtrage de ce qui est déjà chargé et, plus bas,
+   * à l'export « toute la période » — une seule définition, pour que le
+   * fichier exporté ne puisse jamais s'écarter de ce que l'écran filtre.
+   */
+  const matchesFilters = (item: TimeEntry) => {
     const matchesStatus =
       statusFilter === 'ALL' ? true : item.statut === statusFilter;
 
@@ -96,40 +91,59 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
     const matchesDateTo = !dateTo || (!!dateKey && dateKey <= dateTo);
 
     return matchesStatus && matchesClient && matchesPole && matchesCollab && matchesDateFrom && matchesDateTo;
-  });
+  };
+
+  // Filter entries based on search & status
+  const filteredEntries = entries.filter(matchesFilters);
+
+  /**
+   * Pour « Exporter » — `entries` ne porte que ce qui est chargé à l'écran
+   * (200 par défaut, jusqu'à 1000 via « Charger plus »), donc un export basé
+   * dessus subirait la même troncature. La route plafonne `limit` à 1000 par
+   * appel (server.ts), donc on boucle par tranches de 1000 jusqu'à avoir tout
+   * ce que `total` annonce — même raisonnement que `fetchAllFilteredInvoices`
+   * dans CashManagement.tsx — puis on applique les mêmes filtres que l'écran
+   * sur l'ensemble complet, pas seulement sur la page chargée. Le filtre Du/Au
+   * n'est donc plus borné par ce qui est déjà chargé : n'importe quelle
+   * période s'exporte en entier, même au-delà de 1000 tâches au total.
+   */
+  const fetchAllFilteredEntries = async (): Promise<TimeEntry[]> => {
+    const CHUNK = 1000;
+    let offset = 0;
+    let all: TimeEntry[] = [];
+    // Bornée par le total annoncé par le premier appel, pour ne jamais
+    // boucler indéfiniment si la réponse venait à changer entre deux appels.
+    let total = Infinity;
+    while (offset < total) {
+      const res = await fetch(`/api/time-entries?limit=${CHUNK}&offset=${offset}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) break;
+      const body = await res.json();
+      const chunk = body.data ?? [];
+      if (chunk.length === 0) break;
+      all = all.concat(chunk);
+      total = typeof body.total === 'number' ? body.total : all.length;
+      offset += CHUNK;
+    }
+    // A tâche en cours/en pause épinglée en tête de la première page (voir
+    // server.ts) peut aussi apparaître à sa position naturelle dans une page
+    // suivante — dédoublonnée ici par id plutôt que d'exclure l'épinglage du
+    // calcul de pagination, ce qui serait plus fragile.
+    const seen = new Set<string | number>();
+    const deduped: TimeEntry[] = [];
+    for (const e of all) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id);
+      deduped.push(e);
+    }
+    return deduped.filter(matchesFilters);
+  };
 
   /** Libellés de statut, partagés par l'affichage et l'export. */
   const STATUT_LABEL: Record<string, string> = {
     COMPLETED: 'Terminée', RUNNING: 'En cours', PAUSED: 'En pause',
   };
-
-  // Group by month
-  const MONTHS = [
-    'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
-  ];
-  
-  const groupedEntries = filteredEntries.reduce((acc, entry) => {
-    // entry.date is DD/MM/YYYY
-    const [day, month, year] = entry.date.split('/');
-    if (month && year) {
-      const monthKey = `${year}-${month}`; // YYYY-MM
-      if (!acc[monthKey]) {
-        acc[monthKey] = {
-          label: `${MONTHS[parseInt(month, 10) - 1]} ${year}`,
-          entries: []
-        };
-      }
-      acc[monthKey].entries.push(entry);
-    } else {
-      // fallback for weird dates
-      const fallbackKey = 'Unknown';
-      if (!acc[fallbackKey]) acc[fallbackKey] = { label: 'Inconnu', entries: [] };
-      acc[fallbackKey].entries.push(entry);
-    }
-    return acc;
-  }, {});
-
-  const sortedMonthKeys = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
 
   // Only price work whose collaborator has an employer cost configured; the
   // rest is reported separately instead of being costed at a made-up rate.
@@ -223,6 +237,7 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
           <ExportButton
             fileName="pointage"
             rows={filteredEntries}
+            fetchAllRows={fetchAllFilteredEntries}
             columns={[
               { header: 'Collaborateur', value: (e: TimeEntry) => e.userName || '' },
               { header: 'Date', value: (e: TimeEntry) => e.date },
@@ -314,25 +329,15 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
               </tr>
             </tbody>
           ) : (
-            sortedMonthKeys.map((monthKey) => {
-              const isCollapsed = collapsedMonths[monthKey];
-              return (
-              <tbody key={monthKey} className="text-[11.5px] divide-y divide-gray-50 text-gray-800">
-                <tr 
-                  className="bg-gray-100/50 cursor-pointer hover:bg-gray-200/50 transition-colors"
-                  onClick={() => toggleMonth(monthKey)}
-                >
-                  <td colSpan={isAdmin ? 12 : 10} className="px-4 py-2 font-bold text-gray-700 uppercase tracking-wider text-[10px]">
-                    <div className="flex items-center gap-1.5 select-none">
-                      {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
-                      {groupedEntries[monthKey].label}
-                      <span className="ml-2 font-normal text-gray-500 normal-case">
-                        ({groupedEntries[monthKey].entries.length} {groupedEntries[monthKey].entries.length > 1 ? 'activités' : 'activité'})
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-                {!isCollapsed && groupedEntries[monthKey].entries.map((row) => (
+            <tbody className="text-[11.5px] divide-y divide-gray-50 text-gray-800">
+              {/* Aucun regroupement par mois : l'ordre suit tel quel celui que
+                  le serveur renvoie déjà (voir withPinnedActiveEntries dans
+                  server.ts / CLAUDE.md « Scale constraints ») — en cours puis
+                  en pause en tête, quelle que soit leur date, puis le reste.
+                  Grouper par mois cassait exactement cette priorité : une
+                  tâche en cours datée d'un mois plus ancien se serait
+                  retrouvée sous des tâches terminées d'un mois plus récent. */}
+              {filteredEntries.map((row) => (
                 <tr
                   key={row.id}
                   className={`hover:bg-gray-50/80 transition-colors ${
@@ -506,9 +511,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     </td>
                   )}
                 </tr>
-                ))}
-              </tbody>
-            )})
+              ))}
+            </tbody>
           )}
         </table>
       </div>

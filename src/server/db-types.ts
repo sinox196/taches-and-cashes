@@ -125,6 +125,19 @@ export interface Database {
   updateTimeEntry(companyId: string, id: string, updates: any): Promise<any | null>;
   deleteTimeEntry(companyId: string, id: string): Promise<boolean>;
 
+  /**
+   * Gestion des paies — un bulletin par (utilisateur, année, mois). Chaque
+   * bulletin fige une copie de l'identité de paie de l'utilisateur (matricule,
+   * CIN, CNSS, poste…) au moment de la génération, la même règle « copie
+   * figée » que le taux horaire d'une entrée de pointage : corriger la fiche
+   * Équipe plus tard ne doit pas réécrire un bulletin déjà émis.
+   */
+  getAllPayslips(companyId: string): Promise<any[]>;
+  getPayslipById(companyId: string, id: number): Promise<any | undefined>;
+  createPayslip(companyId: string, payslip: any): Promise<any>;
+  updatePayslip(companyId: string, id: number, updates: any): Promise<any | null>;
+  deletePayslip(companyId: string, id: number): Promise<boolean>;
+
   getAllMessages(companyId: string): Promise<any[]>;
   createMessage(companyId: string, message: any): Promise<any>;
   markMessagesRead(companyId: string, readerId: number, fromUserId: number): Promise<number>;
@@ -312,6 +325,8 @@ export const emptyDb = () => ({
   messageGroups: [],
   leaveBalances: [],
   timeEntries: [],
+  // Gestion des paies — un bulletin par (utilisateur, année, mois).
+  payslips: [],
   // Direct messages between two users (chat).
   messages: [],
   // Mission + type de tâche handed by an admin to a collaborator.
@@ -366,6 +381,7 @@ export const ADMIN_PERMISSIONS = [
   'CREATE_ABSENCE_AUTHORIZATION', 'MANAGE_ABSENCE_AUTHORIZATIONS',
   'CREATE_LOAN_REQUEST', 'MANAGE_LOANS_ADVANCES',
   'VIEW_RESOURCES', 'MANAGE_RESOURCES',
+  'VIEW_PAYROLL', 'MANAGE_PAYROLL',
 ];
 
 export const COLLAB_PERMISSIONS = [

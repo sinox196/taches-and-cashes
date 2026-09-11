@@ -40,6 +40,15 @@ const REGIME_LABEL: Record<string, string> = {
   EXPORT: 'Vente à l’export',
 };
 const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT', USD: 'USD', EUR: 'EUR' };
+/** One colour per subview, matched on each screen's own total (Facturation's
+ *  blue Total Général card, Règlements clients' green total, Brouillard de
+ *  caisse's violet total) — same idiom as Tâches'/RH's per-subview tabs,
+ *  so switching subviews here reads the same way it does there. */
+const CASH_TAB_COLOR: Record<'documents' | 'reglements' | 'journal', string> = {
+  documents: 'border-blue-600 text-blue-600',
+  reglements: 'border-emerald-600 text-emerald-700',
+  journal: 'border-violet-600 text-violet-700',
+};
 /** Matches the Clients table's own page size, so both lists page the same way. */
 const PAGE_SIZE = 20;
 const REGIME_BADGE: Record<string, string> = {
@@ -322,7 +331,7 @@ export const CashManagement: React.FC = () => {
             onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-medium -mb-px border-b-2 transition-colors shrink-0 whitespace-nowrap ${
               tab === t.id
-                ? 'border-blue-600 text-blue-600'
+                ? CASH_TAB_COLOR[t.id]
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >

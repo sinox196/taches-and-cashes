@@ -13,8 +13,33 @@ import { LeaveBalance } from '../../types';
 export const HRManagement: React.FC = () => {
   const { hasPermission, token } = useAuth();
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'leaves' | 'absences' | 'loans' | 'advances' | 'attendance' | 'holidays'>('leaves');
+  type HrTab = 'leaves' | 'absences' | 'loans' | 'advances' | 'attendance' | 'holidays';
+  // A notification (congé, autorisation d'absence, prêt, avance) stashes the
+  // tab it's about here — RH carries no sub-tab of its own in the URL (no
+  // router — see App.tsx), same idiom as TaskSubviews.tsx's `open_task_subview`.
+  // Consumed once, on mount, for the case where RH isn't the current page yet.
+  const [activeTab, setActiveTab] = useState<HrTab>(() => {
+    const pending = sessionStorage.getItem('open_hr_subview');
+    if (pending) sessionStorage.removeItem('open_hr_subview');
+    return pending === 'absences' || pending === 'loans' || pending === 'advances'
+      || pending === 'attendance' || pending === 'holidays' ? pending : 'leaves';
+  });
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
+
+  // Same signal as the sessionStorage read above, for when RH is already
+  // mounted (open on another browser tab, or just sitting there) when the
+  // notification is clicked — the initial-state read only fires on mount.
+  useEffect(() => {
+    const onOpenTab = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail === 'leaves' || detail === 'absences' || detail === 'loans'
+        || detail === 'advances' || detail === 'attendance' || detail === 'holidays') {
+        setActiveTab(detail);
+      }
+    };
+    window.addEventListener('open-hr-subview', onOpenTab);
+    return () => window.removeEventListener('open-hr-subview', onOpenTab);
+  }, []);
 
   const loadBalance = () => {
     if (token) {
@@ -93,21 +118,25 @@ export const HRManagement: React.FC = () => {
             stretching to fill the row or wrapping — same idiom as Cash's and
             Tâches' own tab bars, so the three read as one pattern. `flex-1`
             used to squeeze "Autorisations d'absence" onto two lines on a
-            narrow desktop window. */}
+            narrow desktop window.
+            Chaque onglet garde sa propre couleur — reprise sur l'en-tête du
+            tableau qu'il affiche (LeavesTab/AbsencesTab/AttendanceTab/
+            LoansTab/AdvancesTab) — pour qu'un coup d'œil dise sous quel
+            onglet on se trouve, même logique que les sous-vues de Tâches. */}
         <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto shrink-0">
           {([
-            { id: 'leaves' as const, label: t('hr.tabs.leaves'), icon: CalendarRange },
-            { id: 'absences' as const, label: t('hr.tabs.absences'), icon: Clock },
-            { id: 'attendance' as const, label: 'Pointage', icon: User },
-            { id: 'loans' as const, label: 'Prêts', icon: Wallet },
-            { id: 'advances' as const, label: 'Avances', icon: DollarSign },
-            { id: 'holidays' as const, label: 'Jours fériés', icon: Flag },
+            { id: 'leaves' as const, label: t('hr.tabs.leaves'), icon: CalendarRange, border: 'border-indigo-600', text: 'text-indigo-700' },
+            { id: 'absences' as const, label: t('hr.tabs.absences'), icon: Clock, border: 'border-rose-600', text: 'text-rose-700' },
+            { id: 'attendance' as const, label: 'Pointage', icon: User, border: 'border-orange-600', text: 'text-orange-700' },
+            { id: 'loans' as const, label: 'Prêts', icon: Wallet, border: 'border-teal-600', text: 'text-teal-700' },
+            { id: 'advances' as const, label: 'Avances', icon: DollarSign, border: 'border-cyan-600', text: 'text-cyan-700' },
+            { id: 'holidays' as const, label: 'Jours fériés', icon: Flag, border: 'border-fuchsia-600', text: 'text-fuchsia-700' },
           ]).map(tabDef => (
             <button
               key={tabDef.id}
               onClick={() => setActiveTab(tabDef.id)}
               className={`flex items-center gap-1.5 shrink-0 whitespace-nowrap px-3.5 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === tabDef.id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+                activeTab === tabDef.id ? `${tabDef.border} ${tabDef.text}` : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               <tabDef.icon className="w-4 h-4" /> {tabDef.label}

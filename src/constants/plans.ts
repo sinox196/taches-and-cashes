@@ -14,6 +14,18 @@
  * simplement plus proposées — ni sur la page publique, ni à l'inscription.
  * Même règle que `normalizeBalance()` : on récupère la forme ancienne, on ne
  * la réécrit pas.
+ *
+ * **Pack 5/10/15 et l'ancien pack Facturation (30 DT, un siège) ont été
+ * supprimés du catalogue, pas seulement retirés (`legacy: true`)** — décision
+ * explicite de l'utilisateur au moment de basculer vers le nouveau catalogue
+ * ci-dessous. Toute entreprise encore inscrite sous l'un de ces identifiants
+ * verra `planMeta()` renvoyer `null` : `planLabel()` retombe sur l'id brut,
+ * `planAllowsModule()`/`planAllowsPermission()` retombent sur « tout
+ * ouvert » (le repli déjà en place pour une offre inconnue), et la console
+ * plateforme garde son option `<select>` propre à une offre `legacy`
+ * seulement — une fiche sur un id qui n'existe plus du tout n'a pas cette
+ * option et retombe sur le premier choix du catalogue actuel au prochain
+ * changement de plan.
  */
 
 export interface PlanMeta {
@@ -21,9 +33,30 @@ export interface PlanMeta {
   /** Libellé affiché (français). */
   label: string;
   tagline: string;
-  /** Prix mensuel, en dinars. */
+  /** Prix mensuel de base, en dinars — couvre `baseSeats` sièges. */
   priceDT: number;
-  /** Comptes du back-office (collaborateurs, superviseurs, administrateurs). */
+  /**
+   * Prix par utilisateur au-delà de `baseSeats`, en dinars/mois. Absent =
+   * offre à prix plat, indépendant du nombre de sièges (Freelancer, ou une
+   * offre retirée du catalogue) — c'est ce champ qui distingue une offre
+   * « dynamique » d'une offre à un seul prix. Voir `planPriceForSeats()`.
+   */
+  pricePerExtraUserDT?: number;
+  /**
+   * Nombre de sièges couverts par `priceDT` avant que `pricePerExtraUserDT`
+   * ne s'applique. N'a de sens que si `pricePerExtraUserDT` est renseigné ;
+   * vaut alors 1 pour les trois offres dynamiques du catalogue actuel.
+   */
+  baseSeats?: number;
+  /**
+   * Comptes du back-office (collaborateurs, superviseurs, administrateurs).
+   * Pour une offre dynamique, c'est une valeur de repli pour l'affichage
+   * catalogue seul (égale à `baseSeats`) — le nombre réellement accordé à
+   * une entreprise vit sur sa fiche (`company.seatLimit`), posé au nombre
+   * demandé à l'inscription ou négocié depuis la console, jamais réécrit
+   * depuis cette ligne pour une offre dynamique (voir `POST /api/signup` et
+   * `POST /api/platform/companies/:id/confirm` dans server.ts).
+   */
   seatLimit: number;
   /** Comptes du portail client — comptés à part, voir `POST /api/users`. */
   portalSeatLimit: number;
@@ -48,8 +81,10 @@ export interface PlanMeta {
   /**
    * L'offre n'est pas un barreau de l'échelle des sièges — c'est un autre
    * produit. La page de tarifs la place en tête et lui donne sa propre
-   * couleur : quatre cartes identiques feraient lire « 30 DT » comme le pack
-   * le moins cher, alors qu'elle ne vend pas la même chose.
+   * couleur : quatre cartes identiques feraient lire son prix comme le pack
+   * le moins cher, alors qu'elle ne vend pas la même chose. Aucune offre du
+   * catalogue actuel ne s'en sert — gardé pour la prochaine qui en aura
+   * besoin plutôt que retiré du type.
    */
   standalone?: boolean;
   /** Offre retirée du catalogue : encore portée par des entreprises, plus vendue. */
@@ -64,83 +99,67 @@ export interface PlanMeta {
  */
 export type PlanModule =
   | 'Dashboard' | 'Users' | 'Missions' | 'Clients' | 'Time Tracking'
-  | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage';
+  | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage' | 'Payroll';
 
 /**
- * Le socle est identique dans les trois packs : ce qui change, c'est le
- * nombre de comptes. Écrit une fois — trois copies finiraient par diverger, et
- * une carte de tarifs qui promet moins qu'une autre sur la même
- * fonctionnalité est un bug commercial.
+ * Le socle du pack Complet, qui ouvre toutes les vues : écrit une fois, pas
+ * copié dans chaque offre généraliste — une carte de tarifs qui promet moins
+ * qu'une autre sur la même fonctionnalité est un bug commercial.
  */
 export const CORE_FEATURES: string[] = [
+  'Toutes les vues de l\'application, sans exception',
   'Nombre illimité de factures et de documents',
   'Clients et missions illimités',
   'Pointage : chronomètre, tâches assignées, coût employeur',
   'Cash : facturation, règlements clients, brouillard de caisse',
   'Ressources métier : modèles de documents, liens utiles, échéances',
   'RH : congés, autorisations, prêts, avances, présence',
+  'Gestion des paies : bulletins mensuels et déductions fiscales',
   'Tableau de bord Direction : marge, rentabilité, alertes',
   'Messagerie interne et notifications',
   'Export Excel/CSV sur tous les tableaux',
 ];
 
 /**
- * Le pack Facturation ne promet pas le socle ci-dessus — il n'en ouvre qu'une
- * partie. Sa propre liste dit donc les deux chiffres qui le décident : ce que
- * l'essai gratuit autorise, et ce que l'abonnement lève.
+ * Le pack RH & Paie n'ouvre que trois vues (Équipe, RH, Gestion des paies) —
+ * sa propre liste, pas `CORE_FEATURES`, qui promet des vues qu'il ne vend pas
+ * (Cash, Pointage, Ressources métier…).
+ */
+export const RH_PAIE_FEATURES: string[] = [
+  'Ressources humaines : congés, autorisations, prêts, avances, présence',
+  'Calendrier des jours fériés',
+  'Gestion des paies : bulletins mensuels, barème IRPP, CNSS, CSS',
+  'Déductions fiscales complètes : marié(e), enfants, parents à charge, assurance vie, CEA',
+  'Gestion de l\'équipe : rôles, permissions, comptes collaborateurs',
+  'Export Excel/CSV',
+];
+
+/**
+ * Le pack Facturation n'ouvre que trois vues (Équipe, Clients, Cash) — même
+ * raison que `RH_PAIE_FEATURES` : sa propre liste, à la mesure de ce qu'il
+ * vend réellement.
  */
 export const FACTURATION_FEATURES: string[] = [
-  'Essai gratuit : 10 documents par mois (les brouillons ne comptent pas)',
-  'Abonné : documents illimités — factures, devis, bons de livraison…',
-  'Fichier clients : raison sociale, matricule fiscal, adresse',
-  'Suivi trésorerie : règlements clients et brouillard de caisse',
+  'Facturation : factures légales, devis, avoirs, conformité TVA et timbre fiscal',
+  'Fichier clients : raison sociale, matricule fiscal, solde et encaissements',
+  'Trésorerie : règlements clients et brouillard de caisse',
   'Multidevises',
-  'Export des données',
+  'Export Excel/CSV',
   'Signature intégrée',
+  'Gestion de l\'équipe : rôles, permissions, comptes collaborateurs',
 ];
 
 export const PLANS: PlanMeta[] = [
-  /**
-   * L'offre facturation seule : un produit de facturation, pas le cabinet
-   * complet. Elle ouvre Cash et le fichier clients qu'il faut bien pouvoir
-   * facturer — pointage, RH, missions, ressources métier et tableau de bord
-   * restent fermés, entrée de menu comprise. **Équipe non plus** : l'offre
-   * est à un siège, il n'y a personne à gérer. Le mot de passe se change
-   * alors par « mot de passe oublié », qui reste ouvert à toute offre.
-   *
-   * Elle est **en tête** de la liste et `standalone`, donc dessinée à part
-   * sur la page de tarifs : elle ne se compare pas aux trois packs, qui sont
-   * le même produit à trois tailles d'équipe.
-   *
-   * Son essai gratuit est plafonné à dix documents émis par mois : c'est le
-   * plafond, et non une durée, que l'abonnement lève.
-   */
-  {
-    id: 'FACTURATION',
-    label: 'Facturation',
-    tagline: "L'outil de facturation seul",
-    priceDT: 30,
-    seatLimit: 1,
-    portalSeatLimit: 0,
-    // Clients en tête, pas Cash : App.tsx retombe sur le premier module de
-    // cette liste quand la section mémorisée est fermée par l'offre (le cas
-    // par défaut d'une première connexion), et c'est le fichier clients
-    // qu'on veut voir en arrivant — pas un formulaire de facture vide sans
-    // dossier encore choisi.
-    modules: ['Clients', 'Cash'],
-    trialDocumentQuota: 10,
-    features: FACTURATION_FEATURES,
-    standalone: true,
-  },
   /**
    * Un seul siège, ADMIN, gratuit **pour de bon** — pas un essai qui expire :
    * `POST /api/signup` la reconnaît et pose l'entreprise `ACTIVE` d'emblée,
    * sans `trialEndsAt`, pour qu'`expireTrialIfDue` n'ait jamais prise dessus
    * et que `documentQuotaFor()` rende `null` (aucun plafond de documents)
    * comme pour n'importe quel abonnement payé. Elle ouvre les mêmes vues que
-   * les packs — `modules` absent — donc un indépendant seul y trouve tout le
-   * cabinet, juste sans personne à ajouter (le siège unique fait déjà ce que
-   * `seatLimitError()` ferait à la main).
+   * le pack Complet — `modules` absent — donc un indépendant seul y trouve
+   * tout le cabinet, juste sans personne à ajouter (le siège unique fait déjà
+   * ce que `seatLimitError()` ferait à la main). **En tête du catalogue** :
+   * c'est la première carte de la page de tarifs.
    */
   {
     id: 'FREELANCER',
@@ -151,32 +170,71 @@ export const PLANS: PlanMeta[] = [
     portalSeatLimit: 0,
     features: CORE_FEATURES,
   },
+  /**
+   * Équipe + RH + Gestion des paies, rien d'autre : un cabinet qui veut piloter
+   * ses collaborateurs (congés, présence, bulletins) sans le reste de
+   * l'application. `modules` liste HR en tête — c'est l'écran de travail
+   * quotidien de cette offre, Payroll et Users venant après (la paie se
+   * génère moins souvent que les congés se posent, et Users est un écran de
+   * réglage, pas un écran d'usage courant). `Parrainage` en dernier : c'est
+   * l'abonnement lui-même qui est en jeu, pas une fonctionnalité du métier —
+   * une offre restreinte n'a aucune raison de ne pas pouvoir parrainer.
+   */
   {
-    id: 'PACK_5',
-    label: 'Pack 5',
-    tagline: 'Pour une petite équipe',
-    priceDT: 70,
+    id: 'RH_PAIE',
+    label: 'RH & Paie',
+    tagline: 'Ressources humaines et bulletins de paie',
+    priceDT: 20,
+    pricePerExtraUserDT: 10,
+    baseSeats: 1,
+    seatLimit: 1,
+    portalSeatLimit: 0,
+    modules: ['HR', 'Payroll', 'Users', 'Parrainage'],
+    features: RH_PAIE_FEATURES,
+  },
+  /**
+   * Équipe + Clients + Cash : facturer et suivre la trésorerie, avec une
+   * équipe à plusieurs comptes (contrairement à l'ancien pack Facturation à
+   * un siège qu'il remplace). Clients en tête du `modules` et non Cash :
+   * App.tsx retombe sur le premier module de cette liste quand la section
+   * mémorisée est fermée par l'offre (le cas par défaut d'une première
+   * connexion), et c'est le fichier clients qu'on veut voir en arrivant —
+   * pas un formulaire de facture vide sans dossier encore choisi. Users en
+   * dernier, même raison que pour RH & Paie ci-dessus, `Parrainage` après
+   * lui pour la même raison aussi.
+   */
+  {
+    id: 'FACTURATION',
+    label: 'Facturation',
+    tagline: 'Facturation, clients et trésorerie',
+    priceDT: 20,
+    pricePerExtraUserDT: 10,
+    baseSeats: 1,
+    seatLimit: 1,
+    portalSeatLimit: 0,
+    modules: ['Clients', 'Cash', 'Users', 'Parrainage'],
+    features: FACTURATION_FEATURES,
+  },
+  /**
+   * Le cabinet au complet — `modules` absent, donc toutes les vues, comme
+   * Freelancer mais à plusieurs comptes. C'est le pack généraliste, offre
+   * par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
+   * `baseSeats: 5` : les 50 DT couvrent d'emblée cinq utilisateurs, pas un
+   * seul — à la différence de RH & Paie et Facturation, qui partent d'un
+   * seul siège. Un sixième coûte le même +10 DT/utilisateur que les deux
+   * autres offres dynamiques ; `planPriceForSeats()` n'a rien à savoir de
+   * cette différence, elle lit `baseSeats` comme pour n'importe quelle
+   * offre.
+   */
+  {
+    id: 'COMPLET',
+    label: 'Complet',
+    tagline: 'Le cabinet au complet, tous les modules',
+    priceDT: 50,
+    pricePerExtraUserDT: 10,
+    baseSeats: 5,
     seatLimit: 5,
-    portalSeatLimit: 50,
-    features: CORE_FEATURES,
-  },
-  {
-    id: 'PACK_10',
-    label: 'Pack 10',
-    tagline: 'Pour un cabinet qui grandit',
-    priceDT: 100,
-    seatLimit: 10,
-    portalSeatLimit: 100,
-    features: CORE_FEATURES,
-    highlighted: true,
-  },
-  {
-    id: 'PACK_15',
-    label: 'Pack 15',
-    tagline: 'Pour les cabinets établis',
-    priceDT: 130,
-    seatLimit: 15,
-    portalSeatLimit: 150,
+    portalSeatLimit: 0,
     features: CORE_FEATURES,
   },
 
@@ -230,13 +288,58 @@ export const isSellablePlan = (id: any): boolean =>
   SELLABLE_PLANS.some(p => p.id === id);
 
 /** L'offre par défaut quand rien n'est demandé (ou qu'une offre inconnue l'est). */
-export const DEFAULT_PLAN_ID = 'PACK_5';
+export const DEFAULT_PLAN_ID = 'COMPLET';
 
 export const PLAN_SEAT_LIMITS: Record<string, number> =
   Object.fromEntries(PLANS.map(p => [p.id, p.seatLimit]));
 
 export const PLAN_PORTAL_SEAT_LIMITS: Record<string, number> =
   Object.fromEntries(PLANS.map(p => [p.id, p.portalSeatLimit]));
+
+/**
+ * Garde-fou anti-abus sur le nombre de sièges qu'une inscription publique
+ * peut demander pour une offre dynamique — pas une vraie limite commerciale
+ * (au-delà, la page renvoie déjà vers « offre sur mesure »). Sans lui, un
+ * nombre absurde dans le corps de la requête créerait une entreprise TRIAL
+ * avec un `seatLimit` déraisonnable avant même qu'un humain ne l'ait vue.
+ */
+export const MAX_DYNAMIC_SEATS = 200;
+
+/**
+ * Le prix mensuel d'une offre pour un nombre de sièges donné : `priceDT` tel
+ * quel si l'offre n'a pas de tarif par utilisateur supplémentaire, sinon
+ * `priceDT` + le nombre de sièges au-delà de `baseSeats` ×
+ * `pricePerExtraUserDT`, arrondi au millime comme le reste des montants de
+ * l'app. **Unique implémentation** : le calculateur de la page Tarifs, la
+ * modale d'inscription, le mail de RIB et la confirmation de paiement
+ * l'appellent tous — sinon un montant annoncé au client et un montant
+ * encaissé finiraient par diverger, exactement le piège que
+ * `computeInvoiceTotals()` évite déjà côté facturation.
+ */
+export const planPriceForSeats = (meta: PlanMeta | null, seats: number | null | undefined): number => {
+  if (!meta) return 0;
+  if (!meta.pricePerExtraUserDT) return meta.priceDT;
+  const base = meta.baseSeats ?? 1;
+  const requested = Math.round(Number(seats));
+  const extra = Math.max(0, (Number.isFinite(requested) ? requested : base) - base);
+  return Math.round((meta.priceDT + extra * meta.pricePerExtraUserDT) * 1000) / 1000;
+};
+
+/**
+ * Le nombre de sièges à retenir pour une offre donnée, à partir d'une valeur
+ * saisie (page Tarifs, modale d'inscription, corps de `POST /api/signup`) —
+ * jamais fait confiance telle quelle : une offre sans tarif dynamique
+ * retombe toujours sur son `seatLimit` fixe (la saisie n'a aucun sens pour
+ * elle), et une offre dynamique est bornée entre `baseSeats` et
+ * `MAX_DYNAMIC_SEATS`.
+ */
+export const clampSeatsForPlan = (meta: PlanMeta | null, seats: any): number => {
+  const base = meta?.baseSeats ?? 1;
+  if (!meta?.pricePerExtraUserDT) return meta?.seatLimit ?? base;
+  const n = Math.round(Number(seats));
+  if (!Number.isFinite(n) || n < base) return base;
+  return Math.min(n, MAX_DYNAMIC_SEATS);
+};
 
 /**
  * À quelle vue se rattache chaque permission.
@@ -267,6 +370,8 @@ export const PERMISSION_MODULE: Record<string, PlanModule> = {
   CREATE_LOAN_REQUEST: 'HR', MANAGE_LOANS_ADVANCES: 'HR',
 
   VIEW_RESOURCES: 'Ressources', MANAGE_RESOURCES: 'Ressources',
+
+  VIEW_PAYROLL: 'Payroll', MANAGE_PAYROLL: 'Payroll',
 };
 
 /** Les vues ouvertes par une offre — `null` quand elle les ouvre toutes. */

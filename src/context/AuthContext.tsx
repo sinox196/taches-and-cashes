@@ -31,10 +31,33 @@ export interface User {
   soldeConge?: number;
   congesUtilises?: number;
   congesRestants?: number;
+  /** Gestion des paies — dossier administratif/paie de l'employé, sans effet sur aucun calcul de coût ou de pointage : ce sont des informations de référence saisies par l'admin, lues nulle part ailleurs dans l'app. */
+  matricule?: string | null;
+  numCin?: string | null;
+  numCnss?: string | null;
+  qualification?: string | null;
+  departement?: string | null;
+  banque?: string | null;
+  numeroCompte?: string | null;
+  situationFamiliale?: string | null;
+  nombreEnfants?: number | null;
+  categorie?: string | null;
+  echelon?: string | null;
+  salHeure?: number | null;
+  /** Paramètres de la paie — Tableau des Déductions Fiscales : chacun devient une déduction du salaire brut imposable dans computePayslip() côté serveur, jamais un calcul côté client. Marié(e) n'a pas de champ à part : il se lit sur `situationFamiliale` ci-dessus, pour ne pas dupliquer la même information à deux endroits du formulaire Équipe. */
+  paieEnfantsInfirmes?: number | null;
+  paieEnfantsEtudiants?: number | null;
+  paieParentsACharge?: number | null;
+  paieAssuranceVie?: number | null;
+  paieCEA?: number | null;
   /** Runs the platform itself (confirms other companies' payments) — orthogonal to `role`, which is scoped to this user's own company. */
   isPlatformAdmin?: boolean;
   /** This user's own company — trial status, plan, deadline, secteur. Absent for a pre-migration /api/login response shape. */
-  company?: { id: string; name: string; status: string; plan: string; trialEndsAt: string | null; secteur?: string | null } | null;
+  company?: {
+    id: string; name: string; status: string; plan: string; trialEndsAt: string | null; secteur?: string | null;
+    /** Le nombre de sièges back-office réellement accordé — pas le repli du catalogue, voir plans.ts. */
+    seatLimit?: number | null;
+  } | null;
 }
 
 interface AuthContextType {

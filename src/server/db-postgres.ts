@@ -82,6 +82,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   echeance_statuses: { desc: false },
   echeance_status_options: { desc: false },
   public_holidays: { desc: false },
+  payslips: { desc: true },
   orders: { desc: true },
 };
 
@@ -119,6 +120,7 @@ const TABLE_FOR: Record<string, string> = {
   echeanceStatuses: 'echeance_statuses',
   echeanceStatusOptions: 'echeance_status_options',
   publicHolidays: 'public_holidays',
+  payslips: 'payslips',
   orders: 'orders',
 };
 
@@ -359,6 +361,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const attendance = tenantCollection('attendance_records');
   const referrals = tenantCollection('referrals');
   const timeEntries = tenantCollection('time_entries');
+  const payslips = tenantCollection('payslips');
   const messages = tenantCollection('messages');
   const messageGroups = tenantCollection('message_groups');
   const taskAssignments = tenantCollection('task_assignments');
@@ -590,6 +593,12 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     createTimeEntry: timeEntries.create,
     updateTimeEntry: timeEntries.update,
     deleteTimeEntry: timeEntries.remove,
+
+    getAllPayslips: payslips.all,
+    getPayslipById: payslips.byId,
+    createPayslip: payslips.create,
+    updatePayslip: payslips.update,
+    deletePayslip: payslips.remove,
 
     getAllMessages: messages.all,
     createMessage: messages.create,
