@@ -4055,9 +4055,24 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     // Échéances) est visible — en écrire pour les autres serait un rappel
     // vers un écran qu'ils ne voient pas.
     if (!companyHasResourcesModule(company.secteur)) return;
+    // Même garde côté offre que le reste de la route : un pack qui ne vend
+    // pas le module Ressources (RH & Paie, Facturation) ne voit pas l'écran
+    // Échéances non plus, donc pas plus de sens d'y renvoyer un rappel que
+    // pour un secteur qui ne l'a jamais eu.
+    if (planModules(company.plan) && !planAllowsModule(company.plan, 'Ressources')) return;
 
     const month = formatDateISO(new Date()).slice(0, 7);
     if (company.echeanceReminderSentMonth === month) return;
+
+    // Une entreprise tout juste créée n'a encore aucun client, donc rien à
+    // porter sur une grille de suivi par client — le rappel se lisait comme
+    // une notification arrivée avant même la moindre saisie. Tant qu'aucun
+    // client n'existe, on ne marque pas non plus le mois comme fait : le
+    // premier client créé fait naître le rappel à la requête suivante, dans
+    // le mois civil en cours, plutôt que de marquer le mois comme fait à
+    // tort pendant que la garde était encore fermée.
+    const clients = await db.getAllClients(company.id);
+    if (!clients || clients.length === 0) return;
 
     const inFlight = echeanceReminderInFlight.get(company.id);
     if (inFlight) return inFlight;

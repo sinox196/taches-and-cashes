@@ -499,6 +499,18 @@ personne à gérer — un cabinet sur l'une d'elles peut ajouter des
 collaborateurs, ce qui est précisément ce que le tarif par utilisateur
 supplémentaire vend.
 
+**`Parrainage` figure en dernier dans les deux listes**, à côté de `Users` —
+contrairement aux autres vues restreintes, ce n'est pas une fonctionnalité du
+métier mais l'abonnement de l'entreprise lui-même qui est en jeu
+(`canRefer`/`settleReferralOnPayment()`, voir « Parrainage » plus bas), donc
+il n'y avait aucune raison de le réserver aux deux offres généralistes :
+n'importe quel abonnement `ACTIVE` peut parrainer, quelle que soit l'offre
+qu'il vend. Manquait initialement des deux listes — l'écran restait donc
+invisible sur RH & Paie et Facturation alors que la logique serveur
+(`/api/referral`, gardée par `MANAGE_USERS` et par `PLAN_MODULE_ROUTES` qui
+mappe déjà `/api/referral` sur `Parrainage`) n'avait jamais rien d'autre à
+changer pour l'ouvrir.
+
 L'éditeur de document reste capable de se passer du fichier clients : il
 demande `hasPermission('VIEW_CLIENTS')` — qui consulte déjà l'offre — et sans
 lui la raison sociale devient un champ libre au lieu d'un type-ahead (une loupe
@@ -1225,6 +1237,8 @@ Atterrir sur la bonne page ne suffit pas : **Tâches** n'a pas de sous-onglet da
 Notifications (`notifications` collection, `GET/PUT /api/notifications*`) are generic — `type` decides both the icon and where the bell sends you on click (`TYPE_META` in [NotificationBell.tsx](src/components/NotificationBell.tsx)). Wired at four more places besides task assignment: a leave/absence request notifies its chosen `approverId` directly (no need to scan every user's permissions — the requester already picked one approver), and an approve/reject decision notifies the requester back. The `notify()` helper in server.ts is a `function` declaration, not a `const` arrow — it has to be callable from the HR routes, which are registered earlier in `startServer()` than the point where it is defined; declarations are hoisted through the whole function body, a `const` would not be visible yet at that point in execution.
 
 **Un rappel mensuel prévient ADMIN et SUPERVISEUR de mettre à jour la grille des échéances.** Même idiome que le rappel de tâche planifiée et que les semis de catalogue : il n'existe aucun balayage périodique dans cette application, donc « un nouveau mois a commencé » se détecte paresseusement — dans `authenticate`, à la prochaine requête de **n'importe quel** compte de l'entreprise, pas seulement celle d'un administrateur, exactement comme `seedSectorMissions`/`seedResourceLibraryFor` juste à côté. `maybeSendEcheanceReminder()` compare le mois civil courant (`formatDateISO`, donc dans `APP_TIMEZONE`) à `company.echeanceReminderSentMonth` ; s'ils diffèrent, une notification `ECHEANCE_REMINDER` part vers chaque compte `DASHBOARD_ROLES` (ADMIN + SUPERVISEUR — le même duo que le tableau de bord, pas une nouvelle liste), puis le mois est écrit sur la fiche entreprise **après coup**, comme les autres semis, pour qu'une exécution interrompue avant d'avoir notifié tout le monde se rejoue plutôt que de marquer le mois comme fait à tort. Une pose en vol par entreprise (`echeanceReminderInFlight`) évite qu'une rafale de requêtes simultanées au tout début du mois n'envoie chacune sa propre salve. Réservé aux secteurs où `companyHasResourcesModule` ouvre déjà Ressources métier — écrire ce rappel pour un secteur qui n'a pas cet écran n'aurait aucun sens. `ECHEANCE_REMINDER` suit le même câblage que tout le reste : `TYPE_META`/`TOAST_VARIANT` dans NotificationBell.tsx, `PUSH_NAV_FOR_TYPE` côté serveur, tous les deux pointant vers Ressources métier.
+
+**Deux gardes de plus, ajoutées après coup.** Le rappel partait pour une entreprise tout juste créée — sur son tout premier login, avant même la moindre fiche client — parce que la seule garde jusque-là était sectorielle. Deux cas manquaient : une offre restreinte (RH & Paie, Facturation) qui ne vend pas le module Ressources ne voit pas l'écran Échéances non plus, donc `maybeSendEcheanceReminder()` refuse maintenant aussi quand `planAllowsModule(company.plan, 'Ressources')` est faux — même garde que celle qui ferme déjà les routes du module dans `authenticate`, juste répétée ici puisque le rappel part en dehors du chemin des routes. Et une entreprise sans le moindre client n'a rien à porter sur une grille qui se lit par client : le rappel attend maintenant `(await db.getAllClients(company.id)).length > 0` avant d'envoyer quoi que ce soit. Les deux `return` précoces sautent aussi l'écriture d'`echeanceReminderSentMonth` — sans client, le mois n'est jamais marqué fait, donc le premier client créé fait naître le rappel à la requête suivante, dans le mois civil en cours, sans qu'il ait fallu attendre le mois d'après.
 
 **Chat unread counts are not duplicated into notifications.** The bell reads `GET /api/messages/contacts` directly (the same endpoint ChatPage already uses) and synthesizes a "message" row per contact with unread messages, rather than writing a notification row on every message sent that would then need to be kept in sync with `readAt` on the thread. One source of truth for "is this message read", not two.
 

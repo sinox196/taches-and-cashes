@@ -176,7 +176,9 @@ export const PLANS: PlanMeta[] = [
    * l'application. `modules` liste HR en tête — c'est l'écran de travail
    * quotidien de cette offre, Payroll et Users venant après (la paie se
    * génère moins souvent que les congés se posent, et Users est un écran de
-   * réglage, pas un écran d'usage courant).
+   * réglage, pas un écran d'usage courant). `Parrainage` en dernier : c'est
+   * l'abonnement lui-même qui est en jeu, pas une fonctionnalité du métier —
+   * une offre restreinte n'a aucune raison de ne pas pouvoir parrainer.
    */
   {
     id: 'RH_PAIE',
@@ -187,7 +189,7 @@ export const PLANS: PlanMeta[] = [
     baseSeats: 1,
     seatLimit: 1,
     portalSeatLimit: 0,
-    modules: ['HR', 'Payroll', 'Users'],
+    modules: ['HR', 'Payroll', 'Users', 'Parrainage'],
     features: RH_PAIE_FEATURES,
   },
   /**
@@ -198,7 +200,8 @@ export const PLANS: PlanMeta[] = [
    * mémorisée est fermée par l'offre (le cas par défaut d'une première
    * connexion), et c'est le fichier clients qu'on veut voir en arrivant —
    * pas un formulaire de facture vide sans dossier encore choisi. Users en
-   * dernier, même raison que pour RH & Paie ci-dessus.
+   * dernier, même raison que pour RH & Paie ci-dessus, `Parrainage` après
+   * lui pour la même raison aussi.
    */
   {
     id: 'FACTURATION',
@@ -209,7 +212,7 @@ export const PLANS: PlanMeta[] = [
     baseSeats: 1,
     seatLimit: 1,
     portalSeatLimit: 0,
-    modules: ['Clients', 'Cash', 'Users'],
+    modules: ['Clients', 'Cash', 'Users', 'Parrainage'],
     features: FACTURATION_FEATURES,
   },
   /**
