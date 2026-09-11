@@ -6855,15 +6855,26 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * fenêtre chargée. La date de la tâche n'est jamais touchée — seul l'ordre
    * de cette réponse change. `all` doit déjà être triée du plus récent au
    * plus ancien (l'invariant existant de `createTimeEntry`, prepend).
+   *
+   * **Toutes** les tâches en cours/en pause remontent en tête, pas seulement
+   * celles que `page` aurait autrement laissées dehors. La première version
+   * ne déplaçait que ces dernières — une tâche en pause assez récente pour
+   * tenir dans `page` restait à sa position naturelle, mêlée aux tâches
+   * terminées : le tableau montrait alors certaines tâches en pause tout en
+   * haut et d'autres au milieu, ce qui se lisait comme un épinglage à moitié
+   * fait plutôt que comme une règle. Cette version calcule d'abord
+   * l'ensemble complet des tâches épinglées (dans `all`, donc sans jamais en
+   * manquer une qui serait dans `page`), puis retire de `page` celles qui y
+   * figurent déjà pour ne jamais les compter deux fois — la taille totale de
+   * la réponse ne change donc pas, seul l'ordre se resserre.
    */
   const withPinnedActiveEntries = (all: any[], page: any[]) => {
-    const pageIds = new Set(page.map((e: any) => e.id));
-    const running = all.filter((e: any) => e.statut === 'RUNNING' && !pageIds.has(e.id));
-    const paused = all
-      .filter((e: any) => e.statut === 'PAUSED' && !pageIds.has(e.id))
-      .slice(0, PINNED_PAUSED_CAP);
+    const running = all.filter((e: any) => e.statut === 'RUNNING');
+    const paused = all.filter((e: any) => e.statut === 'PAUSED').slice(0, PINNED_PAUSED_CAP);
     if (running.length === 0 && paused.length === 0) return page;
-    return [...running, ...paused, ...page];
+    const pinnedIds = new Set([...running, ...paused].map((e: any) => e.id));
+    const rest = page.filter((e: any) => !pinnedIds.has(e.id));
+    return [...running, ...paused, ...rest];
   };
 
   const doBroadcast = async () => {
