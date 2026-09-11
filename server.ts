@@ -4802,11 +4802,31 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
-  app.get('/api/cash-journal', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
+  /**
+   * Cette route sert les deux onglets Règlements clients et Brouillard de
+   * caisse — pas de gate unique `requirePermission`, puisque chacun a
+   * maintenant sa propre permission (voir « Voir Règlements clients »/
+   * « Voir Brouillard de caisse » dans UsersManagement.tsx). Il faut au moins
+   * l'une des deux pour obtenir quoi que ce soit ; qui n'a que
+   * `VIEW_CLIENT_PAYMENTS` ne reçoit que les lignes qui *sont* un règlement
+   * (`entree > 0` et un client, même filtre que `ClientPayments.tsx`) — pas
+   * les sorties ni les mouvements internes du cabinet (loyer, STEG…), qui
+   * restent réservés à `VIEW_CASH_JOURNAL`. Qui a `VIEW_CASH_JOURNAL` voit
+   * tout, règlements compris, puisque le brouillard est la vue complète dont
+   * Règlements clients n'est qu'un filtre.
+   */
+  app.get('/api/cash-journal', authenticate, async (req: any, res: any) => {
     try {
-      const rows = (await db.getAllCashJournalEntries(req.user.companyId))
+      const canJournal = await userCan(req, 'VIEW_CASH_JOURNAL');
+      const canPayments = canJournal || await userCan(req, 'VIEW_CLIENT_PAYMENTS');
+      if (!canPayments) return res.status(403).json({ error: 'Forbidden: Missing permission VIEW_CASH_JOURNAL or VIEW_CLIENT_PAYMENTS' });
+
+      let rows = (await db.getAllCashJournalEntries(req.user.companyId))
         .slice()
         .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      if (!canJournal) {
+        rows = rows.filter((r: any) => (Number(r.entree) || 0) > 0 && (r.clientId || r.clientName));
+      }
       res.json(rows);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -4906,7 +4926,16 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         totalsByCurrency[currency] = acc;
       }
 
-      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset, totalsByCurrency, draftCount });
+      // Le bandeau "Total Général" (Facturation) est sa propre permission,
+      // pas un sous-effet de VIEW_CASH — voir « Voir les totaux financiers »
+      // dans UsersManagement.tsx. Les stripper ici, pas seulement les cacher
+      // à l'écran, sinon les montants partiraient quand même dans le JSON.
+      const showTotals = await userCan(req, 'VIEW_CASH_TOTALS');
+      res.json({
+        data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset,
+        totalsByCurrency: showTotals ? totalsByCurrency : {},
+        draftCount,
+      });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });

@@ -66,8 +66,20 @@ export const CashManagement: React.FC = () => {
 
   /** Three screens under one nav item: the documents issued, the règlements
    *  clients that feed the clients' encaissements, and the cash daybook the
-   *  espèce ones land in. */
-  const [tab, setTab] = useState<'documents' | 'reglements' | 'journal'>('documents');
+   *  espèce ones land in. Each now has its own permission — Facturation on
+   *  `VIEW_CASH` as always, Règlements clients on `VIEW_CLIENT_PAYMENTS`,
+   *  Brouillard de caisse on `VIEW_CASH_JOURNAL` — so a viewer only sees the
+   *  tabs they're actually allowed into, not all three the moment any one of
+   *  them is granted. */
+  const visibleCashTabs = ([
+    { id: 'documents' as const, allowed: hasPermission('VIEW_CASH') },
+    { id: 'reglements' as const, allowed: hasPermission('VIEW_CLIENT_PAYMENTS') },
+    { id: 'journal' as const, allowed: hasPermission('VIEW_CASH_JOURNAL') },
+  ]).filter(t => t.allowed).map(t => t.id);
+
+  const [tab, setTab] = useState<'documents' | 'reglements' | 'journal'>(
+    () => visibleCashTabs[0] ?? 'documents',
+  );
   const [invoices, setInvoices] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -208,7 +220,7 @@ export const CashManagement: React.FC = () => {
     else setError('Suppression impossible');
   };
 
-  if (!hasPermission('VIEW_CASH')) {
+  if (visibleCashTabs.length === 0) {
     return (
       <div className="p-8 text-center text-gray-500">
         Vous n'avez pas l'autorisation d'accéder à cette page.
@@ -325,7 +337,7 @@ export const CashManagement: React.FC = () => {
           { id: 'documents', label: 'Facturation', icon: FileText },
           { id: 'reglements', label: 'Règlements clients', icon: Wallet },
           { id: 'journal', label: 'Brouillard de caisse', icon: BookOpen },
-        ] as const).map(t => (
+        ] as const).filter(t => visibleCashTabs.includes(t.id)).map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}

@@ -888,7 +888,7 @@ export default function App() {
           <MissionsManagement />
         ) : activeNav === 'Ressources' && hasPermission('VIEW_RESOURCES') ? (
           <ResourcesManagement />
-        ) : activeNav === 'Cash' && hasPermission('VIEW_CASH') ? (
+        ) : activeNav === 'Cash' && (hasPermission('VIEW_CASH') || hasPermission('VIEW_CLIENT_PAYMENTS') || hasPermission('VIEW_CASH_JOURNAL')) ? (
           <CashManagement />
         ) : activeNav === 'HR' && (hasPermission('VIEW_HR') || hasPermission('VIEW_PAYROLL')) ? (
           // GRH & Paie — une seule page, deux permissions : RH et la Paie

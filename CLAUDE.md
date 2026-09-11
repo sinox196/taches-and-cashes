@@ -284,6 +284,13 @@ Two rules that are easy to get wrong:
 
 Gated on `VIEW_CASH` / `MANAGE_CASH`.
 
+**Each of Cash's three tabs has its own view permission, on top of `VIEW_CASH`/`MANAGE_CASH`.** `VIEW_CASH` used to be the single gate for all three subviews — someone granted it to see Facturation could always reach Règlements clients and Brouillard de caisse too, with no way to grant one without the others. Three more permissions (`VIEW_CASH_TOTALS`, `VIEW_CLIENT_PAYMENTS`, `VIEW_CASH_JOURNAL`, all in the "Cash (Facturation)" permission group) narrow this:
+
+- **`VIEW_CASH_TOTALS`** gates the Facturation tab's "Total Général" card (Total HT, Montant de facture) — not the tab itself, which stays behind plain `VIEW_CASH`. `GET /api/invoices` sends `totalsByCurrency: {}` unless the caller has it (`userCan(req, 'VIEW_CASH_TOTALS')`), the same "strip server-side, not just hide on screen" rule `VIEW_CLIENT_FINANCIALS` already follows for the Clients ledger — the card's own `currencyTotals.length > 0` guard then hides it for free once the object comes back empty.
+- **`VIEW_CLIENT_PAYMENTS`** and **`VIEW_CASH_JOURNAL`** each independently gate their own tab, and neither implies `VIEW_CASH` — someone can hold only one of the three and still reach Cash (the sidebar entry and `App.tsx`'s nav guard both check `VIEW_CASH || VIEW_CLIENT_PAYMENTS || VIEW_CASH_JOURNAL`; `CashManagement.tsx` filters its own tab bar to the ones the viewer actually holds and opens on the first one, rather than defaulting to Facturation and leaving someone without `VIEW_CASH` staring at a tab they can't see).
+
+**Both derive from the same `GET /api/cash-journal`, so the split lives inside that one route rather than as a second endpoint** (`requirePermission` only checks a single permission string, so this route takes the two checks itself via `userCan`, same idiom as the client-ledger strip above): refused entirely without at least one of the two; with only `VIEW_CLIENT_PAYMENTS`, the response is filtered to règlement-shaped rows (`entree > 0` and a client — the identical predicate `ClientPayments.tsx` already applies client-side) so a règlements-only viewer never sees the cabinet's own internal movements (loyer, STEG, alimentation de caisse); `VIEW_CASH_JOURNAL` gets everything unfiltered, since the daybook is the superset view and Règlements clients is only ever a lens onto it.
+
 **Both the Brouillard de caisse and Règlements clients tables show the most recently added row first.** `GET /api/cash-journal` already sorts every row ascending — by date, then by `createdAt` as a tiebreak — which is what the daybook's running "Solde" needs to accumulate correctly. Both screens used to render that ascending order as-is, so a freshly added row landed at the *bottom* of a growing list instead of where the cabinet expects to see what it just typed. `CashJournal.tsx`'s `withSolde` still accumulates the balance over that ascending order first — that part has to stay chronological — and only reverses the finished `{row, solde}` list afterward, purely for display and pagination; `ClientPayments.tsx`, which carries no running balance, just reverses `filtered` directly. Because the server's tiebreak is a real `createdAt` timestamp rather than array position, two règlements entered on the same date still land in the order they were actually saved, last on top.
 
 **The editable cells of a new or in-progress row carry a light turquoise fill (`bg-turquoise/10` / `border-turquoise/30`), not white.** A plain white `<input>` sitting inside a table already full of white cells was easy to miss as *the* place to type — reported as the add/edit fields not reading as clearly editable. `ClientSearchInput` and `CategoryPicker` — the two shared pickers that also appear read-only elsewhere in the app (the client-form dossier selector, for one) — take an optional `bgClassName` prop (default `bg-white`) so this only changes their look inside these two journal-row editors, not every call site. A disabled cell (`bankAccount` on an Espèce règlement) still falls back to `disabled:bg-gray-100`, unchanged.
@@ -1015,6 +1022,11 @@ tout le monde, liste blanche oblige.
 technique de la permission collé au libellé. Le nom technique (`id`) reste
 inchangé pour ne pas invalider les permissions déjà enregistrées sur des
 comptes existants ; seul le `label` affiché a changé.
+
+Le premier groupe de `PERMISSIONS_GROUPED` s'appelle « Gestion des tâches »,
+pas « Pointage » — même règle : c'est un intitulé d'écran dans le sélecteur
+de permissions, pas un identifiant, donc `VIEW`/`EDIT`/`DELETE`/
+`MANAGE_SERVICES`/`ASSIGN_TASKS` restent inchangés en dessous.
 
 **Les conversations de groupe** ([GroupModal.tsx](src/components/chat/GroupModal.tsx), routes `/api/messages/groups*` et `/api/messages/group/:id`) vivent dans le même module que les messages directs : un groupe est un nom plus une liste de membres, et un message de groupe porte `groupId` au lieu de `toUserId`. Une seule route d'envoi pour les deux — la validation, la diffusion SSE et la notification poussée sont identiques, et les dédoubler aurait fait deux endroits à corriger.
 

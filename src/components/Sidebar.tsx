@@ -94,7 +94,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       header: 'Finance & RH',
       items: [
-        ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Facturation & Trésorerie', icon: Receipt, hasChevron: false }] : []),
+        // Cash a trois sous-onglets, chacun sa propre permission désormais
+        // (Facturation/Règlements clients/Brouillard de caisse) — l'entrée
+        // de nav s'affiche dès qu'au moins l'un des trois est accordé,
+        // sinon un titulaire de la seule permission Règlements clients
+        // n'aurait aucun moyen d'atteindre l'écran qui la sert.
+        ...(hasPermission('VIEW_CASH') || hasPermission('VIEW_CLIENT_PAYMENTS') || hasPermission('VIEW_CASH_JOURNAL')
+          ? [{ id: 'Cash', label: 'Facturation & Trésorerie', icon: Receipt, hasChevron: false }] : []),
         // UserCheck, not Users2: Équipe took the plain "group of people" mark, and
         // two nav items sharing one icon is unreadable at 16px.
         ...(hasPermission('MANAGE_USERS') ? [{ id: 'Users', label: t('nav.users'), icon: Users2, hasChevron: false }] : []),
