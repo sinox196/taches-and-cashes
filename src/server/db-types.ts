@@ -16,6 +16,13 @@
 export interface Database {
   /** Global — needed pre-auth at login, before any companyId is known. Username uniqueness is global by design (see CLAUDE.md). */
   getUserByUsername(username: string): Promise<any | undefined>;
+  /**
+   * Global, comme `getUserByUsername` — un code de parrainage personnel
+   * (voir CLAUDE.md « Parrainage ») doit être unique tous utilisateurs et
+   * toutes entreprises confondus, et `POST /api/signup` doit pouvoir
+   * retrouver l'auteur d'un code sans connaître son entreprise à l'avance.
+   */
+  getUserByReferralCode(code: string): Promise<any | undefined>;
   /** Company-scoped — the single most important tenant-isolation guarantee: a token from company A can never resolve a user row from company B, even if ids collide. */
   getUserById(companyId: string, id: number): Promise<any | undefined>;
 

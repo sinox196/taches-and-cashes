@@ -202,6 +202,8 @@ async function initJsonDb(): Promise<Database> {
     // visitor happens to capitalize it when typing it back in.
     getUserByUsername: async (username: string) =>
       db.users.find((u: any) => String(u.username).toLowerCase() === String(username).toLowerCase()),
+    getUserByReferralCode: async (code: string) =>
+      db.users.find((u: any) => u.referralCode && String(u.referralCode).toUpperCase() === String(code).toUpperCase()),
     getUserById: async (companyId: string, id: number) => findScoped(db.users, companyId, id),
 
     getAllCompanies: async () => db.companies,

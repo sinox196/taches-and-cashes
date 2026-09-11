@@ -116,9 +116,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Outils de travail', icon: FileCheck2, hasChevron: false }] : []),
         { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
-        // Parrainage : c'est l'abonnement de l'entreprise qui est en jeu, donc
-        // réservé à qui la gère — la même permission que la page Équipe.
-        ...(hasPermission('MANAGE_USERS') ? [{ id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false }] : []),
+        // Parrainage : chaque collaborateur a désormais son propre code, pas
+        // seulement qui gère l'équipe — voir CLAUDE.md « Parrainage ». Le
+        // filtre d'offre (module « Parrainage ») s'applique toujours plus
+        // bas, indépendamment de cette permission qui n'en est plus une ici.
+        { id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false },
       ],
     },
   ];
@@ -127,12 +129,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
    * Une offre restreinte ne dessine pas les entrées qu'elle ne vend pas.
    *
    * Les entrées gardées par une permission se ferment déjà d'elles-mêmes —
-   * `hasPermission` consulte l'offre. Ce filtre-ci est pour les deux cas
-   * qu'une permission ne couvre pas : **Tableau de bord, Tâches et Messages**,
-   * qui n'en portent aucune, et **Parrainage**, qui partage `MANAGE_USERS`
-   * avec Équipe alors que ce sont deux vues distinctes. Un groupe qui perd
-   * tous ses éléments à ce filtre (une offre qui ne vend aucun de ses
-   * modules) n'affiche plus son en-tête non plus — voir le rendu plus bas.
+   * `hasPermission` consulte l'offre. Ce filtre-ci est pour les entrées qui
+   * n'en portent aucune : **Tableau de bord, Tâches, Messages et
+   * Parrainage** (ce dernier n'a plus besoin de `MANAGE_USERS` — voir
+   * plus haut — mais reste fermé sur une offre qui ne vend pas ce module).
+   * Un groupe qui perd tous ses éléments à ce filtre (une offre qui ne vend
+   * aucun de ses modules) n'affiche plus son en-tête non plus — voir le
+   * rendu plus bas.
    */
   const navGroups = NAV_GROUPS
     .map(group => ({

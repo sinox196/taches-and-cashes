@@ -291,6 +291,14 @@ Gated on `VIEW_CASH` / `MANAGE_CASH`.
 
 **Both derive from the same `GET /api/cash-journal`, so the split lives inside that one route rather than as a second endpoint** (`requirePermission` only checks a single permission string, so this route takes the two checks itself via `userCan`, same idiom as the client-ledger strip above): refused entirely without at least one of the two; with only `VIEW_CLIENT_PAYMENTS`, the response is filtered to règlement-shaped rows (`entree > 0` and a client — the identical predicate `ClientPayments.tsx` already applies client-side) so a règlements-only viewer never sees the cabinet's own internal movements (loyer, STEG, alimentation de caisse); `VIEW_CASH_JOURNAL` gets everything unfiltered, since the daybook is the superset view and Règlements clients is only ever a lens onto it.
 
+**Writing the journal follows the identical cut, one level below `VIEW_CASH_TOTALS`/`VIEW_CLIENT_PAYMENTS`/`VIEW_CASH_JOURNAL`: `MANAGE_CLIENT_PAYMENTS` and `MANAGE_CASH_JOURNAL`.** `MANAGE_CASH` used to be the single write gate for the whole journal, same "all or nothing" shape the view-side split above already fixed for reading it. `isReglementRow(row)` — `entree > 0` and a client, the exact predicate the read-side filter already uses — is defined **once** and shared by `GET`/`POST`/`PUT`/`DELETE /api/cash-journal`, so what counts as "a règlement" can never drift between what a `VIEW_CLIENT_PAYMENTS`-only viewer sees and what a `MANAGE_CLIENT_PAYMENTS`-only editor is allowed to touch:
+
+- **`POST /api/cash-journal`** — without `MANAGE_CASH_JOURNAL`, the row being created must satisfy `isReglementRow`; a `MANAGE_CLIENT_PAYMENTS` holder cannot key in a sortie or an internal movement (loyer, STEG…) — that stays `MANAGE_CASH_JOURNAL`'s, since Brouillard de caisse is the full ledger and Règlements clients only a lens onto it.
+- **`PUT /api/cash-journal/:id`** — without `MANAGE_CASH_JOURNAL`, **both** the existing row and the merged row must satisfy `isReglementRow`. Checking only one side would open two holes: editing an internal movement you can't otherwise reach, or editing your own règlement into an internal movement to dodge the read-side filter on the next `GET`.
+- **`DELETE /api/cash-journal/:id`** — without `MANAGE_CASH_JOURNAL`, the existing row must satisfy `isReglementRow`.
+
+No permission falls back to `MANAGE_CASH` here, deliberately: a `MANAGE_CASH` holder without one of the two new permissions already can't even see the journal tabs after the view-side split above, so letting `MANAGE_CASH` alone still write into a screen it can't render would be a half-consistent state. `CashJournal.tsx`'s `canManage` therefore checks `MANAGE_CASH_JOURNAL` only (this view shows non-règlement rows too, so `MANAGE_CLIENT_PAYMENTS` alone isn't enough), while `ClientPayments.tsx`'s checks `MANAGE_CLIENT_PAYMENTS || MANAGE_CASH_JOURNAL` (either grants everything this narrower view ever needs).
+
 **Both the Brouillard de caisse and Règlements clients tables show the most recently added row first.** `GET /api/cash-journal` already sorts every row ascending — by date, then by `createdAt` as a tiebreak — which is what the daybook's running "Solde" needs to accumulate correctly. Both screens used to render that ascending order as-is, so a freshly added row landed at the *bottom* of a growing list instead of where the cabinet expects to see what it just typed. `CashJournal.tsx`'s `withSolde` still accumulates the balance over that ascending order first — that part has to stay chronological — and only reverses the finished `{row, solde}` list afterward, purely for display and pagination; `ClientPayments.tsx`, which carries no running balance, just reverses `filtered` directly. Because the server's tiebreak is a real `createdAt` timestamp rather than array position, two règlements entered on the same date still land in the order they were actually saved, last on top.
 
 **The editable cells of a new or in-progress row carry a light turquoise fill (`bg-turquoise/10` / `border-turquoise/30`), not white.** A plain white `<input>` sitting inside a table already full of white cells was easy to miss as *the* place to type — reported as the add/edit fields not reading as clearly editable. `ClientSearchInput` and `CategoryPicker` — the two shared pickers that also appear read-only elsewhere in the app (the client-form dossier selector, for one) — take an optional `bgClassName` prop (default `bg-white`) so this only changes their look inside these two journal-row editors, not every call site. A disabled cell (`bankAccount` on an Espèce règlement) still falls back to `disabled:bg-gray-100`, unchanged.
@@ -634,10 +642,48 @@ correction de bug.
 
 ### Parrainage
 
-Une entreprise partage un lien (`/?ref=CODE`). Page
+Un collaborateur partage un lien (`/?ref=CODE`). Page
 [ReferralPage.tsx](src/components/ReferralPage.tsx), entrée de nav
-« Parrainage » derrière `MANAGE_USERS` — c'est l'abonnement de l'entreprise qui
-est en jeu.
+« Parrainage » ouverte à **tout collaborateur**, plus seulement à qui gère
+l'équipe — voir « Le code est désormais personnel » ci-dessous.
+
+**Le code est désormais personnel, pas celui de l'entreprise.** Tout
+collaborateur d'une entreprise dont l'abonnement est actif a son propre code
+(`referralCodeForUser()`), pas seulement l'administrateur : `GET
+/api/referral` n'est plus gardé par `MANAGE_USERS`, ni l'entrée de nav
+([Sidebar.tsx](src/components/Sidebar.tsx)) ni la route
+([App.tsx](src/App.tsx)) — seul le filtre d'offre (`planAllowsModule`,
+module « Parrainage ») continue de fermer l'écran sur une offre qui ne le
+vend pas, indépendamment de qui a quelle permission. La récompense reste au
+niveau de **l'entreprise** (un avoir sur son abonnement, partagé par tous) ;
+ce qui devient personnel, c'est seulement le code et la visibilité des
+filleuls qu'il a amenés. `getUserByReferralCode()` (dans `Database`, les deux
+moteurs) est une recherche **globale**, comme `getUserByUsername` : un code
+personnel doit être unique tous utilisateurs et toutes entreprises
+confondus, et `POST /api/signup` doit pouvoir en retrouver l'auteur sans
+connaître son entreprise à l'avance — vérifié à la création contre les codes
+déjà pris, utilisateurs *et* entreprises héritées (voir plus bas), pour
+qu'un nouveau code personnel ne colle jamais par hasard à un vieux lien
+encore valide.
+
+**Chaque ligne de `referrals` porte `referredByUserId`.** C'est ce qui
+distingue « le filleul de Sami » du « filleul de Nadia » dans la même
+entreprise : `GET /api/referral` ne renvoie à chacun que ses propres
+filleuls, plus les lignes héritées d'avant ce changement
+(`referredByUserId` absent) qui restent visibles de tout collaborateur,
+faute de savoir lequel avait réellement partagé ce lien-là. L'ancien code
+d'entreprise (`company.referralCode`) reste reconnu à l'inscription pour les
+liens déjà partagés — `POST /api/signup` résout d'abord un code
+**personnel** (`getUserByReferralCode`), et ne retombe sur l'ancien code
+d'entreprise que si aucun utilisateur ne le porte ; un signup par ce chemin
+hérité écrit `referredByUserId: null` sur la ligne — on récupère la forme
+ancienne, on ne la casse pas, même règle que `normalizeBalance()`. La console
+plateforme ([PlatformAdmin.tsx](src/pages/PlatformAdmin.tsx)) affiche « Parrainé
+par : \<entreprise\> (\<utilisateur\>) » — le nom d'utilisateur est résolu
+côté serveur dans `GET /api/platform/companies` (`db.getUserById` sur
+`referredByCompanyId`/`referredByUserId`, la fiche de l'entreprise portant
+maintenant les deux) et s'efface tout seul quand `referredByUserId` est
+`null` (lien hérité, aucun utilisateur précis à nommer).
 
 **Seule une entreprise dont l'abonnement est actif peut parrainer.** Un compte
 en essai n'a encore rien payé ; lui laisser distribuer des mois gratuits ferait

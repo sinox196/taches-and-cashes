@@ -877,7 +877,10 @@ export default function App() {
           (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? <AdminDashboard /> : <MyDashboard />
         ) : activeNav === 'Messages' ? (
           <ChatPage onUnreadChange={setUnreadMessages} />
-        ) : activeNav === 'Parrainage' && hasPermission('MANAGE_USERS') ? (
+        ) : activeNav === 'Parrainage' ? (
+          // Ouvert à tout collaborateur, plus seulement à qui gère l'équipe —
+          // chacun a désormais son propre code de parrainage. Voir CLAUDE.md
+          // « Parrainage ».
           <ReferralPage />
         ) : activeNav === 'Users' && hasPermission('MANAGE_USERS') ? (
 

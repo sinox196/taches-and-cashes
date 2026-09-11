@@ -4803,14 +4803,22 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   });
 
   /**
+   * Un règlement *est* une ligne de journal avec une entrée et un client —
+   * même prédicat que `ClientPayments.tsx` côté client. Unique implémentation
+   * pour la lecture (`GET /api/cash-journal`) et l'écriture (`POST`/`PUT`/
+   * `DELETE` ci-dessous), pour que les deux ne puissent jamais en désigner
+   * des lignes différentes.
+   */
+  const isReglementRow = (row: any) => (Number(row?.entree) || 0) > 0 && !!(row?.clientId || row?.clientName);
+
+  /**
    * Cette route sert les deux onglets Règlements clients et Brouillard de
    * caisse — pas de gate unique `requirePermission`, puisque chacun a
    * maintenant sa propre permission (voir « Voir Règlements clients »/
    * « Voir Brouillard de caisse » dans UsersManagement.tsx). Il faut au moins
    * l'une des deux pour obtenir quoi que ce soit ; qui n'a que
-   * `VIEW_CLIENT_PAYMENTS` ne reçoit que les lignes qui *sont* un règlement
-   * (`entree > 0` et un client, même filtre que `ClientPayments.tsx`) — pas
-   * les sorties ni les mouvements internes du cabinet (loyer, STEG…), qui
+   * `VIEW_CLIENT_PAYMENTS` ne reçoit que les lignes qui *sont* un règlement —
+   * pas les sorties ni les mouvements internes du cabinet (loyer, STEG…), qui
    * restent réservés à `VIEW_CASH_JOURNAL`. Qui a `VIEW_CASH_JOURNAL` voit
    * tout, règlements compris, puisque le brouillard est la vue complète dont
    * Règlements clients n'est qu'un filtre.
@@ -4825,7 +4833,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         .slice()
         .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
       if (!canJournal) {
-        rows = rows.filter((r: any) => (Number(r.entree) || 0) > 0 && (r.clientId || r.clientName));
+        rows = rows.filter(isReglementRow);
       }
       res.json(rows);
     } catch (error) {
@@ -4833,11 +4841,31 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
-  app.post('/api/cash-journal', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+  /**
+   * L'écriture du journal suit désormais la même coupe que sa lecture :
+   * `MANAGE_CASH_JOURNAL` gère tout (Brouillard de caisse est la vue
+   * complète), `MANAGE_CLIENT_PAYMENTS` ne gère que les lignes qui *sont*
+   * un règlement — pas les sorties ni les mouvements internes du cabinet.
+   * `canJournal`/`canPayments` seuls (sans repli sur `MANAGE_CASH`) : ce
+   * dernier ne rend déjà plus le journal lisible (voir `GET
+   * /api/cash-journal`), donc lui laisser le droit d'écrire dans un onglet
+   * devenu invisible serait un état à moitié cohérent.
+   */
+  app.post('/api/cash-journal', authenticate, async (req: any, res: any) => {
     try {
+      const canJournal = await userCan(req, 'MANAGE_CASH_JOURNAL');
+      const canPayments = canJournal || await userCan(req, 'MANAGE_CLIENT_PAYMENTS');
+      if (!canPayments) return res.status(403).json({ error: 'Forbidden: Missing permission MANAGE_CASH_JOURNAL or MANAGE_CLIENT_PAYMENTS' });
+
       const row = normalizeJournalEntry(req.body);
       const invalid = validateJournalEntry(row);
       if (invalid) return res.status(400).json({ error: invalid });
+      // Sans MANAGE_CASH_JOURNAL, la ligne créée doit être un règlement —
+      // sinon on saisirait un mouvement interne (loyer, STEG…) avec une
+      // permission qui ne couvre que les règlements clients.
+      if (!canJournal && !isReglementRow(row)) {
+        return res.status(403).json({ error: "Cette permission ne couvre que les règlements clients (une entrée avec un client)." });
+      }
 
       const created = await db.createCashJournalEntry(req.user.companyId, {
         id: genId('caisse'),
@@ -4852,14 +4880,25 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
-  app.put('/api/cash-journal/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+  app.put('/api/cash-journal/:id', authenticate, async (req: any, res: any) => {
     try {
+      const canJournal = await userCan(req, 'MANAGE_CASH_JOURNAL');
+      const canPayments = canJournal || await userCan(req, 'MANAGE_CLIENT_PAYMENTS');
+      if (!canPayments) return res.status(403).json({ error: 'Forbidden: Missing permission MANAGE_CASH_JOURNAL or MANAGE_CLIENT_PAYMENTS' });
+
       const existing = await db.getCashJournalEntryById(req.user.companyId, req.params.id);
       if (!existing) return res.status(404).json({ error: 'Not found' });
 
       const row = normalizeJournalEntry({ ...existing, ...req.body });
       const invalid = validateJournalEntry(row);
       if (invalid) return res.status(400).json({ error: invalid });
+      // La ligne existante *et* la ligne modifiée doivent rester des
+      // règlements — sans quoi éditer permettrait soit de mettre la main sur
+      // un mouvement interne existant, soit de transformer un règlement en
+      // mouvement interne pour sortir du filtre de lecture.
+      if (!canJournal && (!isReglementRow(existing) || !isReglementRow(row))) {
+        return res.status(403).json({ error: "Cette permission ne couvre que les règlements clients (une entrée avec un client)." });
+      }
 
       res.json(await db.updateCashJournalEntry(req.user.companyId, req.params.id, row));
     } catch (error) {
@@ -4868,8 +4907,18 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
-  app.delete('/api/cash-journal/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+  app.delete('/api/cash-journal/:id', authenticate, async (req: any, res: any) => {
     try {
+      const canJournal = await userCan(req, 'MANAGE_CASH_JOURNAL');
+      const canPayments = canJournal || await userCan(req, 'MANAGE_CLIENT_PAYMENTS');
+      if (!canPayments) return res.status(403).json({ error: 'Forbidden: Missing permission MANAGE_CASH_JOURNAL or MANAGE_CLIENT_PAYMENTS' });
+
+      const existing = await db.getCashJournalEntryById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+      if (!canJournal && !isReglementRow(existing)) {
+        return res.status(403).json({ error: "Cette permission ne couvre que les règlements clients (une entrée avec un client)." });
+      }
+
       const ok = await db.deleteCashJournalEntry(req.user.companyId, req.params.id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
@@ -8582,6 +8631,18 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   // Chaque parrainage écrit une ligne dans `referrals`, portée par le
   // parrain : jamais de double comptage, et une trace de ce qui a été accordé,
   // quand, et sous quelle forme.
+  //
+  // **Le code est désormais personnel, pas celui de l'entreprise.** Tout
+  // collaborateur d'une entreprise abonnée (`canRefer`) a son propre code —
+  // pas seulement qui gère l'équipe : `GET /api/referral` n'est plus gardée
+  // par `MANAGE_USERS`. La récompense reste au niveau de l'entreprise (un
+  // avoir sur son abonnement, partagé), mais chaque ligne de `referrals`
+  // porte maintenant `referredByUserId` en plus de l'entreprise porteuse —
+  // c'est ce qui permet à chacun de ne voir que ses propres filleuls, et à
+  // la console plateforme d'afficher qui, précisément, a donné son code.
+  // L'ancien code d'entreprise (`company.referralCode`) reste reconnu à
+  // l'inscription pour les liens déjà partagés — on récupère la forme
+  // ancienne, on ne la casse pas — mais aucune page n'en affiche plus.
 
   const REFERRAL_REWARD_DAYS = 30;
 
@@ -8595,22 +8656,29 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     Array.from({ length: 8 }, () => REFERRAL_ALPHABET[Math.floor(Math.random() * REFERRAL_ALPHABET.length)]).join('');
 
   /**
-   * Le code de parrainage de l'entreprise, créé à la première consultation
-   * plutôt qu'à l'inscription : les entreprises déjà en base n'en ont pas, et
-   * une migration pour un champ que personne n'a encore regardé serait du
-   * travail pour rien. Unicité vérifiée contre les codes existants.
+   * Le code de parrainage **personnel**, créé à la première consultation de
+   * la page plutôt qu'à la création du compte — même raison qu'avant pour le
+   * code d'entreprise : les comptes déjà en base n'en ont pas, et une
+   * migration pour un champ que personne n'a encore regardé serait du
+   * travail pour rien. Unicité vérifiée globalement (`getUserByReferralCode`
+   * — tous utilisateurs, toutes entreprises confondus), pas seulement dans
+   * l'entreprise courante : deux collaborateurs d'entreprises différentes ne
+   * doivent jamais partager le même code, sans quoi `POST /api/signup` ne
+   * saurait plus lequel a réellement parrainé.
    */
-  const referralCodeFor = async (company: any): Promise<string> => {
-    if (company.referralCode) return company.referralCode;
-    // Pas de code tant que l'abonnement n'est pas actif : un lien qu'on ne
-    // peut pas encore utiliser n'a aucune raison d'être fabriqué, et il serait
-    // partagé avant de valoir quoi que ce soit.
+  const referralCodeForUser = async (user: any, company: any): Promise<string> => {
+    if (user.referralCode) return user.referralCode;
+    // Pas de code tant que l'abonnement de l'entreprise n'est pas actif : un
+    // lien qu'on ne peut pas encore utiliser n'a aucune raison d'être
+    // fabriqué, et il serait partagé avant de valoir quoi que ce soit.
     if (!canRefer(company)) return '';
-    const companies = await db.getAllCompanies();
-    const taken = new Set(companies.map((c: any) => c.referralCode).filter(Boolean));
+    // Contre les codes d'utilisateurs *et* les codes d'entreprise hérités —
+    // un nouveau code personnel qui collerait par hasard à un vieux lien
+    // d'entreprise encore valide serait ambigu à la résolution du signup.
+    const legacyCompanyCodes = new Set((await db.getAllCompanies()).map((c: any) => c.referralCode).filter(Boolean));
     let code = newReferralCode();
-    for (let i = 0; i < 20 && taken.has(code); i++) code = newReferralCode();
-    await db.updateCompany(company.id, { referralCode: code });
+    for (let i = 0; i < 20 && (legacyCompanyCodes.has(code) || await db.getUserByReferralCode(code)); i++) code = newReferralCode();
+    await db.updateUser(company.id, user.id, { referralCode: code });
     return code;
   };
 
@@ -8619,13 +8687,19 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
    * accorder**. La ligne naît `PENDING` : elle dit « quelqu'un s'est inscrit
    * avec votre lien », ce que le parrain a le droit de voir, et rien de plus.
    * La récompense attend le paiement (`settleReferralOnPayment`).
+   *
+   * `referrerUserId` est `null` pour un lien d'entreprise hérité (un code
+   * posé sur `company.referralCode` avant que le parrainage ne devienne
+   * personnel) — la ligne reste alors visible de tout collaborateur de
+   * l'entreprise parraine, faute de savoir lequel l'a réellement partagé.
    */
-  const recordPendingReferral = async (referrer: any, invitee: any) =>
+  const recordPendingReferral = async (referrer: any, invitee: any, referrerUserId: number | null) =>
     db.createReferral(referrer.id, {
       id: genId('ref'),
       referredCompanyId: invitee.id,
       referredCompanyName: invitee.name,
       referredContactEmail: invitee.contactEmail || '',
+      referredByUserId: referrerUserId,
       status: 'PENDING',
       rewardMonths: 1,
       discountPercent: REFERRAL_DISCOUNT_PERCENT,
@@ -8700,18 +8774,28 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       : 0;
 
   /**
-   * Le tableau de bord parrainage de l'entreprise connectée : son lien, ce
-   * qu'elle a gagné, et qui s'est inscrit grâce à elle. Réservé à qui gère
-   * l'entreprise — c'est son abonnement qui est en jeu.
+   * Le tableau de bord parrainage de **l'utilisateur connecté** : son propre
+   * code, et qui s'est inscrit grâce à lui — plus réservé à qui gère
+   * l'équipe, tout collaborateur d'une entreprise abonnée en a un désormais
+   * (voir la note « Le code est désormais personnel » plus haut). L'avoir
+   * gagné (`creditMonths`) reste affiché tel quel : c'est un fait
+   * d'entreprise, partagé, même si le code qui l'a rapporté est personnel.
    */
-  app.get('/api/referral', authenticate, requirePermission('MANAGE_USERS'), async (req: any, res: any) => {
+  app.get('/api/referral', authenticate, async (req: any, res: any) => {
     try {
+      const user = await db.getUserById(req.user.companyId, req.user.id);
+      if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
       const company = await db.getCompanyById(req.user.companyId);
       if (!company) return res.status(404).json({ error: 'Entreprise introuvable' });
 
       const eligible = canRefer(company);
-      const code = await referralCodeFor(company);
+      const code = await referralCodeForUser(user, company);
+      // Les siens, plus les lignes héritées d'avant le parrainage personnel
+      // (`referredByUserId` absent) : impossible de dire qui les avait
+      // partagées, donc elles restent visibles de tout collaborateur plutôt
+      // que de disparaître pour tout le monde.
       const referrals = (await db.getAllReferrals(company.id))
+        .filter((r: any) => !r.referredByUserId || String(r.referredByUserId) === String(user.id))
         .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
       res.json({
@@ -8795,11 +8879,17 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // partagé. Un code inconnu n'est pas une erreur — l'inscription doit
       // aboutir même si le lien a été tronqué en route ; elle se fait
       // simplement sans parrain.
+      // Un code désigne d'abord un utilisateur (le parrainage est personnel
+      // désormais) ; à défaut, un code d'entreprise hérité d'avant ce
+      // changement — les liens déjà partagés sous l'ancien système
+      // continuent de fonctionner, on ne casse pas la forme ancienne.
       const referralCode = text(req.body?.referralCode, 16).toUpperCase();
-      const allCompanies = referralCode ? await db.getAllCompanies() : [];
-      const referrer = referralCode
-        ? allCompanies.find((c: any) => (c.referralCode || '').toUpperCase() === referralCode) || null
-        : null;
+      const referrerUser = referralCode ? (await db.getUserByReferralCode(referralCode)) || null : null;
+      const referrer = referrerUser
+        ? await db.getCompanyById(referrerUser.companyId)
+        : referralCode
+          ? (await db.getAllCompanies()).find((c: any) => (c.referralCode || '').toUpperCase() === referralCode) || null
+          : null;
       // On ne se parraine pas soi-même : même adresse de contact, c'est le
       // même monde. Le garde-fou minimal, pas une politique anti-fraude.
       const selfReferral = !!referrer
@@ -8807,6 +8897,9 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // Le statut est revérifié ici et pas seulement à la création du code :
       // un lien partagé reste valide indéfiniment, l'abonnement du parrain non.
       const validReferrer = referrer && !selfReferral && canRefer(referrer) ? referrer : null;
+      // `null` pour un code d'entreprise hérité : on sait qui a parrainé,
+      // pas quel collaborateur précisément a partagé le lien.
+      const validReferrerUserId = validReferrer && referrerUser ? referrerUser.id : null;
 
       // Le pack Freelancer est gratuit pour de bon, pas seulement pendant un
       // essai : l'entreprise part directement `ACTIVE` sans `trialEndsAt`,
@@ -8831,6 +8924,11 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         trialEndsAt,
         contactName, contactEmail, phone,
         referredByCompanyId: validReferrer ? validReferrer.id : null,
+        // Qui, précisément, chez le parrain — pas seulement quelle entreprise.
+        // Porté ici en plus de la ligne `referrals` (voir plus bas) pour que
+        // la console plateforme puisse l'afficher par une simple lecture de
+        // la fiche entreprise, sans avoir à rescanner `referrals`.
+        referredByUserId: validReferrerUserId,
         // La remise est *promise* ici, pas accordée : elle ne vaut que sur
         // l'abonnement effectivement souscrit, et c'est la confirmation de
         // paiement qui la consomme.
@@ -8842,7 +8940,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // pointant sur une inscription qui échoue plus loin ne vaudrait rien.
       if (validReferrer) {
         try {
-          await recordPendingReferral(validReferrer, company);
+          await recordPendingReferral(validReferrer, company, validReferrerUserId);
         } catch (e) {
           // Un parrainage perdu ne doit jamais faire échouer une inscription
           // déjà aboutie — l'entreprise et son compte existent à ce stade.
@@ -9011,11 +9109,20 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   app.get('/api/platform/companies', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
     try {
       const companies = await db.getAllCompanies();
-      res.json(
-        companies
-          .filter((c: any) => c.id !== LEGACY_COMPANY_ID)
-          .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')),
-      );
+      const rows = companies
+        .filter((c: any) => c.id !== LEGACY_COMPANY_ID)
+        .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+      // Le parrainage est désormais par utilisateur (voir CLAUDE.md
+      // « Parrainage ») : la console doit dire qui, précisément, chez le
+      // parrain — pas seulement quelle entreprise. `referredByUserId` est
+      // scopé à `referredByCompanyId`, donc la recherche se fait dans cette
+      // entreprise-là, jamais dans celle qu'on affiche.
+      const withReferrer = await Promise.all(rows.map(async (c: any) => {
+        if (!c.referredByUserId || !c.referredByCompanyId) return c;
+        const referrerUser = await db.getUserById(c.referredByCompanyId, c.referredByUserId);
+        return referrerUser ? { ...c, referredByUserName: referrerUser.username } : c;
+      }));
+      res.json(withReferrer);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

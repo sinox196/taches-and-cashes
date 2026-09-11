@@ -125,7 +125,10 @@ const Fields: React.FC<{
 export const CashJournal: React.FC = () => {
   const { token, hasPermission } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  const canManage = hasPermission('MANAGE_CASH');
+  // Brouillard de caisse est la vue complète (sorties et mouvements internes
+  // compris) — MANAGE_CLIENT_PAYMENTS ne couvre que les règlements, donc pas
+  // suffisant ici. Voir CLAUDE.md « Cash (facturation) ».
+  const canManage = hasPermission('MANAGE_CASH_JOURNAL');
 
   const [rows, setRows] = useState<JournalRow[]>([]);
   const [categories, setCategories] = useState<CashCategory[]>([]);

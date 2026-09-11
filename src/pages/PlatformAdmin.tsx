@@ -25,6 +25,10 @@ interface Company {
   /** …consommée à la première confirmation de paiement, jamais deux fois. */
   referralDiscountUsedAt?: string | null;
   referredByCompanyId?: string | null;
+  /** L'utilisateur précis, chez le parrain, dont le code personnel a été utilisé — voir CLAUDE.md « Parrainage ». */
+  referredByUserId?: number | null;
+  /** Résolu côté serveur pour l'affichage — pas de second aller-retour ici. */
+  referredByUserName?: string | null;
   /** Prix retenu à la confirmation, remise déduite — figé pour ne pas bouger avec le catalogue. */
   subscriptionPriceDT?: number;
   /** Échéance de l'abonnement — indicative : rien ne se ferme quand elle passe. */
@@ -368,6 +372,17 @@ export const PlatformAdmin: React.FC = () => {
                       {!!c.referralCreditMonths && (
                         <div className="text-[11px] text-emerald-700 font-medium mt-0.5">
                           {c.referralCreditMonths} mois offert(s) à déduire
+                        </div>
+                      )}
+                      {/* Parrainage par utilisateur : dit à la fois quelle
+                          entreprise et quelle personne, précisément, y a
+                          droit — `referredByUserName` vient déjà résolu du
+                          serveur, seul le nom de l'entreprise parraine se
+                          cherche ici, dans la liste déjà chargée. */}
+                      {!!c.referredByCompanyId && (
+                        <div className="text-[11px] text-gray-400 mt-0.5">
+                          Parrainé par : {companies.find(p => p.id === c.referredByCompanyId)?.name || 'entreprise inconnue'}
+                          {c.referredByUserName ? ` (${c.referredByUserName})` : ''}
                         </div>
                       )}
                     </td>
