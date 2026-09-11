@@ -169,7 +169,7 @@ export const HRManagement: React.FC = () => {
               { id: 'holidays' as const, label: 'Jours fériés', icon: Flag, border: 'border-fuchsia-600', text: 'text-fuchsia-700' },
             ] : []),
             ...(canViewPayroll ? [
-              { id: 'paie' as const, label: 'Paie', icon: Wallet, border: 'border-purple-600', text: 'text-purple-700' },
+              { id: 'paie' as const, label: 'Paie', icon: Wallet, border: 'border-blue-600', text: 'text-blue-700' },
             ] : []),
           ]).map(tabDef => (
             <button

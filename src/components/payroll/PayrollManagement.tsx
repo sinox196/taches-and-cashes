@@ -339,8 +339,8 @@ export const PayrollManagement: React.FC<PayrollManagementProps> = ({ embedded =
             <div className="p-8 text-center text-gray-400 text-[13px]">Aucun bulletin pour cette période.</div>
           ) : (
             <table className="w-full text-[12.5px]">
-              <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
-                <tr className="text-left text-gray-500">
+              <thead className="sticky top-0 bg-blue-50 border-b border-blue-100">
+                <tr className="text-left text-blue-700">
                   <th className="px-4 py-2.5 font-semibold">Collaborateur</th>
                   <th className="px-4 py-2.5 font-semibold">Période</th>
                   <th className="px-4 py-2.5 font-semibold text-right">Salaire brut</th>
