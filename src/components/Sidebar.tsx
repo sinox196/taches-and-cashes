@@ -133,9 +133,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
                 }`}
               >
-                <div className="flex items-center gap-2.5 truncate">
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
+                {/* `truncate` used to sit on both this row and the label span —
+                    fine while every label fit on one line, but "Facturation &
+                    Trésorerie" (25 chars, longer than any other nav label)
+                    was clipped to "Facturation & Trésor…" in the fixed 212px
+                    rail. Letting the label wrap instead of truncating is the
+                    fix: every other label still fits on one line and renders
+                    identically, only this one now uses its second line rather
+                    than losing its tail. `items-start` (was `items-center`)
+                    keeps the icon pinned to the first line instead of
+                    centering against the wrapped block. */}
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <Icon className="w-4 h-4 shrink-0 mt-px" />
+                  <span className="leading-snug">{item.label}</span>
                 </div>
                 {!!item.badge && (
                   <span className="ml-1 shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
