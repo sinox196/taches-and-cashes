@@ -6,8 +6,6 @@ import {
   Filter,
   ArrowUpDown,
   Download,
-  ChevronDown,
-  ChevronRight,
   Play,
   Pause,
   Square,
@@ -49,15 +47,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   const { hasPermission, user, token } = useAuth();
   const { presenceOf } = usePresence();
   const isAdmin = user?.role === 'ADMIN';
-  const [collapsedMonths, setCollapsedMonths] = useState<Record<string, boolean>>({});
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RUNNING' | 'PAUSED'>('ALL');
 
-  const toggleMonth = (monthKey: string) => {
-    setCollapsedMonths(prev => ({
-      ...prev,
-      [monthKey]: !prev[monthKey]
-    }));
-  };
   // Multi-select: an empty array means "no filter applied", not "match nothing".
   const [clientFilter, setClientFilter] = useState<string[]>([]);
   const [poleFilter, setPoleFilter] = useState<string[]>([]);
@@ -153,34 +144,6 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
   const STATUT_LABEL: Record<string, string> = {
     COMPLETED: 'Terminée', RUNNING: 'En cours', PAUSED: 'En pause',
   };
-
-  // Group by month
-  const MONTHS = [
-    'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
-  ];
-  
-  const groupedEntries = filteredEntries.reduce((acc, entry) => {
-    // entry.date is DD/MM/YYYY
-    const [day, month, year] = entry.date.split('/');
-    if (month && year) {
-      const monthKey = `${year}-${month}`; // YYYY-MM
-      if (!acc[monthKey]) {
-        acc[monthKey] = {
-          label: `${MONTHS[parseInt(month, 10) - 1]} ${year}`,
-          entries: []
-        };
-      }
-      acc[monthKey].entries.push(entry);
-    } else {
-      // fallback for weird dates
-      const fallbackKey = 'Unknown';
-      if (!acc[fallbackKey]) acc[fallbackKey] = { label: 'Inconnu', entries: [] };
-      acc[fallbackKey].entries.push(entry);
-    }
-    return acc;
-  }, {});
-
-  const sortedMonthKeys = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
 
   // Only price work whose collaborator has an employer cost configured; the
   // rest is reported separately instead of being costed at a made-up rate.
@@ -366,25 +329,15 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
               </tr>
             </tbody>
           ) : (
-            sortedMonthKeys.map((monthKey) => {
-              const isCollapsed = collapsedMonths[monthKey];
-              return (
-              <tbody key={monthKey} className="text-[11.5px] divide-y divide-gray-50 text-gray-800">
-                <tr 
-                  className="bg-gray-100/50 cursor-pointer hover:bg-gray-200/50 transition-colors"
-                  onClick={() => toggleMonth(monthKey)}
-                >
-                  <td colSpan={isAdmin ? 12 : 10} className="px-4 py-2 font-bold text-gray-700 uppercase tracking-wider text-[10px]">
-                    <div className="flex items-center gap-1.5 select-none">
-                      {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
-                      {groupedEntries[monthKey].label}
-                      <span className="ml-2 font-normal text-gray-500 normal-case">
-                        ({groupedEntries[monthKey].entries.length} {groupedEntries[monthKey].entries.length > 1 ? 'activités' : 'activité'})
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-                {!isCollapsed && groupedEntries[monthKey].entries.map((row) => (
+            <tbody className="text-[11.5px] divide-y divide-gray-50 text-gray-800">
+              {/* Aucun regroupement par mois : l'ordre suit tel quel celui que
+                  le serveur renvoie déjà (voir withPinnedActiveEntries dans
+                  server.ts / CLAUDE.md « Scale constraints ») — en cours puis
+                  en pause en tête, quelle que soit leur date, puis le reste.
+                  Grouper par mois cassait exactement cette priorité : une
+                  tâche en cours datée d'un mois plus ancien se serait
+                  retrouvée sous des tâches terminées d'un mois plus récent. */}
+              {filteredEntries.map((row) => (
                 <tr
                   key={row.id}
                   className={`hover:bg-gray-50/80 transition-colors ${
@@ -558,9 +511,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     </td>
                   )}
                 </tr>
-                ))}
-              </tbody>
-            )})
+              ))}
+            </tbody>
           )}
         </table>
       </div>
