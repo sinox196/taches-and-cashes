@@ -7178,6 +7178,46 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         await pauseOtherRunningEntries(req.user.companyId, existing.userId, entryId);
       }
 
+      // Corriger l'heure de début et/ou de fin depuis « Modifier » (EditTaskModal)
+      // doit se répercuter sur la durée affichée — et donc sur le coût, dérivé de
+      // la durée à chaque lecture (`enrichEntries`) plutôt que stocké. Sans ça,
+      // corriger les heures d'une tâche déjà en pause ou terminée ne changeait
+      // rien à l'écran : `dureeSeconds` restait celui accumulé pendant que la
+      // tâche tournait, ce que ni l'un ni l'autre champ heure ne touche par
+      // eux-mêmes.
+      //
+      // Ne se déclenche que si l'une des deux heures a **réellement changé**
+      // par rapport à la valeur enregistrée — jamais sur leur simple présence
+      // dans le corps de la requête. Le formulaire d'édition renvoie toujours
+      // les deux champs, modifiés ou non (il repart d'une copie de la tâche
+      // entière) : recalculer à chaque fois qu'ils sont présents aurait faussé
+      // la durée d'une tâche qu'on se contente de clôturer sans toucher à ses
+      // heures. C'est aussi pour ça que ce n'est *pas* la même mesure que
+      // `dureeSeconds` : une tâche mise en pause puis reprise plusieurs fois a
+      // un écart heureDebut→heureFin plus large que son temps de travail actif
+      // (il inclut les pauses), donc ce recalcul ne doit s'appliquer qu'à une
+      // correction délibérée, jamais en silence à côté d'une transition normale.
+      const parseHm = (s: any): number | null => {
+        const m = /^(\d{1,2}):(\d{2})$/.exec(String(s ?? '').trim());
+        if (!m) return null;
+        const h = Number(m[1]), min = Number(m[2]);
+        if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+        return h * 60 + min;
+      };
+      const heureDebutChanged = req.body.heureDebut !== undefined && req.body.heureDebut !== existing.heureDebut;
+      const heureFinChanged = req.body.heureFin !== undefined && req.body.heureFin !== existing.heureFin;
+      if (heureDebutChanged || heureFinChanged) {
+        const debutMin = parseHm(updates.heureDebut ?? existing.heureDebut);
+        const finMin = parseHm(updates.heureFin ?? existing.heureFin);
+        // `finMin` reste `null` pour une tâche encore RUNNING (heureFin vide) —
+        // pas de durée à corriger pour une tâche toujours en cours. Une fin
+        // antérieure au début est une saisie incohérente : on laisse la durée
+        // enregistrée plutôt que d'écrire un nombre négatif ou inventé.
+        if (debutMin !== null && finMin !== null && finMin > debutMin) {
+          updates.dureeSeconds = (finMin - debutMin) * 60;
+        }
+      }
+
       // Who last touched this task, from what kind of device, and when.
       // `lastEditedBy` matters as much as the device: an admin pausing
       // someone else's task from a laptop must not read as that collaborator

@@ -149,6 +149,14 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                 onChange={(e) => setStatut(e.target.value as any)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
+                {/* PAUSED doit rester une option même si aucun bouton ne permet
+                    d'y revenir depuis ici — sans elle, ouvrir « Modifier » sur
+                    une tâche en pause affichait « Terminée » présélectionnée
+                    (le repli du navigateur pour une valeur sans <option>
+                    correspondante), alors que l'état React restait « PAUSED » :
+                    enregistrer sans toucher au menu semblait clôturer la
+                    tâche mais ne changeait rien. */}
+                <option value="PAUSED">En pause</option>
                 <option value="COMPLETED">Terminée</option>
                 <option value="RUNNING">En cours</option>
               </select>
