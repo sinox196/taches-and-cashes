@@ -317,7 +317,28 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ onNavigate }
   useEffect(() => {
     refresh();
     const interval = setInterval(refresh, 20000);
-    return () => clearInterval(interval);
+    /**
+     * Un push arrivé pendant que l'onglet était en arrière-plan (écran
+     * verrouillé, appli minimisée sur le téléphone) s'affiche bien côté OS —
+     * la notification "arrive dehors" — mais l'intervalle ci-dessus peut être
+     * suspendu par le navigateur tant que la page n'est pas visible ; sur
+     * mobile, rouvrir l'app peut alors attendre plusieurs minutes avant le
+     * prochain tick, ce qui se lit comme « je reçois la notification sur mon
+     * téléphone mais je ne la retrouve pas dans la plateforme ». Un
+     * rafraîchissement immédiat au retour au premier plan couvre les deux
+     * chemins : rouvrir l'onglet, et le service worker qui ramène un onglet
+     * déjà ouvert au premier plan sur un clic de notification
+     * (`existing.focus()` dans sw.js) — les deux déclenchent
+     * `visibilitychange`/`focus`.
+     */
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', refresh);
+    };
   }, [refresh]);
 
   useEffect(() => {
