@@ -107,7 +107,7 @@ export const ResourcesManagement: React.FC = () => {
       <div>
         <h1 className="text-[20px] font-bold text-gray-800 tracking-tight flex items-center gap-2">
           <FileCheck2 className="w-5 h-5" />
-          Ressources métier
+          Outils de travail
         </h1>
         <p className="text-[12px] text-gray-500 mt-1">
           {canManage

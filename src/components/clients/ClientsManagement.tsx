@@ -1320,7 +1320,7 @@ export const ClientsManagement: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-[10.5px] text-gray-500 mt-1.5">
-                      Les encaissements se saisissent dans Cash → Règlements clients.
+                      Les encaissements se saisissent dans Facturation &amp; Trésorerie → Règlements clients.
                     </p>
                   </div>
                 )}

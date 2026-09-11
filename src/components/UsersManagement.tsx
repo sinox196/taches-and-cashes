@@ -35,7 +35,7 @@ const PERMISSIONS_GROUPED = [
     ]
   },
   {
-    group: 'Cash (Facturation)',
+    group: 'Facturation & Trésorerie',
     permissions: [
       { id: 'VIEW_CASH', label: 'Voir Cash', desc: 'Peut consulter les factures et documents' },
       { id: 'MANAGE_CASH', label: 'Gérer Cash', desc: 'Peut créer, modifier et supprimer des documents' },
@@ -54,7 +54,7 @@ const PERMISSIONS_GROUPED = [
     ]
   },
   {
-    group: 'Ressources Métier',
+    group: 'Outils de travail',
     permissions: [
       { id: 'VIEW_RESOURCES', label: 'Voir les ressources', desc: 'Peut consulter documents, procédures, liens utiles et échéances' },
       { id: 'MANAGE_RESOURCES', label: 'Gérer le référentiel', desc: 'Peut créer, modifier et supprimer les modèles, liens et échéances du cabinet' },

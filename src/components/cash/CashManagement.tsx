@@ -229,7 +229,7 @@ export const CashManagement: React.FC = () => {
           </div>
           <div>
           <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">
-            Cash
+            Facturation &amp; Trésorerie
           </h1>
           <p className="text-[12px] text-gray-500 mt-1">
             {tab === 'documents'

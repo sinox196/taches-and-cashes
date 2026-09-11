@@ -104,7 +104,7 @@ export const AssignResourceModal: React.FC<AssignResourceModalProps> = ({ client
                 </div>
               ) : templates.length === 0 ? (
                 <div className="w-full border border-dashed border-gray-200 rounded-md px-3 py-2 text-[11px] text-gray-400 italic">
-                  Aucun modèle disponible — créez-en un dans Ressources métier.
+                  Aucun modèle disponible — créez-en un dans Outils de travail.
                 </div>
               ) : (
                 <>

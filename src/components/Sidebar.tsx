@@ -51,9 +51,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
     ...(hasPermission('VIEW_CLIENTS') ? [{ id: 'Clients', label: t('nav.clients'), icon: Users, hasChevron: false }] : []),
     { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
-    ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Ressources métier', icon: FileCheck2, hasChevron: false }] : []),
+    ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Outils de travail', icon: FileCheck2, hasChevron: false }] : []),
     { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
-    ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Cash', icon: Receipt, hasChevron: false }] : []),
+    ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Facturation & Trésorerie', icon: Receipt, hasChevron: false }] : []),
     // UserCheck, not Users2: Équipe took the plain "group of people" mark, and
     // two nav items sharing one icon is unreadable at 16px.
     ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: UserCheck, hasChevron: true }] : []),

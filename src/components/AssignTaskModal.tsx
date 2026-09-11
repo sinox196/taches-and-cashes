@@ -186,7 +186,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
               Tâche déléguée{assignedToUserIds.length > 1 ? ` à ${assignedToUserIds.length} collaborateurs` : ''}.
             </p>
             <p className="text-[12px] text-gray-500 mt-1">
-              Elle apparaît maintenant dans Tâches → « Tâches déléguées »
+              Elle apparaît maintenant dans Gestion des tâches → « Tâches déléguées »
               {assignedToUserIds.length > 1 ? ' de chacun' : ' du collaborateur'}.
             </p>
             <button

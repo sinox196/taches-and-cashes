@@ -151,7 +151,7 @@ const HOME_FEATURES: {
     iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <CalendarCheck className="w-[22px] h-[22px]" />,
   },
   {
-    title: 'Ressources métier',
+    title: 'Outils de travail',
     description: 'Listes de pièces par type de dossier, liens utiles, avancement coché client par client.',
     iconBg: '#FFF3DE', iconColor: '#C98A1B', icon: <FolderKanban className="w-[22px] h-[22px]" />,
   },
@@ -398,9 +398,8 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
                 <Reveal delay={80}>
                   <h1 className="mt-[22px] text-[34px] sm:text-[46px] leading-[1.14] font-extrabold text-navy tracking-[-0.02em]">
-                    Toute votre entreprise, <span className="relative whitespace-nowrap">
-                      <span className="relative z-10">d'une seule vision.</span>
-                      <span aria-hidden className="absolute left-0 right-0 bottom-[6px] h-[10px] bg-turquoise/25 rounded-sm -z-0" />
+                    Logiciel de gestion — <span className="relative">
+                      <span className="relative z-10">pour tous les professionnels des services.</span>
                     </span>
                   </h1>
                 </Reveal>
