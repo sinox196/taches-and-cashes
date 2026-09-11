@@ -143,7 +143,8 @@ export const FACTURATION_FEATURES: string[] = [
   'Facturation : factures légales, devis, avoirs, conformité TVA et timbre fiscal',
   'Fichier clients : raison sociale, matricule fiscal, solde et encaissements',
   'Trésorerie : règlements clients et brouillard de caisse',
-  'Multidevises et export des données',
+  'Multidevises',
+  'Export Excel/CSV',
   'Signature intégrée',
   'Gestion de l\'équipe : rôles, permissions, comptes collaborateurs',
 ];
