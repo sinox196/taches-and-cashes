@@ -14,8 +14,7 @@ import {
   MessageCircle,
   FileCheck2,
   Building2,
-  Gift,
-  Wallet
+  Gift
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { planAllowsModule, type PlanModule } from '../constants/plans';
@@ -32,6 +31,36 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
+type NavItem = { id: string; label: string; icon: any; hasChevron: boolean; badge?: number };
+
+/** One nav rail button — extracted so the grouped list and the ungrouped Plateforme entry share the exact same markup. */
+const NavButton: React.FC<{ item: NavItem; isActive: boolean; onSelect: () => void }> = ({ item, isActive, onSelect }) => {
+  const Icon = item.icon;
+  return (
+    <button
+      onClick={onSelect}
+      className={`w-full flex items-center justify-between px-3 py-2 rounded-[9px] text-[12.5px] transition-all group ${
+        isActive
+          ? 'bg-white/10 text-white font-bold'
+          : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
+      }`}
+    >
+      <div className="flex items-center gap-2.5 truncate">
+        <Icon className="w-4 h-4 shrink-0" />
+        <span className="truncate">{item.label}</span>
+      </div>
+      {!!item.badge && (
+        <span className="ml-1 shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+          {item.badge > 99 ? '99+' : item.badge}
+        </span>
+      )}
+      {item.hasChevron && (
+        <ChevronRight className="w-3 h-3 shrink-0 opacity-80" />
+      )}
+    </button>
+  );
+};
+
 export const Sidebar: React.FC<SidebarProps> = ({
   activeItem = 'Time Tracking',
   onSelectItem,
@@ -45,22 +74,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Every authenticated user gets a "Dashboard" entry: DASHBOARD_ROLES see the
   // team-wide AdminDashboard, everyone else gets their own personal KPIs
   // (MyDashboard) — the routing decision lives in App.tsx.
-  const mainNavItems: { id: string; label: string; icon: any; hasChevron: boolean; badge?: number }[] = [
-    { id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false },
-    ...(hasPermission('MANAGE_USERS') ? [{ id: 'Users', label: t('nav.users'), icon: Users2, hasChevron: false }] : []),
-    ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
-    ...(hasPermission('VIEW_CLIENTS') ? [{ id: 'Clients', label: t('nav.clients'), icon: Users, hasChevron: false }] : []),
-    { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
-    ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Outils de travail', icon: FileCheck2, hasChevron: false }] : []),
-    { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
-    ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Facturation & Trésorerie', icon: Receipt, hasChevron: false }] : []),
-    // UserCheck, not Users2: Équipe took the plain "group of people" mark, and
-    // two nav items sharing one icon is unreadable at 16px.
-    ...(hasPermission('VIEW_HR') ? [{ id: 'HR', label: t('nav.hr'), icon: UserCheck, hasChevron: true }] : []),
-    ...(hasPermission('VIEW_PAYROLL') ? [{ id: 'Payroll', label: 'Gestion des paies', icon: Wallet, hasChevron: false }] : []),
-    // Parrainage : c'est l'abonnement de l'entreprise qui est en jeu, donc
-    // réservé à qui la gère — la même permission que la page Équipe.
-    ...(hasPermission('MANAGE_USERS') ? [{ id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false }] : []),
+  //
+  // Grouped under three headers at the user's request — a section per
+  // question ("piloter le travail" / "l'argent et l'équipe" / "le reste") —
+  // rather than one flat list. The grouping is purely visual: each item's
+  // `id` still routes through the same App.tsx branch and plan/permission
+  // gate it always did, so adding a group header never risks re-threading
+  // any of that.
+  const NAV_GROUPS: { header: string; items: NavItem[] }[] = [
+    {
+      header: 'Pilotage & Production',
+      items: [
+        { id: 'Dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, hasChevron: false },
+        ...(hasPermission('VIEW_CLIENTS') ? [{ id: 'Clients', label: t('nav.clients'), icon: Users, hasChevron: false }] : []),
+        ...(hasPermission('MANAGE_SERVICES') ? [{ id: 'Missions', label: 'Missions', icon: Layers, hasChevron: false }] : []),
+        { id: 'Time Tracking', label: t('nav.timeTracking'), icon: Clock, hasChevron: true },
+      ],
+    },
+    {
+      header: 'Finance & RH',
+      items: [
+        ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Facturation & Trésorerie', icon: Receipt, hasChevron: false }] : []),
+        // UserCheck, not Users2: Équipe took the plain "group of people" mark, and
+        // two nav items sharing one icon is unreadable at 16px.
+        ...(hasPermission('MANAGE_USERS') ? [{ id: 'Users', label: t('nav.users'), icon: Users2, hasChevron: false }] : []),
+        // GRH & Paie fusionne RH et l'ex-page « Gestion des paies » sous un
+        // seul lien — la Paie vit désormais dans un onglet de HRManagement,
+        // donc l'un ou l'autre droit suffit à ouvrir ce lien (voir App.tsx et
+        // HRManagement.tsx's canViewHr/canViewPayroll).
+        ...((hasPermission('VIEW_HR') || hasPermission('VIEW_PAYROLL')) ? [{ id: 'HR', label: t('nav.hr'), icon: UserCheck, hasChevron: true }] : []),
+      ],
+    },
+    {
+      header: 'Outils & Collaboration',
+      items: [
+        ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Outils de travail', icon: FileCheck2, hasChevron: false }] : []),
+        { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
+        // Parrainage : c'est l'abonnement de l'entreprise qui est en jeu, donc
+        // réservé à qui la gère — la même permission que la page Équipe.
+        ...(hasPermission('MANAGE_USERS') ? [{ id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false }] : []),
+      ],
+    },
   ];
 
   /**
@@ -70,15 +124,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
    * `hasPermission` consulte l'offre. Ce filtre-ci est pour les deux cas
    * qu'une permission ne couvre pas : **Tableau de bord, Tâches et Messages**,
    * qui n'en portent aucune, et **Parrainage**, qui partage `MANAGE_USERS`
-   * avec Équipe alors que ce sont deux vues distinctes.
+   * avec Équipe alors que ce sont deux vues distinctes. Un groupe qui perd
+   * tous ses éléments à ce filtre (une offre qui ne vend aucun de ses
+   * modules) n'affiche plus son en-tête non plus — voir le rendu plus bas.
    */
-  const navItems = mainNavItems.filter(item => planAllowsModule(user?.company?.plan, item.id as PlanModule));
+  const navGroups = NAV_GROUPS
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => planAllowsModule(user?.company?.plan, item.id as PlanModule)),
+    }))
+    .filter(group => group.items.length > 0);
 
   // Orthogonal to any company-scoped permission: runs the platform itself
-  // (confirms other companies' payments), not this user's own company.
-  if (user?.isPlatformAdmin) {
-    navItems.push({ id: 'Plateforme', label: 'Plateforme', icon: Building2, hasChevron: false });
-  }
+  // (confirms other companies' payments), not this user's own company. Kept
+  // outside the three groups above — a platform-admin link isn't a question
+  // any of them answers, and it's rare enough (superadmin only) not to need
+  // its own header.
+  const platformItem: NavItem | null = user?.isPlatformAdmin
+    ? { id: 'Plateforme', label: 'Plateforme', icon: Building2, hasChevron: false }
+    : null;
 
   return (
     <>
@@ -123,37 +187,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Navigation List */}
-        <nav className="flex flex-col gap-px px-2.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeItem === item.id;
-
-            return (
-              <button
-                key={item.id}
-                onClick={() => { onSelectItem?.(item.id); onClose?.(); }}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-[9px] text-[12.5px] transition-all group ${
-                  isActive
-                    ? 'bg-white/10 text-white font-bold'
-                    : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-2.5 truncate">
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
-                </div>
-                {!!item.badge && (
-                  <span className="ml-1 shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
-                    {item.badge > 99 ? '99+' : item.badge}
-                  </span>
-                )}
-                {item.hasChevron && (
-                  <ChevronRight className="w-3 h-3 shrink-0 opacity-80" />
-                )}
-              </button>
-            );
-          })}
+        {/* Navigation List — grouped under three headers, each answering one
+            question: Pilotage & Production (piloter le travail), Finance &
+            RH (l'argent et l'équipe), Outils & Collaboration (le reste). A
+            group with no visible items (its own header included) simply
+            doesn't render — see `navGroups`'s filter above. */}
+        <nav className="flex flex-col px-2.5">
+          {navGroups.map((group, i) => (
+            <div key={group.header} className="flex flex-col gap-px">
+              <div className={`px-3 ${i === 0 ? 'pt-1' : 'pt-4'} pb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/35`}>
+                {group.header}
+              </div>
+              {group.items.map((item) => (
+                <NavButton key={item.id} item={item} isActive={activeItem === item.id} onSelect={() => { onSelectItem?.(item.id); onClose?.(); }} />
+              ))}
+            </div>
+          ))}
+          {platformItem && (
+            <div className="flex flex-col gap-px pt-4">
+              <NavButton item={platformItem} isActive={activeItem === platformItem.id} onSelect={() => { onSelectItem?.(platformItem.id); onClose?.(); }} />
+            </div>
+          )}
         </nav>
       </div>
 

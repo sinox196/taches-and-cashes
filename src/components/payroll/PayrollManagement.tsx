@@ -72,13 +72,23 @@ const emptyForm = {
 
 const dateOfPayslip = (p: Payslip) => `${p.year}-${String(p.month).padStart(2, '0')}-01`;
 
+interface PayrollManagementProps {
+  /**
+   * Rendu comme l'onglet « Paie » de GRH & Paie (HRManagement.tsx) plutôt
+   * qu'en page autonome : la page hôte porte déjà l'en-tête (icône, titre,
+   * sous-titre) et la marge extérieure, donc les deux ne se dupliquent pas
+   * ici — seul le contenu (barre d'actions, tableau, modales) reste.
+   */
+  embedded?: boolean;
+}
+
 /**
  * Gestion des paies — un bulletin par (collaborateur, mois). Voir CLAUDE.md
  * pour le détail du moteur de calcul (`computePayslip()` côté serveur, seule
  * implémentation — cet écran n'en porte aucune copie, seulement un aperçu
  * demandé au serveur).
  */
-export const PayrollManagement: React.FC = () => {
+export const PayrollManagement: React.FC<PayrollManagementProps> = ({ embedded = false }) => {
   const { token, hasPermission } = useAuth();
   const canManage = hasPermission('MANAGE_PAYROLL');
 
@@ -268,19 +278,21 @@ export const PayrollManagement: React.FC = () => {
   const shownPreview = preview; // aperçu serveur uniquement — pas de second calcul côté client
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1300px] w-full mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
-            <Wallet className="w-5 h-5 text-gray-800" />
+    <div className={`flex-1 min-h-0 flex flex-col space-y-4 sm:space-y-6 max-w-[1300px] w-full mx-auto ${embedded ? '' : 'p-4 sm:p-6 lg:p-8'}`}>
+      <div className={`flex flex-col sm:flex-row sm:items-start gap-4 ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && (
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+              <Wallet className="w-5 h-5 text-gray-800" />
+            </div>
+            <div>
+              <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">Gestion des paies</h1>
+              <p className="text-[12px] text-gray-500 mt-1">
+                Bulletins de paie mensuels — CNSS, IRPP et contribution sociale de solidarité calculés automatiquement.
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">Gestion des paies</h1>
-            <p className="text-[12px] text-gray-500 mt-1">
-              Bulletins de paie mensuels — CNSS, IRPP et contribution sociale de solidarité calculés automatiquement.
-            </p>
-          </div>
-        </div>
+        )}
         <div className="flex items-center gap-2 flex-wrap">
           <ExportButton
             fileName="bulletins-de-paie"

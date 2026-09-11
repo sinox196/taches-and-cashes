@@ -21,7 +21,6 @@ import { planAllowsModule, planModules, type PlanModule } from './constants/plan
 import { MissionsManagement } from './components/missions/MissionsManagement';
 import { CashManagement } from './components/cash/CashManagement';
 import { ResourcesManagement } from './components/resources/ResourcesManagement';
-import { PayrollManagement } from './components/payroll/PayrollManagement';
 import { useEscapeToClose } from './hooks/useEscapeToClose';
 import { closeLingeringTimerNotification } from './utils/osNotifications';
 import { useAuth } from './context/AuthContext';
@@ -62,7 +61,11 @@ export default function App() {
 
   // Remember the current section so a refresh (or anything that remounts the
   // app) leaves you where you were instead of bouncing back to Pointage.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Payroll', 'Users', 'Parrainage', 'Plateforme'];
+  // 'Payroll' n'est plus un id de nav distinct depuis que la Paie a fusionné
+  // dans 'HR' (« GRH & Paie », un seul lien de nav pour les deux) — un
+  // `active_nav`/`?nav=` déjà stocké à 'Payroll' échoue simplement ce test et
+  // retombe sur le repli plus bas, aucune route n'y a jamais pointé.
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Parrainage', 'Plateforme'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     // Clicking a pushed notification with no tab open makes the service
     // worker open the app at `/?nav=<section>` — there's no router to read a
@@ -887,10 +890,13 @@ export default function App() {
           <ResourcesManagement />
         ) : activeNav === 'Cash' && hasPermission('VIEW_CASH') ? (
           <CashManagement />
-        ) : activeNav === 'HR' && hasPermission('VIEW_HR') ? (
+        ) : activeNav === 'HR' && (hasPermission('VIEW_HR') || hasPermission('VIEW_PAYROLL')) ? (
+          // GRH & Paie — une seule page, deux permissions : RH et la Paie
+          // (ex-page « Gestion des paies », maintenant un onglet dedans) ont
+          // fusionné sous un seul lien de nav, donc l'un ou l'autre droit
+          // suffit à l'ouvrir. HRManagement se garde elle-même onglet par
+          // onglet — voir canViewHr/canViewPayroll dans ce composant.
           <HRManagement />
-        ) : activeNav === 'Payroll' && hasPermission('VIEW_PAYROLL') ? (
-          <PayrollManagement />
         ) : activeNav === 'Time Tracking' ? (
           <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col sm:min-h-0 space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
             

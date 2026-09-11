@@ -6,11 +6,11 @@ export const translations: Translations = {
   fr: {
     // Nav
     'nav.dashboard': 'Tableau de bord',
-    'nav.users': 'Équipe',
+    'nav.users': 'Équipe de travail',
     'nav.clients': 'Clients',
     'nav.timeTracking': 'Gestion des tâches',
     'nav.invoicing': 'Facturation',
-    'nav.hr': 'RH',
+    'nav.hr': 'GRH & Paie',
     'nav.logout': 'Déconnexion',
 
     // Common
@@ -40,8 +40,8 @@ export const translations: Translations = {
     'users.permissions': 'Permissions',
 
     // HR Management
-    'hr.title': 'Ressources Humaines',
-    'hr.subtitle': 'Gestion des congés et des autorisations d\'absence.',
+    'hr.title': 'GRH & Paie',
+    'hr.subtitle': 'Congés, autorisations d\'absence et bulletins de paie.',
     'hr.balance.available': 'Congés disponibles',
     'hr.balance.used': 'Congés pris',
     'hr.balance.days': 'jours',
@@ -70,7 +70,7 @@ export const translations: Translations = {
     'nav.clients': 'Clients',
     'nav.timeTracking': 'Task Management',
     'nav.invoicing': 'Invoicing',
-    'nav.hr': 'HR',
+    'nav.hr': 'HR & Payroll',
     'nav.logout': 'Logout',
 
     // Common
@@ -100,8 +100,8 @@ export const translations: Translations = {
     'users.permissions': 'Permissions',
 
     // HR Management
-    'hr.title': 'Human Resources',
-    'hr.subtitle': 'Leave and absence authorizations management.',
+    'hr.title': 'HR & Payroll',
+    'hr.subtitle': 'Leave, absence authorizations and payslips.',
     'hr.balance.available': 'Available Leaves',
     'hr.balance.used': 'Used Leaves',
     'hr.balance.days': 'days',
