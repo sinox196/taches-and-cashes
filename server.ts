@@ -213,6 +213,62 @@ const employerHourlyRate = (user: any, settings: any): number | null => {
  * `nombreMois` représente : sur combien de mois annualiser ce bulletin pour
  * la progressivité de l'impôt, pas une durée de contrat.
  *
+ * **Ce calcul à plat suppose un salaire constant sur l'année — faux dès que
+ * le salaire d'un collaborateur change en cours d'année.** Le système fiscal
+ * tunisien répartit l'impôt annuel de façon progressive : à chaque bulletin,
+ * on recalcule l'impôt dû sur la base des revenus *réellement perçus* depuis
+ * janvier, et on ne retient que la différence avec ce qui a déjà été prélevé
+ * — une régularisation, pas un montant figé mois après mois. `computePayslip()`
+ * bascule automatiquement sur cette régularisation progressive dès qu'un
+ * bulletin **antérieur existe pour ce collaborateur, cette même année**
+ * (`cumulAnterieur`, construit par l'appelant à partir de
+ * `db.getAllPayslips()`) : le premier bulletin de l'année pour quelqu'un
+ * retombe sur l'ancien calcul à plat (`nombreMois`, faute d'historique à
+ * cumuler), et chaque bulletin suivant régularise.
+ *
+ * Le mécanisme, pour le mois **M** (le Mᵉ bulletin de l'année pour ce
+ * collaborateur, `cumulAnterieur.moisEcoules + 1`) :
+ *
+ * 1. **Revenu cumulé réel** = somme des `salaireBrutImposable` des bulletins
+ *    déjà émis cette année + celui de ce mois-ci.
+ * 2. **Annualisation** = revenu cumulé × 12 / M — remplace le
+ *    `salaireBrutImposable × nombreMois` du calcul à plat, mais avec le même
+ *    résultat tant que le salaire ne bouge pas (voir plus bas).
+ * 3. Le reste du calcul (abattement, déductions communes, barème IRPP,
+ *    CSS) est **identique** au calcul à plat — seule la base annuelle change.
+ * 4. **Impôt dû pour la période écoulée** = impôt annuel estimé × M / 12.
+ * 5. **Retenue de ce mois** = impôt dû pour la période écoulée − impôt déjà
+ *    retenu de janvier au mois précédent (`cumulAnterieur.irppRetenu`). Même
+ *    calcul pour la CSS avec `cumulAnterieur.cssRetenue`. Un résultat négatif
+ *    (le salaire a baissé et le cumul déjà retenu dépasse ce qui est
+ *    réellement dû) est ramené à 0 plutôt que de produire une retenue
+ *    négative sur le bulletin — un crédit d'impôt éventuel se régularise à la
+ *    déclaration annuelle, pas en remboursant le bulletin du mois.
+ *
+ * **Preuve que ça ne change rien tant que le salaire est constant** : avec un
+ * salaire identique chaque mois, le revenu cumulé au mois M vaut
+ * `salaire × M`, donc l'annualisation vaut `salaire × M × 12 / M = salaire ×
+ * 12` — exactement la même base que le calcul à plat avec `nombreMois = 12`.
+ * L'impôt annuel estimé est donc identique d'un mois à l'autre, et la
+ * retenue mensuelle (`impôt annuel / 12`) l'est aussi — la régularisation
+ * n'a alors jamais rien à corriger. C'est ce qui permet de basculer
+ * *automatiquement* sur la régularisation dès qu'un historique existe, sans
+ * avoir à détecter explicitement « le salaire a changé » : la formule
+ * cumulative généralise le calcul à plat au lieu de le remplacer par un
+ * second chemin qui pourrait diverger.
+ *
+ * **Exemple vérifié** (le cas remonté) : 1 000 DT/mois de janvier à avril,
+ * puis 1 500 DT/mois en mai-juin. Le calcul à plat de mai (`1 500 × 12 =
+ * 18 000`) et le calcul à plat de juin surestimeraient tous deux l'année en
+ * extrapolant le dernier salaire en vigueur sur les douze mois. La
+ * régularisation progressive donne, elle : fin mai, cumul réel
+ * `4 000 + 1 500 = 5 500` sur 5 mois → annualisé `5 500 × 12 / 5 = 13 200` ;
+ * fin juin, cumul réel `5 500 + 1 500 = 7 000` sur 6 mois → annualisé
+ * `7 000 × 12 / 6 = 14 000`. La retenue de juin absorbe alors le
+ * rattrapage entre l'impôt annuel estimé à 13 200 (déjà retenu en partie
+ * jusqu'à mai) et celui réestimé à 14 000 — c'est la régularisation, pas une
+ * nouvelle sous-estimation qui se répéterait indéfiniment.
+ *
  * **« Jours fériés » se chiffre à 8 h/jour au taux horaire** (`salHeure` ×
  * `HEURES_PAR_JOUR`) — une hypothèse, pas une valeur du cahier des charges :
  * le document modèle remis ne donne aucune formule pour cette ligne, et 8 h
@@ -348,6 +404,22 @@ function computePayslip(input: {
   paieParentsACharge: number | null | undefined;
   paieAssuranceVie: number | null | undefined;
   paieCEA: number | null | undefined;
+  /**
+   * Régularisation progressive IRPP/CSS — voir le commentaire au-dessus de
+   * cette fonction. `null` quand aucun bulletin antérieur n'existe pour ce
+   * collaborateur sur cette année (premier bulletin de l'année) : le calcul
+   * retombe alors sur l'ancienne annualisation à plat par `nombreMois`.
+   */
+  cumulAnterieur: {
+    /** Nombre de bulletins déjà émis cette année pour ce collaborateur, avant celui-ci. */
+    moisEcoules: number;
+    /** Somme de leurs `salaireBrutImposable`. */
+    imposable: number;
+    /** Somme de leur `impotSurLeRevenu` déjà retenu. */
+    irppRetenu: number;
+    /** Somme de leur `contributionSocialeSolidarite` déjà retenue. */
+    cssRetenue: number;
+  } | null;
 }) {
   // « Salaire de base » n'est pas dérivé d'heures : c'est le salaire brut
   // mensuel de la fiche Équipe (`user.salaireBrut`), repris tel quel — la
@@ -367,8 +439,14 @@ function computePayslip(input: {
   const retenueCnss = round3(salaireBrut * (tauxCnss / 100));
   const salaireBrutImposable = round3(salaireBrut - retenueCnss);
 
-  const nombreMois = num(input.nombreMois, 12) > 0 ? num(input.nombreMois, 12) : 12;
-  const imposableAnnuelRef = salaireBrutImposable * nombreMois;
+  const cumul = input.cumulAnterieur;
+  // M : le rang de ce bulletin dans l'année (1er, 2e, …) quand il y a un
+  // historique à régulariser ; sinon l'ancien `nombreMois` saisi par l'admin
+  // (12 par défaut) — voir le commentaire au-dessus de cette fonction.
+  const moisEcoules = cumul ? cumul.moisEcoules + 1 : (num(input.nombreMois, 12) > 0 ? num(input.nombreMois, 12) : 12);
+  const imposableAnnuelRef = cumul
+    ? (round3(cumul.imposable + salaireBrutImposable) * 12) / moisEcoules
+    : salaireBrutImposable * moisEcoules;
   const abattement = Math.min(imposableAnnuelRef * (ABATTEMENT_TAUX / 100), ABATTEMENT_PLAFOND_ANNUEL);
   const baseAvantDeductionsCommunes = imposableAnnuelRef - abattement;
   const deductionsCommunes = deductionsCommunesAnnuelles({
@@ -384,8 +462,20 @@ function computePayslip(input: {
   const imposableIrppAnnuel = Math.max(0, imposableAnnuelRef - abattement - deductionsCommunes);
   const imposableIrppArrondi = Math.ceil(imposableIrppAnnuel);
 
-  const impotSurLeRevenu = round3(irppAnnuel(imposableIrppArrondi) / nombreMois);
-  const contributionSocialeSolidarite = round3((imposableIrppArrondi * (CSS_TAUX / 100)) / nombreMois);
+  const irppAnnuelEstime = irppAnnuel(imposableIrppArrondi);
+  const cssAnnuelEstime = imposableIrppArrondi * (CSS_TAUX / 100);
+
+  // Sans historique : la retenue mensuelle est un simple 1/nombreMois de
+  // l'impôt annuel, comme avant. Avec historique : la retenue de ce mois est
+  // la différence entre l'impôt dû pour toute la période déjà écoulée et ce
+  // qui a déjà été retenu — la régularisation. Un résultat négatif (salaire
+  // en baisse) est ramené à 0 plutôt que de rembourser sur ce bulletin.
+  const impotSurLeRevenu = cumul
+    ? round3(Math.max(0, round3((irppAnnuelEstime * moisEcoules) / 12) - cumul.irppRetenu))
+    : round3(irppAnnuelEstime / moisEcoules);
+  const contributionSocialeSolidarite = cumul
+    ? round3(Math.max(0, round3((cssAnnuelEstime * moisEcoules) / 12) - cumul.cssRetenue))
+    : round3(cssAnnuelEstime / moisEcoules);
 
   const salaireNet = round3(salaireBrutImposable - impotSurLeRevenu);
   const salaireNetAPayer = round3(salaireNet - contributionSocialeSolidarite);
@@ -403,7 +493,14 @@ function computePayslip(input: {
     contributionSocialeSolidarite,
     salaireNet,
     salaireNetAPayer,
-    nombreMois,
+    nombreMois: moisEcoules,
+    // Transparence : si la régularisation progressive s'est appliquée, et sur
+    // quel cumul — pour que l'écran puisse l'expliquer plutôt que de laisser
+    // deviner pourquoi une retenue diffère d'un simple 1/12e.
+    regularisationProgressive: !!cumul,
+    cumulAnterieurImposable: cumul ? cumul.imposable : null,
+    cumulAnterieurIrpp: cumul ? cumul.irppRetenu : null,
+    cumulAnterieurCss: cumul ? cumul.cssRetenue : null,
   };
 }
 
@@ -1398,12 +1495,32 @@ async function startServer() {
   const lastDayOfMonth = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
 
   /**
+   * Le cumul des bulletins déjà émis pour ce collaborateur, cette même
+   * année, avant le mois demandé — ce que `computePayslip()` régularise.
+   * `null` s'il n'y en a aucun (premier bulletin de l'année pour ce
+   * collaborateur), auquel cas `computePayslip()` retombe sur l'ancienne
+   * annualisation à plat par `nombreMois`. Un bulletin *du même mois* (le cas
+   * d'une modification en cours d'édition) n'est jamais compté : le filtre
+   * est strictement `< month`.
+   */
+  const cumulAnterieurFor = (payslips: any[], userId: number, year: number, month: number) => {
+    const priors = payslips.filter((p: any) => p.userId === userId && p.year === year && p.month < month);
+    if (priors.length === 0) return null;
+    return {
+      moisEcoules: priors.length,
+      imposable: round3(priors.reduce((s: number, p: any) => s + num(p.salaireBrutImposable, 0), 0)),
+      irppRetenu: round3(priors.reduce((s: number, p: any) => s + num(p.impotSurLeRevenu, 0), 0)),
+      cssRetenue: round3(priors.reduce((s: number, p: any) => s + num(p.contributionSocialeSolidarite, 0), 0)),
+    };
+  };
+
+  /**
    * Construit les entrées communes à l'aperçu et à l'enregistrement : la
    * copie figée de l'identité de paie de l'employé (au moment de l'appel) et
    * le résultat de `computePayslip()`. Ni l'aperçu ni l'enregistrement n'ont
    * de deuxième façon de calculer un bulletin.
    */
-  const buildPayslipDraft = (employee: any, body: any) => {
+  const buildPayslipDraft = async (employee: any, body: any, companyId: string) => {
     const year = parseInt(body.year, 10);
     const month = parseInt(body.month, 10);
     const nombreMois = num(body.nombreMois, 12) || 12;
@@ -1411,6 +1528,9 @@ async function startServer() {
     // Prérempli depuis la fiche Équipe (`user.salaireBrut`), modifiable sur ce
     // bulletin — voir le commentaire de `computePayslip()`.
     const salaireBase = typeof body.salaireBase === 'number' ? body.salaireBase : num(employee.salaireBrut, 0);
+    const cumulAnterieur = Number.isFinite(year) && Number.isFinite(month)
+      ? cumulAnterieurFor(await db.getAllPayslips(companyId), employee.id, year, month)
+      : null;
     const computed = computePayslip({
       salaireBase,
       salHeure,
@@ -1427,6 +1547,7 @@ async function startServer() {
       paieParentsACharge: employee.paieParentsACharge,
       paieAssuranceVie: employee.paieAssuranceVie,
       paieCEA: employee.paieCEA,
+      cumulAnterieur,
     });
     return {
       userId: employee.id,
@@ -1471,7 +1592,7 @@ async function startServer() {
     try {
       const employee = await db.getUserById(req.user.companyId, Number(req.body.userId));
       if (!employee || employee.role === CLIENT_ROLE) return res.status(404).json({ error: 'Collaborateur introuvable' });
-      res.json(buildPayslipDraft(employee, req.body || {}));
+      res.json(await buildPayslipDraft(employee, req.body || {}, req.user.companyId));
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1505,7 +1626,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Un bulletin existe déjà pour ce collaborateur sur cette période.' });
       }
 
-      const draft = buildPayslipDraft(employee, req.body || {});
+      const draft = await buildPayslipDraft(employee, req.body || {}, req.user.companyId);
       const row = await db.createPayslip(req.user.companyId, {
         id: Date.now(),
         ...draft,
@@ -1528,7 +1649,14 @@ async function startServer() {
 
       // L'identité de paie reste celle figée à la génération — modifier les
       // gains du mois ne doit pas aller rechercher une fiche Équipe
-      // éventuellement changée depuis.
+      // éventuellement changée depuis. Le cumul antérieur, lui, se relit à
+      // chaque édition (les bulletins des mois précédents peuvent avoir
+      // changé depuis la génération de celui-ci) — même exigence que la
+      // préparation initiale : un bulletin édité ne doit jamais afficher un
+      // chiffre que le cumul actuel ne justifie plus.
+      const cumulAnterieur = cumulAnterieurFor(
+        await db.getAllPayslips(req.user.companyId), existing.userId, existing.year, existing.month,
+      );
       const computed = computePayslip({
         salaireBase: typeof req.body.salaireBase === 'number' ? req.body.salaireBase : num(existing.salaireBase, 0),
         salHeure: typeof req.body.salHeure === 'number' ? req.body.salHeure : num(existing.salHeure, 0),
@@ -1545,6 +1673,7 @@ async function startServer() {
         paieParentsACharge: existing.paieParentsACharge,
         paieAssuranceVie: existing.paieAssuranceVie,
         paieCEA: existing.paieCEA,
+        cumulAnterieur,
       });
 
       const updated = await db.updatePayslip(req.user.companyId, id, {

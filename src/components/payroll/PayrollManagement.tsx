@@ -39,6 +39,14 @@ interface Payslip {
   imposableIrppAnnuel: number; imposableIrppArrondi: number;
   impotSurLeRevenu: number; contributionSocialeSolidarite: number;
   salaireNet: number; salaireNetAPayer: number; nombreMois: number;
+  // Régularisation progressive IRPP/CSS — voir CLAUDE.md « Gestion des paies ».
+  // `regularisationProgressive` est `false` (et les trois cumuls `null`) pour
+  // le premier bulletin de l'année d'un collaborateur, faute d'historique à
+  // régulariser ; `nombreMois` porte alors le sens qu'il a toujours eu.
+  regularisationProgressive?: boolean;
+  cumulAnterieurImposable?: number | null;
+  cumulAnterieurIrpp?: number | null;
+  cumulAnterieurCss?: number | null;
 }
 
 /** Empty draft used to reset the generation form — mirrors `Payslip`'s editable fields. */
@@ -404,7 +412,11 @@ export const PayrollManagement: React.FC = () => {
                     onChange={e => setForm(f => ({ ...f, nombreMois: e.target.value === '' ? '' as any : parseInt(e.target.value, 10) }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
                   />
-                  <p className="text-[10.5px] text-gray-500 mt-1">Annualisation IRPP/CSS — 12 par défaut.</p>
+                  <p className="text-[10.5px] text-gray-500 mt-1">
+                    {shownPreview?.regularisationProgressive
+                      ? "Ignoré : régularisation progressive sur l'historique du collaborateur cette année (voir l'aperçu)."
+                      : 'Annualisation IRPP/CSS — 12 par défaut.'}
+                  </p>
                 </div>
               </div>
 
@@ -564,6 +576,14 @@ export const PayrollManagement: React.FC = () => {
                 </div>
                 {shownPreview ? (
                   <div className="border border-gray-200 rounded-lg overflow-hidden text-[12.5px]">
+                    {shownPreview.regularisationProgressive && (
+                      <div className="px-3 py-2 bg-indigo-50 border-b border-indigo-100 text-[11px] text-indigo-800">
+                        Régularisation progressive : {shownPreview.nombreMois - 1} bulletin(s) antérieur(s) cette année
+                        cumulant {money(shownPreview.cumulAnterieurImposable)} DT imposable et
+                        {' '}{money(shownPreview.cumulAnterieurIrpp)} DT d'IRPP déjà retenu — la retenue de ce mois
+                        rattrape la différence avec l'impôt réestimé sur {shownPreview.nombreMois} mois.
+                      </div>
+                    )}
                     {[
                       ['Salaire brut', shownPreview.salaireBrut],
                       ['Retenue CNSS', -shownPreview.retenueCnss],
