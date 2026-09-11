@@ -82,7 +82,15 @@ export const UsersManagement: React.FC = () => {
   // écrit contre le siège plutôt que l'id de l'offre pour couvrir toute
   // future offre à un seul compte de la même façon. Le bouton ne fait
   // qu'anticiper le refus déjà posé par seatLimitError() côté serveur.
-  const singleSeatPlan = (planMeta(user?.company?.plan)?.seatLimit ?? Infinity) <= 1;
+  //
+  // Résolu fiche d'abord (`user.company.seatLimit`, le nombre réellement
+  // accordé), offre ensuite (`planMeta(...).seatLimit`) — même ordre que
+  // `seatLimitError()` côté serveur. Une offre dynamique (RH & Paie,
+  // Facturation, Complet) porte toujours `seatLimit: 1` au catalogue, qui
+  // n'est qu'un repli d'affichage ; s'arrêter à lui masquerait « Nouvel
+  // utilisateur »/« Exporter » pour une entreprise ayant réellement acheté
+  // plusieurs sièges sur l'une de ces offres.
+  const singleSeatPlan = (user?.company?.seatLimit ?? planMeta(user?.company?.plan)?.seatLimit ?? Infinity) <= 1;
   const { presenceOf } = usePresence();
   const { t } = useLanguage();
   const [users, setUsers] = useState<User[]>([]);

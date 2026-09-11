@@ -364,15 +364,93 @@ Deliberately deferred to V2/V3 per the spec's own phasing table (do not build wi
 
 Le catalogue vit dans [src/constants/plans.ts](src/constants/plans.ts) — une
 seule liste, lue par la page publique, la console plateforme et `server.ts`,
-comme `roles.ts` et `paymentModes.ts`. Trois packs : **Pack 5 / 70 DT**,
-**Pack 10 / 100 DT**, **Pack 15 / 130 DT**, chacun avec dix fois son nombre de
-sièges en comptes portail client (50 / 100 / 150) et l'intégralité des vues,
-factures comprises et sans plafond. Changer un prix, c'est éditer une ligne :
-une valeur corrigée sur la page de tarifs mais pas côté serveur produirait une
-page qui annonce un montant et un e-mail de RIB qui en demande un autre.
+comme `roles.ts` et `paymentModes.ts`. Changer un prix, c'est éditer une
+ligne : une valeur corrigée sur la page de tarifs mais pas côté serveur
+produirait une page qui annonce un montant et un e-mail de RIB qui en
+demande un autre.
+
+**Quatre offres, dans cet ordre** — Freelancer en tête, puis RH & Paie,
+Facturation, Complet — chacune ouvrant un périmètre différent :
+
+- **Freelancer** — gratuit, un siège, ADMIN, toutes les vues (`modules`
+  absent). Voir plus bas.
+- **RH & Paie** (`RH_PAIE`) — 20 DT/mois pour 1 utilisateur, +10 DT par
+  utilisateur supplémentaire. `modules: ['HR', 'Payroll', 'Users']` — Équipe,
+  RH et Gestion des paies, rien d'autre.
+- **Facturation** (`FACTURATION`) — même tarif, `modules: ['Clients', 'Cash',
+  'Users']` — Équipe, Clients et Cash.
+- **Complet** (`COMPLET`) — 50 DT/mois pour 1 utilisateur, +10 DT par
+  utilisateur supplémentaire, `modules` absent (toutes les vues). Offre par
+  défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
+
+**Pack 5/10/15 et l'ancien pack Facturation à 30 DT (un siège) ont été
+supprimés du catalogue purement et simplement**, pas seulement retirés
+(`legacy: true`) — décision explicite prise en connaissance du risque :
+toute entreprise encore inscrite sous l'un de ces identifiants voit
+`planMeta()` renvoyer `null`, ce qui la fait retomber sur les replis déjà en
+place pour une offre inconnue (`planLabel()` affiche l'id brut,
+`planAllowsModule()`/`planAllowsPermission()` ouvrent tout). Une offre
+retirée qu'on veut au contraire préserver pour ses entreprises existantes
+suit toujours le chemin `legacy: true` — voir `FREELANCE`/`EQUIPE`/
+`CROISSANCE` ci-dessous, inchangé.
+
+**Le tarif par utilisateur supplémentaire est le cœur du nouveau catalogue.**
+`PlanMeta.pricePerExtraUserDT` (10 DT pour les trois offres non-Freelancer) et
+`PlanMeta.baseSeats` (1 pour les trois) définissent une offre **dynamique** —
+`planPriceForSeats(meta, seats)` dans plans.ts en est l'unique
+implémentation : `priceDT` tel quel si `pricePerExtraUserDT` est absent
+(Freelancer, ou une offre retirée), sinon `priceDT + (seats − baseSeats) ×
+pricePerExtraUserDT`. **Une seule fonction, appelée aux quatre endroits qui
+doivent absolument s'accorder** — le calculateur de la page Tarifs, l'aperçu
+de prix dans la modale d'inscription, le mail de RIB
+(`POST /api/platform/companies/:id/send-rib`) et la confirmation de paiement
+(`POST /api/platform/companies/:id/confirm`) — sinon un montant annoncé au
+client et un montant encaissé finiraient tôt ou tard par diverger, exactement
+le piège que `computeInvoiceTotals()` évite déjà côté facturation.
+
+**`PlanMeta.seatLimit` sur une offre dynamique n'est qu'un repli
+d'affichage** (égal à `baseSeats`, donc 1) — **jamais** le nombre réellement
+accordé à une entreprise. Ce nombre-là vit sur la fiche
+(`company.seatLimit`), posé au nombre demandé à l'inscription
+(`POST /api/signup`, champ `seats` du corps de la requête, borné par
+`clampSeatsForPlan()` — entre `baseSeats` et `MAX_DYNAMIC_SEATS`, un
+garde-fou anti-abus de 200, pas une vraie limite commerciale) ou négocié
+ensuite depuis la console (`CompanyEditModal.tsx`, déjà éditable comme tout
+le reste des sièges). `POST /api/platform/companies/:id/confirm` **ne
+réécrit jamais `seatLimit`/`portalSeatLimit` depuis le catalogue statique
+pour une offre dynamique** — seule une offre à prix plat (aucune sellable
+aujourd'hui hormis Freelancer) reprend encore son `seatLimit` fixe à la
+confirmation ; sans cette garde, confirmer une entreprise sur RH & Paie à 4
+sièges l'aurait silencieusement ramenée à 1.
+
+**Toute lecture de `seatLimit` côté client doit suivre le même ordre de
+résolution que `seatLimitError()` côté serveur : la fiche d'abord, l'offre
+ensuite.** `GET /api/me` porte donc `company.seatLimit` (le nombre réel, pas
+le repli du catalogue) précisément pour ça —
+[UsersManagement.tsx](src/components/UsersManagement.tsx)'s `singleSeatPlan`
+(qui masque « Nouvel utilisateur »/« Exporter » d'Équipe sur un siège
+unique) lit `user.company.seatLimit ?? planMeta(...).seatLimit`, jamais
+`planMeta(...).seatLimit` seul — s'arrêter au catalogue aurait masqué ces
+deux boutons pour *toute* entreprise sur une offre dynamique, même celle
+ayant payé pour dix sièges, puisque le catalogue n'en affiche jamais que 1.
+Même règle appliquée dans [PlatformAdmin.tsx](src/pages/PlatformAdmin.tsx),
+qui affiche `c.seatLimit ?? meta.seatLimit` (jamais `meta.seatLimit` seul) à
+côté du prix recalculé pour ce nombre de sièges.
+
+**La page de tarifs porte un calculateur par carte** — un curseur
+« Utilisateurs » (`+`/`−`, borné entre `baseSeats` et `SEAT_STEPPER_MAX`, une
+limite d'affichage locale à Landing.tsx fixée à 50, bien en-deçà du
+`MAX_DYNAMIC_SEATS` serveur) qui recalcule le prix affiché **instantanément**
+via `planPriceForSeats()` — aucun aller-retour réseau, la même fonction que
+le serveur rappelée à chaque clic. Le nombre choisi sur la carte est porté
+jusqu'à la modale d'inscription (`initialSeats`), qui garde son propre champ
+éditable et son propre aperçu de prix : le visiteur peut affiner le chiffre
+là aussi sans revenir à la carte. `POST /api/signup` reçoit ce nombre dans
+`seats` et l'écrit tel quel (borné) comme `seatLimit` de la nouvelle
+entreprise — voir plus haut.
 
 **Le pack Freelancer est gratuit pour de bon, pas seulement à l'essai.** Un
-siège, ADMIN, `priceDT: 0`, et les mêmes vues que les trois packs (`modules`
+siège, ADMIN, `priceDT: 0`, et les mêmes vues que le pack Complet (`modules`
 absent) — un indépendant y trouve tout le cabinet, juste sans personne
 d'autre à ajouter, ce que le siège unique impose déjà par `seatLimitError()`
 sans règle à part. « Gratuit, sans période d'essai » n'est pas ce que
@@ -384,18 +462,6 @@ n'y entre jamais n'expire jamais, et `documentQuotaFor()` rend `null` (aucun
 plafond) exactement comme pour un abonnement payé confirmé. La page de
 tarifs affiche « Gratuit » plutôt que « 0 DT/mois » pour la même offre — un
 prix à zéro se lit comme un champ oublié, pas comme une promesse.
-
-**« Nouvel utilisateur » et « Exporter » disparaissent tous les deux d'Équipe
-sur un siège unique.** [UsersManagement.tsx](src/components/UsersManagement.tsx)
-lit `planMeta(user?.company?.plan)?.seatLimit <= 1` plutôt que de comparer
-littéralement `plan === 'FREELANCER'` — le Freelancer est aujourd'hui la
-seule offre à un siège qui ouvre encore cette vue (Facturation aussi est à un
-siège, mais `modules` lui ferme Équipe avant qu'on y arrive), mais une future
-offre à un seul compte suivrait la même règle sans y toucher. « Nouvel
-utilisateur » n'empêche rien côté serveur — `seatLimitError()` refuserait de
-toute façon la création — il évite seulement d'offrir un geste qui échouera à
-coup sûr ; « Exporter » n'a simplement rien à exporter d'utile quand la seule
-ligne du tableau est soi-même.
 
 **Les offres retirées restent dans la liste** (`legacy: true`) — `FREELANCE`,
 `EQUIPE`, `CROISSANCE`. Une entreprise inscrite sous l'ancien catalogue les
@@ -409,37 +475,25 @@ la réécrit pas.
 **Une offre peut n'ouvrir qu'une partie de l'application.** `PlanMeta.modules`
 porte les vues qu'elle vend, désignées par l'identifiant que porte déjà leur
 entrée de barre latérale (`Cash`, `Clients`, `HR`…) — **absent = toutes**, ce
-qui est le cas des trois packs (et du Freelancer) et ce qui fait qu'ajouter
-une offre restreinte n'a touché à rien de ce qui existait. Le pack
-**Facturation** (30 DT, un siège, aucun compte portail) déclare
-`['Clients', 'Cash']` — dans cet ordre : Clients en tête et non Cash, parce
-que c'est le premier module de cette liste qu'App.tsx ouvre par défaut, et
-c'est le fichier clients qu'on veut voir en arrivant, pas un formulaire de
-facture sans dossier encore choisi — le fichier clients qu'il faut bien
-pouvoir facturer, rien d'autre — **Équipe non plus**, l'offre étant à un
-siège, il n'y a personne à gérer (le mot de passe se change alors par « mot
-de passe oublié », que `PLAN_NEUTRAL_PREFIXES` laisse ouvert à toute offre).
-
-`standalone: true` la sort de l'échelle des sièges : elle est **en tête** de
-`PLANS` et la page de tarifs lui donne son propre ton (`TONES.accent`, le fond
-turquoise clair de la charte). Quatre cartes identiques feraient lire « 30 DT »
-comme le pack le moins cher, alors que ce n'est pas le même produit — d'où
-trois tons et non deux : `navy` met une offre **en avant** parmi ses pareilles,
-`accent` dit qu'une offre **n'est pas de la même famille**. Les encres du ton
-accent sont assombries pour tenir sur ce fond : le gris `#8A93A0` des cartes
-blanches y tombe à 2,6:1.
-
-**Sa carte a été retirée de la page Tarifs, à la demande de l'utilisateur** —
-[Landing.tsx](src/pages/Landing.tsx) filtre `FACTURATION` hors de la liste
-affichée (`SELLABLE_PLANS.filter(p => p.id !== 'FACTURATION')`) avant de la
-mettre en forme de cartes, et le paragraphe d'en-tête qui la présentait
-(« L'offre Facturation est un autre produit… ») a été retiré avec elle. Ce
-n'est **pas** la même chose qu'un `legacy: true` : l'offre reste dans
-`SELLABLE_PLANS` et donc `isSellablePlan` — une inscription qui la demande
-encore (console plateforme, lien direct) fonctionne toujours, seule sa carte
-publique a disparu. Si elle doit redevenir visible sur la page, retirer le
-`.filter()` suffit — ne pas la remarquer `legacy`, qui produirait un tout
-autre comportement (refusée à toute nouvelle inscription).
+qui est le cas de Freelancer et de Complet, et ce qui fait qu'ajouter une
+offre restreinte n'a touché à rien de ce qui existait. Les deux offres
+restreintes (RH & Paie, Facturation) suivent la même règle littérale que
+l'ancien pack Facturation à un siège : **seules les vues explicitement
+listées s'ouvrent**, Tableau de bord, Pointage, Ressources métier et
+Messages compris — ce n'est pas un oubli, c'est ce que l'utilisateur a
+demandé (« ken », *seulement*, dans sa description des deux offres). L'ordre
+compte dans chaque liste : Facturation déclare `Clients` avant `Cash` avant
+`Users`, parce que c'est le premier module de la liste qu'App.tsx ouvre par
+défaut, et c'est le fichier clients qu'on veut voir en arrivant — pas un
+formulaire de facture sans dossier encore choisi ; RH & Paie déclare `HR`
+avant `Payroll` avant `Users`, parce que c'est l'écran de travail quotidien
+de cette offre, la paie se générant moins souvent que les congés ne se
+posent, et Équipe étant un écran de réglage plutôt qu'un écran d'usage
+courant. `Users` (Équipe) figurant désormais dans ces deux offres — à la
+différence de l'ancien pack Facturation à un siège, qui l'excluait faute de
+personne à gérer — un cabinet sur l'une d'elles peut ajouter des
+collaborateurs, ce qui est précisément ce que le tarif par utilisateur
+supplémentaire vend.
 
 L'éditeur de document reste capable de se passer du fichier clients : il
 demande `hasPermission('VIEW_CLIENTS')` — qui consulte déjà l'offre — et sans
@@ -479,20 +533,26 @@ Le périmètre se ferme à **trois endroits, et les trois sont nécessaires** :
 App.tsx dérive de tout ça la section réellement affichée (`activeNav`) : la
 section mémorisée peut être fermée par l'offre — et l'est par défaut, le repli
 du sélecteur étant « Équipe » —, auquel cas on retombe sur **la première vue
-déclarée par l'offre** (`Clients` pour le pack Facturation, puisque « Équipe »
-n'y figure pas — un siège unique n'a personne à gérer), pas sur la première
-entrée de `NAV_IDS` qui se trouve autorisée. `canShowNav` traite le même refus
-pour une seconde raison, indépendante de l'offre : « Équipe » ferme aussi pour
-un utilisateur sans `MANAGE_USERS`, exactement comme elle fermerait pour une
-offre qui ne la vend pas — un collaborateur en première connexion retombe donc
-sur la même chaîne de secours qu'un compte Facturation, plutôt que sur
-« section en cours de développement ».
+déclarée par l'offre** (`Clients` pour le pack Facturation, en tête de
+`['Clients', 'Cash', 'Users']` ; `HR` pour RH & Paie, en tête de
+`['HR', 'Payroll', 'Users']`), pas sur la première entrée de `NAV_IDS` qui se
+trouve autorisée. `canShowNav` traite le même refus pour une seconde raison,
+indépendante de l'offre : « Équipe » ferme aussi pour un utilisateur sans
+`MANAGE_USERS`, exactement comme elle fermerait pour une offre qui ne la vend
+pas — un collaborateur en première connexion sans ce droit retombe donc sur
+la même chaîne de secours qu'un compte sur une offre qui ne vend pas Équipe,
+plutôt que sur « section en cours de développement ».
 
-**Le plafond de documents est ce que lève l'abonnement.**
-`PlanMeta.trialDocumentQuota` (10 pour le pack Facturation) plafonne les
+**Le plafond de documents est ce que lève l'abonnement — aucune offre du
+catalogue actuel n'en pose un.** `PlanMeta.trialDocumentQuota` plafonne les
 documents **émis** par mois tant que l'entreprise n'est pas `ACTIVE` ;
 `documentQuotaFor()` rend `null` dès qu'elle l'est — c'est précisément ce
-qu'on vend. Trois précisions qui décident du comportement :
+qu'on vend. L'ancien pack Facturation à un siège en portait un (10/mois) ;
+le pack Facturation qui l'a remplacé n'en a délibérément pas, comme les
+trois autres offres — rien dans la demande n'en redemandait un, et le champ
+reste disponible pour la prochaine offre qui en aura besoin. Trois
+précisions qui décident du comportement, pour l'offre qui viendrait en
+poser un :
 
 - **Un brouillon ne compte pas** (`countsAgainstQuota` : tout sauf `DRAFT`).
   On en prépare autant qu'on veut ; c'est à l'**émission** que la place est
@@ -521,6 +581,17 @@ un oubli : une entreprise sur une offre retirée, ou l'entreprise historique,
 n'a jamais souscrit de quota de comptes portail et lui en imposer un
 casserait un portail déjà en service. Un `0` écrit sur la fiche, lui, veut bien
 dire zéro : c'est une valeur saisie, pas une absence.
+
+**Les trois offres dynamiques posent `portalSeatLimit: 0` au catalogue —
+aucun chiffre n'a été demandé pour ce panier-là, seul le tarif par
+utilisateur du back-office l'a été.** Zéro est le même défaut sûr que
+« aucune offre » ci-dessus : ça n'empêche personne de négocier un quota par
+fiche via `CompanyEditModal.tsx`, et ça n'invente pas un nombre qui
+tromperait un vrai client sur ce qu'il achète. Facturation et Complet
+ouvrent tous deux le module Clients (donc le portail client a un sens
+fonctionnel pour eux, contrairement à RH & Paie) — si un chiffre est
+souhaité pour ce panier, c'est une ligne à ajouter dans plans.ts, pas une
+correction de bug.
 
 ### Parrainage
 

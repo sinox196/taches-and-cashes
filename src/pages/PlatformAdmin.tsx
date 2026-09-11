@@ -5,7 +5,7 @@ import { friendlyError } from '../utils/errors';
 import { PlatformUsersModal } from '../components/platform/PlatformUsersModal';
 import { CompanyEditModal } from '../components/platform/CompanyEditModal';
 import { usePeriodPage, PeriodFilter, PaginationBar } from '../components/PeriodPager';
-import { SELLABLE_PLANS, planMeta, planLabel, formatDT, discountedPriceDT } from '../constants/plans';
+import { SELLABLE_PLANS, planMeta, planLabel, formatDT, discountedPriceDT, planPriceForSeats } from '../constants/plans';
 
 interface Company {
   id: string;
@@ -441,16 +441,30 @@ export const PlatformAdmin: React.FC = () => {
                         const meta = planMeta(planFor(c));
                         if (!meta) return null;
                         const discount = pendingDiscount(c);
+                        // Le nombre de sièges à afficher est celui de la
+                        // **fiche** (`c.seatLimit`/`c.portalSeatLimit`), pas
+                        // celui du catalogue : pour une offre dynamique, c'est
+                        // le nombre réellement demandé à l'inscription ou
+                        // négocié depuis cette même console — celui du
+                        // catalogue n'est qu'un repli d'affichage (voir le
+                        // commentaire de `seatLimit` dans plans.ts). Même
+                        // raison pour le prix : `planPriceForSeats()` le
+                        // recalcule pour ce nombre-là, jamais le prix de base
+                        // seul.
+                        const seats = c.seatLimit ?? meta.seatLimit;
+                        const price = planPriceForSeats(meta, seats);
                         return (
                           <div className="text-[11px] text-gray-400 mt-1">
-                            {meta.seatLimit} util. + {meta.portalSeatLimit} portail
+                            {seats} util. + {c.portalSeatLimit ?? meta.portalSeatLimit} portail
                             {/* Le prix à encaisser, remise de parrainage
                                 déduite : c'est ce chiffre-là qu'il faut
                                 facturer, pas celui du catalogue. */}
-                            {discount > 0 && (
+                            {discount > 0 ? (
                               <div className="text-emerald-700 font-medium">
-                                {formatDT(discountedPriceDT(meta.priceDT, discount))}/mois — remise parrainage −{discount} %
+                                {formatDT(discountedPriceDT(price, discount))}/mois — remise parrainage −{discount} %
                               </div>
+                            ) : (
+                              <div>{formatDT(price)}/mois</div>
                             )}
                             {c.status === 'ACTIVE' && c.subscriptionPriceDT !== undefined && (
                               <div className="text-gray-500">Facturé {formatDT(c.subscriptionPriceDT)}/mois</div>

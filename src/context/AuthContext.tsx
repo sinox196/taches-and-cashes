@@ -53,7 +53,11 @@ export interface User {
   /** Runs the platform itself (confirms other companies' payments) — orthogonal to `role`, which is scoped to this user's own company. */
   isPlatformAdmin?: boolean;
   /** This user's own company — trial status, plan, deadline, secteur. Absent for a pre-migration /api/login response shape. */
-  company?: { id: string; name: string; status: string; plan: string; trialEndsAt: string | null; secteur?: string | null } | null;
+  company?: {
+    id: string; name: string; status: string; plan: string; trialEndsAt: string | null; secteur?: string | null;
+    /** Le nombre de sièges back-office réellement accordé — pas le repli du catalogue, voir plans.ts. */
+    seatLimit?: number | null;
+  } | null;
 }
 
 interface AuthContextType {

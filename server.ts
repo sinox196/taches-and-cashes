@@ -13,6 +13,7 @@ import {
   PLAN_SEAT_LIMITS, PLAN_PORTAL_SEAT_LIMITS, SELLABLE_PLANS, isSellablePlan, DEFAULT_PLAN_ID,
   planMeta, planLabel, formatDT, REFERRAL_DISCOUNT_PERCENT, discountedPriceDT,
   planAllowsPermission, documentQuotaFor, planAllowsModule, planModules, type PlanModule,
+  planPriceForSeats, clampSeatsForPlan,
 } from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
@@ -1082,7 +1083,12 @@ async function startServer() {
         breakMinutes: user.breakMinutes ?? null,
         clientId: user.clientId ?? null,
         isPlatformAdmin: !!user.isPlatformAdmin,
-        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null } : null,
+        // `seatLimit` est le nombre réellement accordé à l'entreprise — pour
+        // une offre dynamique (prix par utilisateur), ce n'est PAS la valeur
+        // de repli du catalogue (`planMeta(plan).seatLimit`, toujours 1), et
+        // le client en a besoin pour des décisions comme « Nouvel
+        // utilisateur »/« Exporter » sur Équipe (voir UsersManagement.tsx).
+        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null, seatLimit: company.seatLimit ?? null } : null,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -8209,9 +8215,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   });
 
   // --- Public landing page.
-  // "Sur mesure" (>10 seats) stays a lead-capture request — a custom deal is
-  // inherently a conversation, not a self-serve signup. The three standard
-  // packs go through /api/signup below instead, which provisions a real
+  // "Sur mesure" (beyond the pricing page's own seat-stepper cap — see
+  // SEAT_STEPPER_MAX in Landing.tsx) stays a lead-capture request — a custom
+  // deal is inherently a conversation, not a self-serve signup. The sellable
+  // plans go through /api/signup below instead, which provisions a real
   // isolated company immediately.
   const escapeHtml = (v: string) => v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
@@ -8488,6 +8495,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const password = String(req.body?.password ?? '');
       const confirmPassword = String(req.body?.confirmPassword ?? '');
       const plan = isSellablePlan(req.body?.plan) ? req.body.plan : DEFAULT_PLAN_ID;
+      const planMetaForSignup = planMeta(plan);
+      // Pour une offre dynamique (prix par utilisateur), le nombre demandé
+      // ici *est* le nombre de sièges accordé — écrit une fois pour toutes
+      // sur la fiche ci-dessous, jamais réécrit depuis le catalogue statique
+      // ensuite (voir le commentaire de `seatLimit` dans plans.ts). Pour une
+      // offre à prix plat, `clampSeatsForPlan` ignore la valeur envoyée et
+      // retombe sur le `seatLimit` fixe de l'offre.
+      const requestedSeats = clampSeatsForPlan(planMetaForSignup, req.body?.seats);
       const secteur: Secteur = SECTEURS.some(s => s.id === req.body?.secteur) ? req.body.secteur : 'CABINET';
 
       if (!companyName || !contactName || !contactEmail || !phone) {
@@ -8542,7 +8557,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         name: companyName,
         status: isFreePlan ? 'ACTIVE' : 'TRIAL',
         plan,
-        seatLimit: PLAN_SEAT_LIMITS[plan] || 1,
+        // `requestedSeats` est déjà le bon nombre pour une offre à prix plat
+        // (clampSeatsForPlan l'y ramène) comme pour une offre dynamique (le
+        // nombre demandé) — un seul champ, pas une branche par type d'offre.
+        seatLimit: requestedSeats,
         portalSeatLimit: PLAN_PORTAL_SEAT_LIMITS[plan] || 0,
         secteur,
         createdAt: new Date().toISOString(),
@@ -8601,7 +8619,8 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
           <p><strong>Contact :</strong> ${escapeHtml(contactName)}</p>
           <p><strong>Email :</strong> ${escapeHtml(contactEmail)}</p>
           <p><strong>Téléphone :</strong> ${escapeHtml(phone)}</p>
-          <p><strong>Offre visée :</strong> ${escapeHtml(plan)}</p>
+          <p><strong>Offre visée :</strong> ${escapeHtml(plan)} (${requestedSeats} utilisateur${requestedSeats > 1 ? 's' : ''})</p>
+          <p><strong>Prix visé :</strong> ${escapeHtml(formatDT(planPriceForSeats(planMetaForSignup, requestedSeats)))}/mois</p>
           <p><strong>Fin de la période d'essai :</strong> ${trialEndsAt ? trialEndsAt.slice(0, 10) : 'Aucune — offre Freelancer gratuite'}</p>
         `,
       }).catch(() => {});
@@ -8915,19 +8934,22 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       const plan = isSellablePlan(req.body?.plan) ? req.body.plan : company.plan;
       const bank = await db.getPlatformSettings();
 
-      // Le prix annoncé est celui de l'offre, remise de parrainage déduite si
-      // l'entreprise en porte une : c'est le montant qu'on lui demande de
-      // virer, donc c'est celui qui doit figurer dans le mail. L'annoncer plein
-      // puis facturer moins (ou l'inverse) est la seule façon sûre de rater un
-      // encaissement.
+      // Le prix annoncé est celui de l'offre **pour le nombre de sièges déjà
+      // sur la fiche** (voir `planPriceForSeats`) — le nombre demandé à
+      // l'inscription, ou négocié depuis la console entre-temps — remise de
+      // parrainage déduite si l'entreprise en porte une : c'est le montant
+      // qu'on lui demande de virer, donc c'est celui qui doit figurer dans le
+      // mail. L'annoncer plein puis facturer moins (ou l'inverse) est la
+      // seule façon sûre de rater un encaissement.
       const meta = planMeta(plan);
       const discount = pendingReferralDiscount(company);
-      const net = meta ? discountedPriceDT(meta.priceDT, discount) : 0;
+      const basePrice = meta ? planPriceForSeats(meta, company.seatLimit) : 0;
+      const net = meta ? discountedPriceDT(basePrice, discount) : 0;
       const priceHtml = meta
         ? (discount > 0
           ? `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(net))} / mois
-               <span style="color:#8A93A0;"> (au lieu de ${escapeHtml(formatDT(meta.priceDT))} — remise parrainage de ${discount} % sur votre premier abonnement)</span></p>`
-          : `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(meta.priceDT))} / mois</p>`)
+               <span style="color:#8A93A0;"> (au lieu de ${escapeHtml(formatDT(basePrice))} — remise parrainage de ${discount} % sur votre premier abonnement)</span></p>`
+          : `<p><strong>Montant à régler :</strong> ${escapeHtml(formatDT(basePrice))} / mois</p>`)
         : '';
 
       const { sent } = await sendMail({
@@ -8979,18 +9001,28 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       // paie : c'est la première échéance qu'elle concerne, et le prix retenu
       // est figé sur la fiche (`subscriptionPriceDT`) pour que la console
       // n'ait pas à le recalculer plus tard, quand le catalogue aura bougé.
+      // Le prix se calcule pour le nombre de sièges **déjà sur la fiche** —
+      // celui demandé à l'inscription (offre dynamique) ou négocié depuis la
+      // console entre-temps — jamais pour le prix de base seul.
       const discount = pendingReferralDiscount(company);
-      const price = meta ? discountedPriceDT(meta.priceDT, discount) : null;
+      const price = meta ? discountedPriceDT(planPriceForSeats(meta, company.seatLimit), discount) : null;
 
       const updated = await db.updateCompany(company.id, {
         status: 'ACTIVE',
         plan,
-        seatLimit: PLAN_SEAT_LIMITS[plan] || company.seatLimit,
+        // Une offre dynamique (prix par utilisateur) ne réécrit jamais le
+        // nombre de sièges depuis le catalogue statique : celui de la fiche
+        // est déjà le nombre réellement demandé ou négocié, et c'est lui qui
+        // vient de servir à calculer `price` juste au-dessus — les deux
+        // doivent rester le même chiffre. Seule une offre à prix plat encore
+        // reprend son `seatLimit` fixe du catalogue.
+        ...(meta && !meta.pricePerExtraUserDT ? { seatLimit: PLAN_SEAT_LIMITS[plan] || company.seatLimit } : {}),
         // Seule une offre encore vendue pose un quota de comptes portail.
         // L'écrire depuis une offre retirée (qui n'en donne aucun) fixerait un
         // zéro sur la fiche — donc « aucun compte portail » — là où
-        // l'entreprise n'a jamais rien souscrit de tel.
-        ...(meta && !meta.legacy ? { portalSeatLimit: meta.portalSeatLimit } : {}),
+        // l'entreprise n'a jamais rien souscrit de tel. Même raison que
+        // ci-dessus pour ne pas y toucher sur une offre dynamique.
+        ...(meta && !meta.legacy && !meta.pricePerExtraUserDT ? { portalSeatLimit: meta.portalSeatLimit } : {}),
         trialEndsAt: null,
         confirmedAt: new Date().toISOString(),
         // L'échéance de l'abonnement, dérivée de l'offre : les trois packs

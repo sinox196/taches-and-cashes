@@ -10,15 +10,26 @@ import { Reveal, CountUp } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
 import { ClientLogos } from '../components/landing/ClientLogos';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
-import { SELLABLE_PLANS, formatDT } from '../constants/plans';
+import { SELLABLE_PLANS, planMeta, planPriceForSeats, formatDT } from '../constants/plans';
 
 const CONTACT_EMAIL = 'contact@taches-and-cash.com';
 
+/**
+ * Le plafond du curseur « utilisateurs » sur une carte — purement une limite
+ * d'affichage, pas une limite commerciale : au-delà, la carte propose déjà
+ * l'offre sur mesure en pied de section. `clampSeatsForPlan` côté serveur
+ * borne bien plus haut (`MAX_DYNAMIC_SEATS`, garde-fou anti-abus).
+ */
+const SEAT_STEPPER_MAX = 50;
+
 interface PricingPlan {
+  id: string;
   name: string;
   tagline: string;
-  price: string;
-  period?: string;
+  isFree: boolean;
+  /** A un tarif par utilisateur supplémentaire — affiche le curseur. */
+  dynamic: boolean;
+  baseSeats: number;
   seats: string;
   portalSeats: string;
   features: string[];
@@ -67,23 +78,24 @@ const TONES: Record<Tone, {
  * Les cartes de tarifs sont dérivées de [plans.ts](../constants/plans.ts), la
  * même liste que lit le serveur : un prix corrigé ici et pas là-bas produirait
  * une page publique qui annonce un montant et un e-mail de RIB qui en demande
- * un autre. Cette interface ne fait que mettre la liste en forme d'affichage.
- *
- * **Le pack Facturation n'y figure plus** — retiré de la page à la demande de
- * l'utilisateur. Il reste dans `SELLABLE_PLANS` côté serveur (`isSellablePlan`,
- * la console plateforme) : ce n'est pas une offre retirée comme `FREELANCE`/
- * `EQUIPE`/`CROISSANCE` (`legacy: true`), qui elles ne se vendent plus du
- * tout — seule sa carte publique disparaît, l'offre se propose encore
- * autrement (contact direct).
+ * un autre. Cette interface ne fait que mettre la liste en forme d'affichage —
+ * le prix lui-même n'est **pas** figé ici : pour une offre dynamique (RH &
+ * Paie, Facturation, Complet), il dépend du curseur « utilisateurs » de la
+ * carte et se recalcule au rendu via `planPriceForSeats()`, la même fonction
+ * que le serveur.
  */
-const PLANS: PricingPlan[] = SELLABLE_PLANS.filter(p => p.id !== 'FACTURATION').map(p => ({
+const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
+  id: p.id,
   name: p.label,
   tagline: p.tagline,
   // « 0 DT/mois » se lit comme un prix qu'on a oublié de saisir — le pack
   // Freelancer n'a pas de période, il n'a pas de prix du tout.
-  price: p.priceDT === 0 ? 'Gratuit' : formatDT(p.priceDT),
-  period: p.priceDT === 0 ? undefined : '/mois',
-  seats: `${p.seatLimit} utilisateur${p.seatLimit > 1 ? 's' : ''}`,
+  isFree: p.priceDT === 0 && !p.pricePerExtraUserDT,
+  dynamic: !!p.pricePerExtraUserDT,
+  baseSeats: p.baseSeats ?? p.seatLimit,
+  seats: p.pricePerExtraUserDT
+    ? `à partir de ${p.baseSeats ?? p.seatLimit} utilisateur${(p.baseSeats ?? p.seatLimit) > 1 ? 's' : ''}`
+    : `${p.seatLimit} utilisateur${p.seatLimit > 1 ? 's' : ''}`,
   // Une offre sans portail client ne porte pas la ligne du tout : « + 0
   // comptes portail client » se lit comme une privation, alors que ce
   // portail n'est simplement pas ce qu'elle vend.
@@ -242,6 +254,21 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
   const [modalPlan, setModalPlan] = useState<string | null>(null);
+  // Le nombre de sièges choisi sur la carte cliquée — porté jusqu'à la
+  // modale pour qu'elle démarre sur le même chiffre plutôt que de repartir
+  // de zéro.
+  const [modalSeats, setModalSeats] = useState<number>(1);
+  // Un curseur par carte, indépendant des autres : changer « RH & Paie » ne
+  // doit pas faire bouger le prix affiché sur « Complet ».
+  const [seatsByPlan, setSeatsByPlan] = useState<Record<string, number>>({});
+  const seatsFor = (p: PricingPlan) => Math.max(p.baseSeats, seatsByPlan[p.id] ?? p.baseSeats);
+  const bumpSeats = (p: PricingPlan, delta: number) => {
+    setSeatsByPlan(prev => {
+      const current = Math.max(p.baseSeats, prev[p.id] ?? p.baseSeats);
+      const next = Math.min(SEAT_STEPPER_MAX, Math.max(p.baseSeats, current + delta));
+      return { ...prev, [p.id]: next };
+    });
+  };
 
   useEffect(() => {
     if (view === 'home' && pendingAnchor) {
@@ -937,7 +964,9 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 Un prix simple, qui grandit avec votre équipe
               </h1>
               <p className="mt-[18px] text-[16.5px] text-[#5B6472] leading-[1.6]">
-                Les trois packs donnent accès à l'intégralité des vues — tâches, temps, coûts, facturation et trésorerie.
+                Freelancer est gratuit pour un indépendant seul. Les trois autres offres ouvrent chacune un
+                périmètre différent — RH &amp; Paie, Facturation, ou le cabinet complet — et leur prix s'ajuste
+                instantanément au nombre d'utilisateurs.
               </p>
             </div>
           </section>
@@ -947,9 +976,16 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             <div className="max-w-[1240px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
               {PLANS.map(plan => {
                 const tone = TONES[plan.tone];
+                const meta = planMeta(plan.id);
+                const seats = seatsFor(plan);
+                // Le prix affiché suit exactement `planPriceForSeats()` — la
+                // même fonction que le serveur utilise pour le mail de RIB et
+                // la confirmation de paiement, pour qu'un montant annoncé ici
+                // ne puisse jamais diverger de ce qui sera réellement demandé.
+                const priceDT = plan.isFree ? 0 : planPriceForSeats(meta, seats);
                 return (
                 <div
-                  key={plan.name}
+                  key={plan.id}
                   className={`relative rounded-[20px] px-[30px] py-9 text-left flex flex-col ${tone.card}`}
                 >
                   {plan.highlighted && (
@@ -961,8 +997,8 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <p className={`text-[13.5px] mt-1.5 ${tone.muted}`}>{plan.tagline}</p>
 
                   <div className="mt-6 flex items-baseline gap-1.5">
-                    <span className={`text-[40px] font-extrabold ${tone.title}`}>{plan.price}</span>
-                    {plan.period && <span className={`text-[14px] ${tone.muted}`}>{plan.period}</span>}
+                    <span className={`text-[40px] font-extrabold ${tone.title}`}>{plan.isFree ? 'Gratuit' : formatDT(priceDT)}</span>
+                    {!plan.isFree && <span className={`text-[14px] ${tone.muted}`}>/mois</span>}
                   </div>
                   <p className={`text-[13px] mt-1 ${tone.muted}`}>{plan.seats}</p>
                   {/* Les comptes du portail client se comptent dans un panier
@@ -970,6 +1006,38 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                       quoi « 5 utilisateurs + 50 portail » se lit comme 55. */}
                   {plan.portalSeats && (
                     <p className={`text-[13px] ${tone.portal}`}>+ {plan.portalSeats}</p>
+                  )}
+
+                  {/* Le calculateur : +10 DT par utilisateur au-delà du
+                      premier, recalculé instantanément — aucun aller-retour
+                      réseau, juste `planPriceForSeats()` rappelée à chaque
+                      clic. N'apparaît que sur une offre dynamique ; Freelancer
+                      n'a ni curseur ni second siège à afficher. */}
+                  {plan.dynamic && (
+                    <div className={`mt-4 flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 ${tone.rule}`}>
+                      <span className={`text-[12.5px] font-semibold ${tone.title}`}>Utilisateurs</span>
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => bumpSeats(plan, -1)}
+                          disabled={seats <= plan.baseSeats}
+                          aria-label="Retirer un utilisateur"
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-[15px] font-bold transition-colors disabled:opacity-30 ${tone.bullet}`}
+                        >
+                          −
+                        </button>
+                        <span className={`text-[14px] font-bold w-6 text-center ${tone.title}`}>{seats}</span>
+                        <button
+                          type="button"
+                          onClick={() => bumpSeats(plan, 1)}
+                          disabled={seats >= SEAT_STEPPER_MAX}
+                          aria-label="Ajouter un utilisateur"
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-[15px] font-bold transition-colors disabled:opacity-30 ${tone.bullet}`}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
                   )}
 
                   <div className={`h-px my-6 ${tone.rule}`} />
@@ -984,7 +1052,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   </div>
 
                   <button
-                    onClick={() => setModalPlan(plan.name)}
+                    onClick={() => { setModalPlan(plan.name); setModalSeats(seats); }}
                     className={`mt-7 w-full py-[14px] px-6 rounded-xl text-[14.5px] font-bold transition-colors ${tone.cta}`}
                   >
                     {plan.cta}
@@ -995,8 +1063,8 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </div>
 
             <p className="mt-9 text-center text-[13.5px] text-[#8A93A0]">
-              Besoin de plus de 15 utilisateurs ?{' '}
-              <button onClick={() => setModalPlan('Sur mesure')} className="text-turquoise font-semibold hover:underline">
+              Besoin de plus de {SEAT_STEPPER_MAX} utilisateurs ?{' '}
+              <button onClick={() => { setModalPlan('Sur mesure'); setModalSeats(1); }} className="text-turquoise font-semibold hover:underline">
                 Contactez-nous
               </button>{' '}
               pour une offre sur mesure.
@@ -1086,7 +1154,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
         </div>
       </footer>
 
-      {modalPlan && <RequestAccessModal plan={modalPlan} onClose={() => setModalPlan(null)} />}
+      {modalPlan && <RequestAccessModal plan={modalPlan} initialSeats={modalSeats} onClose={() => setModalPlan(null)} />}
     </div>
   );
 };
