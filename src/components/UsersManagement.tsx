@@ -13,7 +13,7 @@ import { planMeta } from '../constants/plans';
 
 const PERMISSIONS_GROUPED = [
   {
-    group: 'Pointage',
+    group: 'Gestion des tâches',
     permissions: [
       { id: 'VIEW', label: 'Voir', desc: 'Peut consulter le suivi du temps' },
       { id: 'EDIT', label: 'Modifier', desc: 'Peut modifier le suivi du temps' },
@@ -37,8 +37,13 @@ const PERMISSIONS_GROUPED = [
   {
     group: 'Facturation & Trésorerie',
     permissions: [
-      { id: 'VIEW_CASH', label: 'Voir Cash', desc: 'Peut consulter les factures et documents' },
+      { id: 'VIEW_CASH', label: 'Voir Cash', desc: "Peut consulter l'onglet Facturation — les factures et documents émis" },
       { id: 'MANAGE_CASH', label: 'Gérer Cash', desc: 'Peut créer, modifier et supprimer des documents' },
+      { id: 'VIEW_CASH_TOTALS', label: 'Voir les totaux financiers', desc: 'Peut voir le bandeau "Total Général" (Total HT, Montant de facture) de l\'onglet Facturation. Sans cette permission, ces montants ne sont pas envoyés au navigateur.' },
+      { id: 'VIEW_CLIENT_PAYMENTS', label: 'Voir Règlements clients', desc: 'Peut consulter l\'onglet Règlements clients — ce que chaque client a réglé et par quel moyen.' },
+      { id: 'MANAGE_CLIENT_PAYMENTS', label: 'Gérer Règlements clients', desc: 'Peut ajouter, modifier et supprimer des règlements clients (lignes du journal avec un client et une entrée) — pas les autres mouvements de caisse.' },
+      { id: 'VIEW_CASH_JOURNAL', label: 'Voir Brouillard de caisse', desc: 'Peut consulter le brouillard de caisse — tous les mouvements de caisse, entrées et sorties.' },
+      { id: 'MANAGE_CASH_JOURNAL', label: 'Gérer Brouillard de caisse', desc: 'Peut ajouter, modifier et supprimer tout mouvement du brouillard de caisse, règlements clients compris.' },
     ]
   },
   {

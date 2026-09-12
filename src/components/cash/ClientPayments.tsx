@@ -141,7 +141,9 @@ const Fields: React.FC<{
 export const ClientPayments: React.FC = () => {
   const { token, hasPermission } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  const canManage = hasPermission('MANAGE_CASH');
+  // MANAGE_CASH_JOURNAL couvre tout le brouillard, règlements compris — voir
+  // CLAUDE.md « Cash (facturation) ».
+  const canManage = hasPermission('MANAGE_CLIENT_PAYMENTS') || hasPermission('MANAGE_CASH_JOURNAL');
 
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);

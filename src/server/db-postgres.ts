@@ -387,6 +387,10 @@ export async function initPostgres(connectionString: string): Promise<Database> 
       const rows = await q(`SELECT data FROM users WHERE LOWER(data->>'username') = LOWER($1)`, [String(username)]);
       return rows.length ? rows[0].data : undefined;
     },
+    getUserByReferralCode: async (code: string) => {
+      const rows = await q(`SELECT data FROM users WHERE UPPER(data->>'referralCode') = UPPER($1)`, [String(code)]);
+      return rows.length ? rows[0].data : undefined;
+    },
     getUserById: users.byId,
 
     getAllCompanies: companies.all,

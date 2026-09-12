@@ -877,7 +877,10 @@ export default function App() {
           (hasPermission('ADMIN') || DASHBOARD_ROLES.includes(user?.role ?? '')) ? <AdminDashboard /> : <MyDashboard />
         ) : activeNav === 'Messages' ? (
           <ChatPage onUnreadChange={setUnreadMessages} />
-        ) : activeNav === 'Parrainage' && hasPermission('MANAGE_USERS') ? (
+        ) : activeNav === 'Parrainage' ? (
+          // Ouvert à tout collaborateur, plus seulement à qui gère l'équipe —
+          // chacun a désormais son propre code de parrainage. Voir CLAUDE.md
+          // « Parrainage ».
           <ReferralPage />
         ) : activeNav === 'Users' && hasPermission('MANAGE_USERS') ? (
 
@@ -888,7 +891,7 @@ export default function App() {
           <MissionsManagement />
         ) : activeNav === 'Ressources' && hasPermission('VIEW_RESOURCES') ? (
           <ResourcesManagement />
-        ) : activeNav === 'Cash' && hasPermission('VIEW_CASH') ? (
+        ) : activeNav === 'Cash' && (hasPermission('VIEW_CASH') || hasPermission('VIEW_CLIENT_PAYMENTS') || hasPermission('VIEW_CASH_JOURNAL')) ? (
           <CashManagement />
         ) : activeNav === 'HR' && (hasPermission('VIEW_HR') || hasPermission('VIEW_PAYROLL')) ? (
           // GRH & Paie — une seule page, deux permissions : RH et la Paie

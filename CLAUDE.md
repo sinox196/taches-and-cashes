@@ -284,6 +284,21 @@ Two rules that are easy to get wrong:
 
 Gated on `VIEW_CASH` / `MANAGE_CASH`.
 
+**Each of Cash's three tabs has its own view permission, on top of `VIEW_CASH`/`MANAGE_CASH`.** `VIEW_CASH` used to be the single gate for all three subviews — someone granted it to see Facturation could always reach Règlements clients and Brouillard de caisse too, with no way to grant one without the others. Three more permissions (`VIEW_CASH_TOTALS`, `VIEW_CLIENT_PAYMENTS`, `VIEW_CASH_JOURNAL`, all in the "Cash (Facturation)" permission group) narrow this:
+
+- **`VIEW_CASH_TOTALS`** gates the Facturation tab's "Total Général" card (Total HT, Montant de facture) — not the tab itself, which stays behind plain `VIEW_CASH`. `GET /api/invoices` sends `totalsByCurrency: {}` unless the caller has it (`userCan(req, 'VIEW_CASH_TOTALS')`), the same "strip server-side, not just hide on screen" rule `VIEW_CLIENT_FINANCIALS` already follows for the Clients ledger — the card's own `currencyTotals.length > 0` guard then hides it for free once the object comes back empty.
+- **`VIEW_CLIENT_PAYMENTS`** and **`VIEW_CASH_JOURNAL`** each independently gate their own tab, and neither implies `VIEW_CASH` — someone can hold only one of the three and still reach Cash (the sidebar entry and `App.tsx`'s nav guard both check `VIEW_CASH || VIEW_CLIENT_PAYMENTS || VIEW_CASH_JOURNAL`; `CashManagement.tsx` filters its own tab bar to the ones the viewer actually holds and opens on the first one, rather than defaulting to Facturation and leaving someone without `VIEW_CASH` staring at a tab they can't see).
+
+**Both derive from the same `GET /api/cash-journal`, so the split lives inside that one route rather than as a second endpoint** (`requirePermission` only checks a single permission string, so this route takes the two checks itself via `userCan`, same idiom as the client-ledger strip above): refused entirely without at least one of the two; with only `VIEW_CLIENT_PAYMENTS`, the response is filtered to règlement-shaped rows (`entree > 0` and a client — the identical predicate `ClientPayments.tsx` already applies client-side) so a règlements-only viewer never sees the cabinet's own internal movements (loyer, STEG, alimentation de caisse); `VIEW_CASH_JOURNAL` gets everything unfiltered, since the daybook is the superset view and Règlements clients is only ever a lens onto it.
+
+**Writing the journal follows the identical cut, one level below `VIEW_CASH_TOTALS`/`VIEW_CLIENT_PAYMENTS`/`VIEW_CASH_JOURNAL`: `MANAGE_CLIENT_PAYMENTS` and `MANAGE_CASH_JOURNAL`.** `MANAGE_CASH` used to be the single write gate for the whole journal, same "all or nothing" shape the view-side split above already fixed for reading it. `isReglementRow(row)` — `entree > 0` and a client, the exact predicate the read-side filter already uses — is defined **once** and shared by `GET`/`POST`/`PUT`/`DELETE /api/cash-journal`, so what counts as "a règlement" can never drift between what a `VIEW_CLIENT_PAYMENTS`-only viewer sees and what a `MANAGE_CLIENT_PAYMENTS`-only editor is allowed to touch:
+
+- **`POST /api/cash-journal`** — without `MANAGE_CASH_JOURNAL`, the row being created must satisfy `isReglementRow`; a `MANAGE_CLIENT_PAYMENTS` holder cannot key in a sortie or an internal movement (loyer, STEG…) — that stays `MANAGE_CASH_JOURNAL`'s, since Brouillard de caisse is the full ledger and Règlements clients only a lens onto it.
+- **`PUT /api/cash-journal/:id`** — without `MANAGE_CASH_JOURNAL`, **both** the existing row and the merged row must satisfy `isReglementRow`. Checking only one side would open two holes: editing an internal movement you can't otherwise reach, or editing your own règlement into an internal movement to dodge the read-side filter on the next `GET`.
+- **`DELETE /api/cash-journal/:id`** — without `MANAGE_CASH_JOURNAL`, the existing row must satisfy `isReglementRow`.
+
+No permission falls back to `MANAGE_CASH` here, deliberately: a `MANAGE_CASH` holder without one of the two new permissions already can't even see the journal tabs after the view-side split above, so letting `MANAGE_CASH` alone still write into a screen it can't render would be a half-consistent state. `CashJournal.tsx`'s `canManage` therefore checks `MANAGE_CASH_JOURNAL` only (this view shows non-règlement rows too, so `MANAGE_CLIENT_PAYMENTS` alone isn't enough), while `ClientPayments.tsx`'s checks `MANAGE_CLIENT_PAYMENTS || MANAGE_CASH_JOURNAL` (either grants everything this narrower view ever needs).
+
 **Both the Brouillard de caisse and Règlements clients tables show the most recently added row first.** `GET /api/cash-journal` already sorts every row ascending — by date, then by `createdAt` as a tiebreak — which is what the daybook's running "Solde" needs to accumulate correctly. Both screens used to render that ascending order as-is, so a freshly added row landed at the *bottom* of a growing list instead of where the cabinet expects to see what it just typed. `CashJournal.tsx`'s `withSolde` still accumulates the balance over that ascending order first — that part has to stay chronological — and only reverses the finished `{row, solde}` list afterward, purely for display and pagination; `ClientPayments.tsx`, which carries no running balance, just reverses `filtered` directly. Because the server's tiebreak is a real `createdAt` timestamp rather than array position, two règlements entered on the same date still land in the order they were actually saved, last on top.
 
 **The editable cells of a new or in-progress row carry a light turquoise fill (`bg-turquoise/10` / `border-turquoise/30`), not white.** A plain white `<input>` sitting inside a table already full of white cells was easy to miss as *the* place to type — reported as the add/edit fields not reading as clearly editable. `ClientSearchInput` and `CategoryPicker` — the two shared pickers that also appear read-only elsewhere in the app (the client-form dossier selector, for one) — take an optional `bgClassName` prop (default `bg-white`) so this only changes their look inside these two journal-row editors, not every call site. A disabled cell (`bankAccount` on an Espèce règlement) still falls back to `disabled:bg-gray-100`, unchanged.
@@ -680,21 +695,13 @@ n'a jamais souscrit de quota de comptes portail et lui en imposer un
 casserait un portail déjà en service. Un `0` écrit sur la fiche, lui, veut bien
 dire zéro : c'est une valeur saisie, pas une absence.
 
-**Complet est la seule offre dont le panier back-office est un plafond
-souple, à la demande explicite de l'utilisateur** (`planAllowsSeatOverage(plan)`,
-`plan === 'COMPLET'` seul). `seatLimitError()` continue de calculer `used`
-et `limit` normalement, mais quand le panier concerné est le back-office et
-que l'offre l'autorise, elle rend `null` (pas de refus) même une fois la
-limite atteinte — le panier portail, lui, reste ferme pour toutes les
-offres, Complet compris : ce n'est pas ce qui a été demandé d'assouplir.
-`notifySeatOverageIfNeeded(company, usedBefore, role, newUsername)`, appelée
-juste après une création ou un changement de rôle réussi dans
-`POST /api/users` et `PUT /api/users/:id`, envoie alors un e-mail à contact@
-(nom, e-mail, téléphone du contact, sièges souscrits, nom du nouveau
-compte, date) — un dépassement se facture après coup plutôt que de bloquer
-une création en plein travail. `usedBefore` est le nombre de comptes
-back-office *avant* la création qui vient d'aboutir : `usedBefore >= limit`
-dit que ce nouveau compte-là dépasse, lui, le quota.
+**`seatLimitError()` ne plafonne plus le back-office de Complet — et seulement Complet, à la demande explicite de l'utilisateur.** Une version antérieure de cette règle l'avait ouverte à toute offre dynamique (`sellablePlan?.pricePerExtraUserDT`, ce qui couvrait alors RH & Paie et Facturation aussi) ; une fois les deux retirées de la vente (`legacy: true`, voir « Offres et sièges »), `SELLABLE_PLANS.find(...)` ne les trouve plus et cette condition générique serait revenue, par accident, au même résultat que la restriction explicite ci-dessous — mais s'appuyer sur cet accident aurait laissé la porte ouverte à ce qu'une future offre dynamique hérite du plafond souple sans qu'on l'ait décidé. `planAllowsSeatOverage(plan)` (`plan === 'COMPLET'` seul) est donc la unique condition, posée après le calcul normal de `used`/`limit` : quand le panier concerné est le back-office et que l'offre l'autorise, `seatLimitError()` rend `null` (pas de refus) même une fois la limite atteinte — le panier portail, lui, reste ferme pour toutes les offres, Complet compris : ce n'est pas ce qui a été demandé d'assouplir. `company.seatLimit` reste écrit et affiché ailleurs (nombre demandé à l'inscription ou négocié, prix calculé dessus par `planPriceForSeats`) mais n'arrête plus `POST`/`PUT /api/users` pour Complet. RH & Paie et Facturation `legacy`, elles, retombent sur le plafond dur normal — leurs fiches existantes ne changent pas de comportement du seul fait d'être retirées de la vente.
+
+**`notifySeatOverageIfNeeded(company, usedBefore, role, newUsername)`**, appelée juste après une création ou un changement de rôle réussi dans `POST /api/users` et `PUT /api/users/:id`, envoie un e-mail à contact@ (nom, e-mail, téléphone du contact, sièges souscrits, nom et date du nouveau compte, total de comptes back-office et combien au-delà du quota, et le **montant mensuel dû pour ce nombre d'utilisateurs** via `planPriceForSeats()` — la même fonction que la page Tarifs et la confirmation de paiement, jamais un second calcul qui pourrait diverger) plutôt que de bloquer — un dépassement se facture après coup plutôt que d'arrêter une création en plein travail. `usedBefore` est le nombre de comptes back-office *avant* la création qui vient d'aboutir : `usedBefore >= limit` dit que ce nouveau compte-là dépasse, lui, le quota. `POST /api/users` écrit aussi un `createdAt` sur chaque compte créé (absent avant ce champ — un compte plus ancien reste simplement sans date, même règle de récupération de forme héritée que `normalizeBalance()`), pour que la console plateforme puisse dater chaque compte sans dépendre du mail.
+
+Exemple : un compte Complet à 1 siège souscrit ; le deuxième utilisateur créé déclenche le mail avec son nom et sa date de création, le total de comptes (2) et le montant mensuel dû pour ce nombre (`planPriceForSeats(meta, 2)` = 30 DT) — le premier, lui, n'en déclenche aucun puisqu'il était inclus.
+
+**La console plateforme (`PlatformUsersModal.tsx`) rend une information voisine sans attendre un mail** — combien de comptes sont inclus dans `baseSeats` et lesquels sont « en supplément » (badge sur chaque ligne au-delà), plus un bandeau avec le montant mensuel dû, calculés côté client depuis `planMeta(plan).baseSeats`/`pricePerExtraUserDT`. Cet affichage reste générique à toute offre dynamique (pas restreint à Complet comme `seatLimitError()`) : il ne fait que *décrire* la tarification par siège d'une offre, ce qui reste vrai de RH & Paie/Facturation `legacy` pour les entreprises qui les portent encore, même si leur panier back-office à elles reste à plafond dur.
 
 **Complet pose `portalSeatLimit: 0` au catalogue — aucun chiffre n'a été
 demandé pour ce panier-là, seul le tarif par utilisateur du back-office l'a
@@ -707,10 +714,48 @@ panier, c'est une ligne à ajouter dans plans.ts, pas une correction de bug.
 
 ### Parrainage
 
-Une entreprise partage un lien (`/?ref=CODE`). Page
+Un collaborateur partage un lien (`/?ref=CODE`). Page
 [ReferralPage.tsx](src/components/ReferralPage.tsx), entrée de nav
-« Parrainage » derrière `MANAGE_USERS` — c'est l'abonnement de l'entreprise qui
-est en jeu.
+« Parrainage » ouverte à **tout collaborateur**, plus seulement à qui gère
+l'équipe — voir « Le code est désormais personnel » ci-dessous.
+
+**Le code est désormais personnel, pas celui de l'entreprise.** Tout
+collaborateur d'une entreprise dont l'abonnement est actif a son propre code
+(`referralCodeForUser()`), pas seulement l'administrateur : `GET
+/api/referral` n'est plus gardé par `MANAGE_USERS`, ni l'entrée de nav
+([Sidebar.tsx](src/components/Sidebar.tsx)) ni la route
+([App.tsx](src/App.tsx)) — seul le filtre d'offre (`planAllowsModule`,
+module « Parrainage ») continue de fermer l'écran sur une offre qui ne le
+vend pas, indépendamment de qui a quelle permission. La récompense reste au
+niveau de **l'entreprise** (un avoir sur son abonnement, partagé par tous) ;
+ce qui devient personnel, c'est seulement le code et la visibilité des
+filleuls qu'il a amenés. `getUserByReferralCode()` (dans `Database`, les deux
+moteurs) est une recherche **globale**, comme `getUserByUsername` : un code
+personnel doit être unique tous utilisateurs et toutes entreprises
+confondus, et `POST /api/signup` doit pouvoir en retrouver l'auteur sans
+connaître son entreprise à l'avance — vérifié à la création contre les codes
+déjà pris, utilisateurs *et* entreprises héritées (voir plus bas), pour
+qu'un nouveau code personnel ne colle jamais par hasard à un vieux lien
+encore valide.
+
+**Chaque ligne de `referrals` porte `referredByUserId`.** C'est ce qui
+distingue « le filleul de Sami » du « filleul de Nadia » dans la même
+entreprise : `GET /api/referral` ne renvoie à chacun que ses propres
+filleuls, plus les lignes héritées d'avant ce changement
+(`referredByUserId` absent) qui restent visibles de tout collaborateur,
+faute de savoir lequel avait réellement partagé ce lien-là. L'ancien code
+d'entreprise (`company.referralCode`) reste reconnu à l'inscription pour les
+liens déjà partagés — `POST /api/signup` résout d'abord un code
+**personnel** (`getUserByReferralCode`), et ne retombe sur l'ancien code
+d'entreprise que si aucun utilisateur ne le porte ; un signup par ce chemin
+hérité écrit `referredByUserId: null` sur la ligne — on récupère la forme
+ancienne, on ne la casse pas, même règle que `normalizeBalance()`. La console
+plateforme ([PlatformAdmin.tsx](src/pages/PlatformAdmin.tsx)) affiche « Parrainé
+par : \<entreprise\> (\<utilisateur\>) » — le nom d'utilisateur est résolu
+côté serveur dans `GET /api/platform/companies` (`db.getUserById` sur
+`referredByCompanyId`/`referredByUserId`, la fiche de l'entreprise portant
+maintenant les deux) et s'efface tout seul quand `referredByUserId` est
+`null` (lien hérité, aucun utilisateur précis à nommer).
 
 **Seule une entreprise dont l'abonnement est actif peut parrainer.** Un compte
 en essai n'a encore rien payé ; lui laisser distribuer des mois gratuits ferait
@@ -1096,6 +1141,11 @@ technique de la permission collé au libellé. Le nom technique (`id`) reste
 inchangé pour ne pas invalider les permissions déjà enregistrées sur des
 comptes existants ; seul le `label` affiché a changé.
 
+Le premier groupe de `PERMISSIONS_GROUPED` s'appelle « Gestion des tâches »,
+pas « Pointage » — même règle : c'est un intitulé d'écran dans le sélecteur
+de permissions, pas un identifiant, donc `VIEW`/`EDIT`/`DELETE`/
+`MANAGE_SERVICES`/`ASSIGN_TASKS` restent inchangés en dessous.
+
 **Les conversations de groupe** ([GroupModal.tsx](src/components/chat/GroupModal.tsx), routes `/api/messages/groups*` et `/api/messages/group/:id`) vivent dans le même module que les messages directs : un groupe est un nom plus une liste de membres, et un message de groupe porte `groupId` au lieu de `toUserId`. Une seule route d'envoi pour les deux — la validation, la diffusion SSE et la notification poussée sont identiques, et les dédoubler aurait fait deux endroits à corriger.
 
 **La lecture d'un message de groupe se note dans `readBy`** (un tableau d'ids), pas dans `readAt` : un message direct a un lecteur, un message de groupe en a N, et les compresser dans un seul horodatage aurait fait passer le fil pour lu dès que le premier membre l'ouvre. Sous Postgres l'ajout se fait en JSONB (`|| to_jsonb(...)`) plutôt qu'en lisant puis réécrivant la ligne, pour que deux membres qui ouvrent le fil au même instant ne s'effacent pas l'un l'autre. L'auteur naît dans `readBy` de son propre message, sinon il se compterait dans ses propres non-lus. La double coche n'apparaît **que** sur un fil direct : dans un groupe « lu » n'a pas de réponse unique.
@@ -1381,6 +1431,8 @@ Because there is no URL state, anything that remounts the app loses the current 
 **"Facturation & Trésorerie" (25 characters, longer than every other nav label) was clipped to "Facturation & Trésor…" in the sidebar's original 212px rail.** Every `mainNavItems` row shares one `truncate` (single-line, ellipsis) treatment on both its flex container and its label `<span>` — safe while every label happened to fit on one line, but this one no longer did. A first fix let the label wrap to two lines instead of truncating; the second, current fix widens the rail (`212px` → `226px`, both the `w-`/`min-w-` on `<aside>`) instead — the user wanted the label to stay on **one** line, not grow the row — measured against the label's own natural (unconstrained, `white-space: nowrap`) rendered width (~149px at the rail's `12.5px` font) versus what a 212px rail actually leaves after the icon, the `gap-2.5` and the button's `px-3` padding (~142px), so 14px of extra rail width was the real gap to close. `truncate` on the row is otherwise unchanged and still the fallback for anything longer still.
 
 **The sidebar is grouped under three headers, at the user's own explicit layout** ([Sidebar.tsx](src/components/Sidebar.tsx)): **Pilotage & Production** (Tableau de bord, Clients, Missions, Gestion des tâches), **Finance & RH** (Facturation & Trésorerie, Équipe de travail, GRH & Paie), **Outils & Collaboration** (Outils de travail, Messages, Parrainage) — plus Plateforme, ungrouped, superadmin-only. `NAV_GROUPS` carries the fixed header text and item order; each item's `id`, permission guard and plan-module gate are completely unchanged from the flat list before it — grouping is purely a rendering concern, never a re-routing of anything `App.tsx` or `plans.ts` key on. `navGroups` filters each group's items through the existing `planAllowsModule` check exactly as the old flat `navItems` did, then **drops any group left with zero items** (header included) — a restricted plan that sells none of a group's modules doesn't leave a bare, pointless heading behind. `NavButton` is the row markup extracted once so the grouped list and the ungrouped Plateforme entry can't drift into two different button styles.
+
+**A restricted plan (RH & Paie, Facturation) hides the group headers entirely, showing a flat list of the items it does sell.** These two offers sell only two or three views split across two or three of the groups above — after `planAllowsModule` filters each group down, a header ends up captioning just one or two items, reading as a hierarchy the offer never earns. `showGroupHeaders` in [Sidebar.tsx](src/components/Sidebar.tsx) is `planModules(user?.company?.plan) === null` — `null` for a generalist offer (Freelancer, Complet, any legacy plan, since none of them declare an explicit `modules` list) and an array for a restricted one — so the headers disappear exactly for a plan that sells a named subset of views, never by a literal plan-id check, and a future restricted offer inherits the same behaviour without touching this file. The top-padding rhythm between groups (`pt-1` on the first, `pt-4` on the rest) moved from the header `<div>` onto the group's own wrapping `<div>` so it survives whether or not the header renders — otherwise a restricted plan's items would all collapse onto one line with no vertical rhythm between what used to be separate groups.
 
 **A group header is deliberately louder than the nav labels under it** (`text-[12px] font-extrabold uppercase tracking-wider`), not a subtler `10px`/dimmed treatment — the first pass read as too close in weight to the items it was heading, the exact opposite of what a section header needs to do. **The header text and its leading `•` bullet share one colour, `text-turquoise`**, applied once on the wrapping `<div>` rather than on the bullet alone — an earlier version painted only the bullet turquoise and left the words at `text-white/70`, which read as a two-tone label rather than one heading with a marker in front of it, and was corrected at the user's explicit request ("same color mta3 point eli mawjouda f awl l titre"). It's the same accent colour as the app wordmark's `&` in the logo above it, not a new colour introduced just for this.
 

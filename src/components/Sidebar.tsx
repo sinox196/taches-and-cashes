@@ -17,7 +17,7 @@ import {
   Gift
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { planAllowsModule, type PlanModule } from '../constants/plans';
+import { planAllowsModule, planModules, type PlanModule } from '../constants/plans';
 import { useLanguage } from '../context/LanguageContext';
 
 interface SidebarProps {
@@ -94,7 +94,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       header: 'Finance & RH',
       items: [
-        ...(hasPermission('VIEW_CASH') ? [{ id: 'Cash', label: 'Facturation & Trésorerie', icon: Receipt, hasChevron: false }] : []),
+        // Cash a trois sous-onglets, chacun sa propre permission désormais
+        // (Facturation/Règlements clients/Brouillard de caisse) — l'entrée
+        // de nav s'affiche dès qu'au moins l'un des trois est accordé,
+        // sinon un titulaire de la seule permission Règlements clients
+        // n'aurait aucun moyen d'atteindre l'écran qui la sert.
+        ...(hasPermission('VIEW_CASH') || hasPermission('VIEW_CLIENT_PAYMENTS') || hasPermission('VIEW_CASH_JOURNAL')
+          ? [{ id: 'Cash', label: 'Facturation & Trésorerie', icon: Receipt, hasChevron: false }] : []),
         // UserCheck, not Users2: Équipe took the plain "group of people" mark, and
         // two nav items sharing one icon is unreadable at 16px.
         ...(hasPermission('MANAGE_USERS') ? [{ id: 'Users', label: t('nav.users'), icon: Users2, hasChevron: false }] : []),
@@ -110,9 +116,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         ...(hasPermission('VIEW_RESOURCES') ? [{ id: 'Ressources', label: 'Outils de travail', icon: FileCheck2, hasChevron: false }] : []),
         { id: 'Messages', label: 'Messages', icon: MessageCircle, hasChevron: false, badge: unreadMessages },
-        // Parrainage : c'est l'abonnement de l'entreprise qui est en jeu, donc
-        // réservé à qui la gère — la même permission que la page Équipe.
-        ...(hasPermission('MANAGE_USERS') ? [{ id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false }] : []),
+        // Parrainage : chaque collaborateur a désormais son propre code, pas
+        // seulement qui gère l'équipe — voir CLAUDE.md « Parrainage ». Le
+        // filtre d'offre (module « Parrainage ») s'applique toujours plus
+        // bas, indépendamment de cette permission qui n'en est plus une ici.
+        { id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false },
       ],
     },
   ];
@@ -121,12 +129,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
    * Une offre restreinte ne dessine pas les entrées qu'elle ne vend pas.
    *
    * Les entrées gardées par une permission se ferment déjà d'elles-mêmes —
-   * `hasPermission` consulte l'offre. Ce filtre-ci est pour les deux cas
-   * qu'une permission ne couvre pas : **Tableau de bord, Tâches et Messages**,
-   * qui n'en portent aucune, et **Parrainage**, qui partage `MANAGE_USERS`
-   * avec Équipe alors que ce sont deux vues distinctes. Un groupe qui perd
-   * tous ses éléments à ce filtre (une offre qui ne vend aucun de ses
-   * modules) n'affiche plus son en-tête non plus — voir le rendu plus bas.
+   * `hasPermission` consulte l'offre. Ce filtre-ci est pour les entrées qui
+   * n'en portent aucune : **Tableau de bord, Tâches, Messages et
+   * Parrainage** (ce dernier n'a plus besoin de `MANAGE_USERS` — voir
+   * plus haut — mais reste fermé sur une offre qui ne vend pas ce module).
+   * Un groupe qui perd tous ses éléments à ce filtre (une offre qui ne vend
+   * aucun de ses modules) n'affiche plus son en-tête non plus — voir le
+   * rendu plus bas.
    */
   const navGroups = NAV_GROUPS
     .map(group => ({
@@ -134,6 +143,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: group.items.filter(item => planAllowsModule(user?.company?.plan, item.id as PlanModule)),
     }))
     .filter(group => group.items.length > 0);
+
+  /**
+   * Une offre restreinte (RH & Paie, Facturation) ne vend que deux ou trois
+   * vues au total, réparties sur deux ou trois groupes qui n'en gardent
+   * chacun qu'une poignée après le filtre ci-dessus — « Pilotage &
+   * Production », « Finance & RH », « Outils & Collaboration » finissent par
+   * chapeauter une ou deux entrées, ce qui lit comme une hiérarchie que
+   * l'offre ne justifie pas. `planModules` renvoyant `null` pour une offre
+   * généraliste (Freelancer, Complet, toute offre retirée) : les en-têtes ne
+   * s'effacent que pour une offre qui vend explicitement un sous-ensemble de
+   * vues, pas par identifiant de pack en dur — une future offre restreinte
+   * hérite du même comportement sans y toucher.
+   */
+  const showGroupHeaders = planModules(user?.company?.plan) === null;
 
   // Orthogonal to any company-scoped permission: runs the platform itself
   // (confirms other companies' payments), not this user's own company. Kept
@@ -191,13 +214,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             question: Pilotage & Production (piloter le travail), Finance &
             RH (l'argent et l'équipe), Outils & Collaboration (le reste). A
             group with no visible items (its own header included) simply
-            doesn't render — see `navGroups`'s filter above. */}
+            doesn't render — see `navGroups`'s filter above. A restricted
+            plan (RH & Paie, Facturation) hides the header text entirely —
+            see `showGroupHeaders` above — and keeps only the top-padding
+            rhythm between groups, so a lone item or two doesn't sit under a
+            heading the offer doesn't earn. */}
         <nav className="flex flex-col px-2.5">
           {navGroups.map((group, i) => (
-            <div key={group.header} className="flex flex-col gap-px">
-              <div className={`flex items-center gap-1.5 px-3 ${i === 0 ? 'pt-1' : 'pt-4'} pb-1.5 text-[12px] font-extrabold uppercase tracking-wider text-turquoise`}>
-                <span>•</span> {group.header}
-              </div>
+            <div key={group.header} className={`flex flex-col gap-px ${i === 0 ? 'pt-1' : 'pt-4'}`}>
+              {showGroupHeaders && (
+                <div className="flex items-center gap-1.5 px-3 pb-1.5 text-[12px] font-extrabold uppercase tracking-wider text-turquoise">
+                  <span>•</span> {group.header}
+                </div>
+              )}
               {group.items.map((item) => (
                 <NavButton key={item.id} item={item} isActive={activeItem === item.id} onSelect={() => { onSelectItem?.(item.id); onClose?.(); }} />
               ))}
