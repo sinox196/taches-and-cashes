@@ -197,7 +197,7 @@ export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
                   <React.Fragment key={r.pole}>
                     <tr
                       onClick={() => setExpandedMission(isOpen ? null : r.pole)}
-                      className="hover:bg-gray-50 transition-colors cursor-pointer"
+                      className={`transition-colors cursor-pointer ${isOpen ? 'bg-blue-50/70 hover:bg-blue-50' : 'hover:bg-gray-50'}`}
                     >
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -225,7 +225,7 @@ export const TaskIntelligence: React.FC<Props> = ({ missions }) => {
                       <td className="px-3 py-2.5 text-right font-mono text-gray-600">{r.clients}</td>
                     </tr>
                     {isOpen && r.taskTypes.map(t => (
-                      <tr key={`${r.pole}::${t.name}`} className="bg-[#FAFBFC]">
+                      <tr key={`${r.pole}::${t.name}`} className="bg-blue-50/40">
                         <td className="px-4 py-2 pl-11">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-gray-600 truncate" title={t.name}>{t.name}</span>

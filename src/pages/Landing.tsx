@@ -398,14 +398,18 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
                 <Reveal delay={80}>
                   <h1 className="mt-[22px] text-[34px] sm:text-[46px] leading-[1.14] font-extrabold text-navy tracking-[-0.02em]">
-                    Logiciel de gestion — <span className="relative">
-                      <span className="relative z-10">pour tous les professionnels des services.</span>
-                    </span>
+                    Logiciel de gestion pour tous les professionnels des services.
                   </h1>
                 </Reveal>
                 <Reveal delay={150}>
-                  <p className="mt-[22px] text-[17px] leading-[1.65] text-[#5B6472]">
-                    Suivi du temps, missions, échéances fiscales, facturation, trésorerie, RH, messagerie et portail client — réunis dans une plateforme qui relie chaque minute travaillée à votre rentabilité réelle.
+                  <p className="mt-[22px] text-[19px] sm:text-[21px] leading-[1.35] font-bold text-navy">
+                    Gérez mieux, facturez plus, gagnez en rentabilité
+                  </p>
+                  <p className="mt-2 text-[14.5px] leading-[1.5] font-semibold text-[#3D4655]">
+                    Pour les comptables, auditeurs, fiscalistes, avocats, consultants, architectes, ingénieurs-conseils et autres professionnels des services.
+                  </p>
+                  <p className="mt-3 text-[17px] leading-[1.65] text-[#5B6472]">
+                    Centralisez vos missions, pilotez vos équipes, suivez le temps consacré à chaque client et transformez votre travail en valeur, en facturation et en rentabilité.
                   </p>
                 </Reveal>
                 <Reveal delay={220}>
