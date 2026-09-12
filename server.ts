@@ -1753,6 +1753,22 @@ async function startServer() {
     // aujourd'hui casserait un portail déjà en service. Un `0` écrit *sur la
     // fiche* veut bien dire zéro : c'est une valeur saisie, pas une absence.
     const sellablePlan = SELLABLE_PLANS.find(p => p.id === company.plan) || null;
+
+    // Une offre **dynamique** (RH & Paie, Facturation, Complet) vend un
+    // siège de plus au-delà de `baseSeats` plutôt que de le refuser — c'est
+    // précisément ce que `pricePerExtraUserDT` facture. Bloquer la création
+    // à `seatLimit` empêchait un cabinet de simplement grandir : il n'y a
+    // aucune raison de refuser un utilisateur que l'offre sait déjà
+    // facturer. Le back-office cesse donc d'être plafonné pour ces trois
+    // offres — `POST /api/users` avertit par mail dès qu'un compte de plus
+    // dépasse `baseSeats`, et la console plateforme affiche le total et le
+    // montant mensuel dû (voir plus bas), donc rien de plus ne se perd à ne
+    // plus bloquer. Le portail client garde son plafond dur : ce panier n'a
+    // aucun tarif au siège, donc aucune façon de facturer un compte de plus.
+    // Une offre à prix plat (Freelancer, ou une offre retirée) n'a pas ce
+    // champ et reste plafonnée comme avant.
+    if (!portal && sellablePlan?.pricePerExtraUserDT) return null;
+
     const stored = Number(portal ? company.portalSeatLimit : company.seatLimit);
     const limit = Number.isFinite(stored)
       ? stored
@@ -1886,6 +1902,7 @@ async function startServer() {
                 <p><strong>Nouvel utilisateur :</strong> ${escapeHtml(username)}</p>
                 <p><strong>Date de création :</strong> ${formatDateFR(new Date())}</p>
                 <p><strong>Total utilisateurs back-office :</strong> ${seatUsers.length} (${seatUsers.length - baseSeats} au-delà de l'inclus)</p>
+                <p><strong>Montant mensuel dû pour ce nombre d'utilisateurs :</strong> ${escapeHtml(formatDT(planPriceForSeats(planMetaForSeat, seatUsers.length)))}/mois</p>
               `,
             }).catch(() => {});
           }

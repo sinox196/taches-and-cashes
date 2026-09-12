@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { friendlyError } from '../../utils/errors';
 import { ROLES, roleMeta, CLIENT_ROLE } from '../../constants/roles';
-import { planMeta, formatDT } from '../../constants/plans';
+import { planMeta, formatDT, planPriceForSeats } from '../../constants/plans';
 
 interface PlatformUser {
   id: number;
@@ -151,12 +151,21 @@ export const PlatformUsersModal: React.FC<PlatformUsersModalProps> = ({ companyI
 
         <div className="px-6 py-4 overflow-y-auto space-y-2">
           {!isLoading && !!meta?.pricePerExtraUserDT && (
-            <p className="text-[11.5px] text-gray-500 -mt-1 mb-1">
-              {seatUsers.length} utilisateur{seatUsers.length > 1 ? 's' : ''} — {Math.min(seatUsers.length, baseSeats)} inclus dans l'offre
-              {extraIds.size > 0 && (
-                <> , <strong className="text-amber-700">{extraIds.size} en supplément</strong> (+{formatDT(meta.pricePerExtraUserDT)}/mois chacun)</>
-              )}
-            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 -mt-1 mb-1">
+              <p className="text-[11.5px] text-gray-500">
+                {seatUsers.length} utilisateur{seatUsers.length > 1 ? 's' : ''} — {Math.min(seatUsers.length, baseSeats)} inclus dans l'offre
+                {extraIds.size > 0 && (
+                  <> , <strong className="text-amber-700">{extraIds.size} en supplément</strong> (+{formatDT(meta.pricePerExtraUserDT)}/mois chacun)</>
+                )}
+              </p>
+              {/* La création n'est plus plafonnée à `seatLimit` pour une offre
+                  dynamique (voir `seatLimitError()` côté serveur) — ce montant
+                  est donc désormais ce qu'il faut effectivement facturer, pas
+                  seulement un repère théorique. */}
+              <p className="text-[13px] font-semibold text-navy mt-0.5">
+                Montant mensuel dû : {formatDT(planPriceForSeats(meta, seatUsers.length))}/mois
+              </p>
+            </div>
           )}
           {error && (
             <div className="bg-red-50 border-l-4 border-red-500 p-3 rounded-md">
