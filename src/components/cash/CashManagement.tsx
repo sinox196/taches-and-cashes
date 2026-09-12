@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft, ChevronRight, ChevronDown, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
@@ -82,12 +82,15 @@ export const CashManagement: React.FC = () => {
   const [companyOpen, setCompanyOpen] = useState(false);
   const [preview, setPreview] = useState<any | null>(null);
   /**
-   * Le plafond mensuel de l'offre — `limit: null` pour une offre sans
-   * plafond, ce qui est le cas de tous les packs. Compté par le serveur, avec
-   * le même helper que les refus : un compteur qui annoncerait une place
-   * restante devant un refus serait pire que pas de compteur.
+   * Le plafond mensuel — `limit: null` pour une offre sans plafond (Complet).
+   * `permanent: true` distingue le quota Freelance (jamais un essai qui
+   * expire, ne bloque jamais la création — seule la consultation d'un
+   * document au-delà se verrouille) de l'ancien plafond d'essai (`permanent:
+   * false`, bloquant, hérité d'une offre retirée du catalogue). Compté par le
+   * serveur, avec le même helper que les refus : un compteur qui annoncerait
+   * une place restante devant un refus serait pire que pas de compteur.
    */
-  const [quota, setQuota] = useState<{ limit: number | null; used: number; remaining: number | null } | null>(null);
+  const [quota, setQuota] = useState<{ limit: number | null; used: number; remaining: number | null; permanent?: boolean } | null>(null);
   /** "Voir le détail" on the Total Général card — collapsed by default, since
    *  the two summed amounts already answer the usual question. */
   const [showTotalDetail, setShowTotalDetail] = useState(false);
@@ -242,15 +245,21 @@ export const CashManagement: React.FC = () => {
               sans plafond n'affiche rien, comme le badge d'essai du bandeau. */}
           {quota?.limit ? (
             <p
-              title="Les brouillons ne comptent pas — préparez-en autant que nécessaire."
+              title={quota.permanent
+                ? "Les documents au-delà du quota se créent normalement — seule leur consultation se verrouille jusqu'à l'upgrade."
+                : 'Les brouillons ne comptent pas — préparez-en autant que nécessaire.'}
               className={`inline-flex items-center gap-1.5 mt-2 px-2 py-0.5 rounded-full text-[11.5px] font-semibold ${
                 quota.remaining === 0 ? 'bg-late-bg text-late-fg' : 'bg-[#FFFAEB] text-[#B54708]'
               }`}
             >
               <FileClock className="w-3.5 h-3.5 shrink-0" />
-              {quota.remaining === 0
-                ? `Plafond atteint — ${quota.limit} documents ce mois-ci`
-                : `Essai gratuit : ${quota.used} / ${quota.limit} documents ce mois-ci`}
+              {quota.permanent
+                ? (quota.remaining === 0
+                    ? `Quota atteint — ${quota.limit} documents ce mois-ci, passez à l'offre illimitée`
+                    : `Offre Freelance : ${quota.used} / ${quota.limit} documents ce mois-ci`)
+                : (quota.remaining === 0
+                    ? `Plafond atteint — ${quota.limit} documents ce mois-ci`
+                    : `Essai gratuit : ${quota.used} / ${quota.limit} documents ce mois-ci`)}
             </p>
           ) : null}
           </div>
@@ -465,7 +474,17 @@ export const CashManagement: React.FC = () => {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{inv.title}</div>
+                      <div className="font-medium text-gray-900 flex items-center gap-1.5">
+                        {inv.title}
+                        {inv.quotaLocked && (
+                          <span
+                            title="Quota Freelance dépassé — passez à l'offre illimitée pour le consulter"
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[9px] font-bold uppercase tracking-wide shrink-0"
+                          >
+                            <Lock className="w-2.5 h-2.5" /> Verrouillé
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[11px] text-gray-400">{KIND_LABEL[inv.documentKind] ?? inv.documentKind}</div>
                     </td>
                     <td className="px-4 py-3 text-gray-800">{inv.clientName}</td>
@@ -477,38 +496,59 @@ export const CashManagement: React.FC = () => {
                         {REGIME_LABEL[inv.vatRegime] ?? inv.vatRegime}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-700">{money(inv.totalHT)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-gray-700">
+                      {inv.quotaLocked ? <span className="text-gray-300 select-none">•••••</span> : money(inv.totalHT)}
+                    </td>
                     <td className="px-4 py-3 text-right bg-emerald-50/20">
-                      <span className="font-mono font-semibold text-emerald-900">{money(inv.totalNetToPay)} {CURRENCY_SUFFIX[inv.currency] || inv.currency || 'DT'}</span>
+                      {inv.quotaLocked ? (
+                        <span className="text-gray-300 select-none">•••••</span>
+                      ) : (
+                        <span className="font-mono font-semibold text-emerald-900">{money(inv.totalNetToPay)} {CURRENCY_SUFFIX[inv.currency] || inv.currency || 'DT'}</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-center sticky right-0 z-10 bg-white group-hover:bg-gray-50 transition-colors shadow-[-1px_0_0_0_theme(colors.gray.200)]">
                       {canManage && (
                         <div className="flex items-center justify-center gap-1">
-                          {inv.status === 'DRAFT' && (
-                            <button
-                              onClick={e => { e.stopPropagation(); issue(inv); }}
-                              className="p-1.5 text-run-fg hover:bg-run-bg rounded"
-                              title="Émettre — lui attribue son numéro définitif"
+                          {/* Un document verrouillé ne s'émet, ne se convertit
+                              ni ne se modifie plus — seule sa suppression
+                              reste possible, elle n'exige pas d'en consulter
+                              les montants. */}
+                          {inv.quotaLocked ? (
+                            <span
+                              title="Verrouillé — quota Freelance dépassé, passez à l'offre illimitée"
+                              className="p-1.5 text-amber-500"
                             >
-                              <Send className="w-4 h-4" />
-                            </button>
+                              <Lock className="w-4 h-4" />
+                            </span>
+                          ) : (
+                            <>
+                              {inv.status === 'DRAFT' && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); issue(inv); }}
+                                  className="p-1.5 text-run-fg hover:bg-run-bg rounded"
+                                  title="Émettre — lui attribue son numéro définitif"
+                                >
+                                  <Send className="w-4 h-4" />
+                                </button>
+                              )}
+                              {inv.status !== 'DRAFT' && inv.documentKind !== 'FACTURE_LEGALE' && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); convertToLegal(inv); }}
+                                  className="p-1.5 text-gray-400 hover:text-navy hover:bg-gray-100 rounded"
+                                  title="Transformer en facture légale"
+                                >
+                                  <ArrowRightLeft className="w-4 h-4" />
+                                </button>
+                              )}
+                              <button
+                                onClick={e => { e.stopPropagation(); setEditor({ invoice: inv }); }}
+                                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
+                                title="Modifier"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            </>
                           )}
-                          {inv.status !== 'DRAFT' && inv.documentKind !== 'FACTURE_LEGALE' && (
-                            <button
-                              onClick={e => { e.stopPropagation(); convertToLegal(inv); }}
-                              className="p-1.5 text-gray-400 hover:text-navy hover:bg-gray-100 rounded"
-                              title="Transformer en facture légale"
-                            >
-                              <ArrowRightLeft className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            onClick={e => { e.stopPropagation(); setEditor({ invoice: inv }); }}
-                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
-                            title="Modifier"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
                           <button
                             onClick={e => { e.stopPropagation(); remove(inv); }}
                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"

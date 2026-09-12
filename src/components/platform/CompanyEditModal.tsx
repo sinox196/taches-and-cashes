@@ -16,6 +16,8 @@ interface Company {
   contactEmail?: string;
   phone?: string;
   secteur?: string;
+  /** Dérogation au quota mensuel de 10 documents de Freelance — voir plans.ts. */
+  documentQuotaOverride?: boolean;
 }
 
 interface Props {
@@ -49,6 +51,7 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
   const [portalSeatLimit, setPortalSeatLimit] = useState<string>(String(company.portalSeatLimit ?? ''));
   const [trialEndsAt, setTrialEndsAt] = useState((company.trialEndsAt || '').slice(0, 10));
   const [subscriptionEndsAt, setSubscriptionEndsAt] = useState((company.subscriptionEndsAt || '').slice(0, 10));
+  const [documentQuotaOverride, setDocumentQuotaOverride] = useState(!!company.documentQuotaOverride);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -93,7 +96,7 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
       const res = await fetch(`/api/platform/companies/${company.id}`, {
         method: 'PUT',
         headers: authHeaders,
-        body: JSON.stringify({ name, contactName, contactEmail, phone, seatLimit, portalSeatLimit, trialEndsAt, subscriptionEndsAt }),
+        body: JSON.stringify({ name, contactName, contactEmail, phone, seatLimit, portalSeatLimit, trialEndsAt, subscriptionEndsAt, documentQuotaOverride }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       onSaved();
@@ -230,6 +233,28 @@ export const CompanyEditModal: React.FC<Props> = ({ company, onClose, onSaved, o
               </p>
             </div>
           </div>
+
+          {/* Dérogation au quota Freelance — n'a d'effet que sur cette offre,
+              donc n'apparaît que pour elle : la montrer sur un compte Complet
+              laisserait croire à un réglage qui ne fait rien. Posée à la main
+              une fois l'upgrade (15 DT/mois) payé hors app, faute de paiement
+              en ligne dans cette application. */}
+          {company.plan === 'FREELANCER' && (
+            <label className="flex items-start gap-2.5 p-3 rounded-lg border border-gray-200 bg-gray-50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={documentQuotaOverride}
+                onChange={e => setDocumentQuotaOverride(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-navy focus:ring-navy"
+              />
+              <span>
+                <span className="block text-[12.5px] font-semibold text-gray-900">Documents illimités (upgrade payé)</span>
+                <span className="block text-[11px] text-gray-500 mt-0.5">
+                  Lève le plafond de 10 documents/mois de l'offre Freelance, sans changer d'offre.
+                </span>
+              </span>
+            </label>
+          )}
 
           {/* Accès au compte. Séparé du reste du formulaire : il ne s'enregistre
               pas avec « Enregistrer », il prend effet au clic. */}

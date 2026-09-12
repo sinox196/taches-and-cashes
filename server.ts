@@ -13,7 +13,8 @@ import {
   PLAN_SEAT_LIMITS, PLAN_PORTAL_SEAT_LIMITS, SELLABLE_PLANS, isSellablePlan, DEFAULT_PLAN_ID,
   planMeta, planLabel, formatDT, REFERRAL_DISCOUNT_PERCENT, discountedPriceDT,
   planAllowsPermission, documentQuotaFor, planAllowsModule, planModules, type PlanModule,
-  planPriceForSeats, clampSeatsForPlan,
+  planPriceForSeats, clampSeatsForPlan, planAllowsSeatOverage, permanentDocumentQuotaFor,
+  FREELANCER_UPGRADE_PRICE_DT,
 } from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
 import { SECTEURS, RESOURCES_PERMISSIONS, companyHasResourcesModule, type Secteur } from './src/constants/secteurs.js';
@@ -86,6 +87,15 @@ const formatDateFR = (d: Date) => {
   const c = civilParts(d);
   return `${String(c.day).padStart(2, '0')}/${String(c.month).padStart(2, '0')}/${c.year}`;
 };
+
+/**
+ * Module-level (not inside `startServer()`) — the Freelance quota-lock
+ * helpers and the seat-overage notifier both need it and are themselves
+ * declared at module level / early in `startServer()`, before the old
+ * in-function copy this replaced would have been initialized.
+ */
+const escapeHtml = (v: string): string =>
+  v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 /** HH:mm, 24h. */
 const formatTimeFR = (d: Date) => {
@@ -599,6 +609,99 @@ const documentQuotaState = (company: any, allInvoices: any[]) => {
 const QUOTA_REACHED_ERROR = (limit: number) =>
   `Votre essai gratuit couvre ${limit} documents par mois — le plafond est atteint. `
   + 'Les brouillons restent illimités ; passez à l\'abonnement pour émettre sans plafond.';
+
+/**
+ * Le plafond mensuel **permanent** de Freelance (voir plans.ts —
+ * `monthlyDocumentQuota`, distinct de `trialDocumentQuota` ci-dessus, qui ne
+ * s'applique jamais à Freelance puisqu'elle est `ACTIVE` dès sa création).
+ * `null` dès que la dérogation `documentQuotaOverride` est posée sur la
+ * fiche entreprise, ou pour toute autre offre.
+ */
+const permanentDocumentQuotaOf = (company: any): number | null =>
+  permanentDocumentQuotaFor(company?.plan, company?.documentQuotaOverride);
+
+/**
+ * Le rang (1-based) d'un document parmi ceux du même mois qui comptent dans
+ * le quota, triés par création — c'est ce rang, pas un compteur global, qui
+ * dit si *ce* document précis dépasse le quota. Un brouillon devenu document
+ * à l'émission prend son rang à ce moment-là (`documentMonth` lit
+ * `issuedAt || createdAt`), jamais à sa préparation.
+ */
+const monthlyQuotaRank = (inv: any, allInvoicesSameCompany: any[]): number => {
+  const month = documentMonth(inv);
+  const sameMonth = allInvoicesSameCompany
+    .filter((i: any) => countsAgainstQuota(i) && documentMonth(i) === month)
+    .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return sameMonth.findIndex((i: any) => i.id === inv.id) + 1;
+};
+
+/**
+ * Un document au-delà du quota permanent **se crée quand même** —
+ * contrairement au plafond d'essai ci-dessus, qui refuse (402) à la
+ * création. Ici, la création n'est jamais bloquée ; seule sa consultation
+ * l'est (`maskLockedInvoice`) : c'est la différence explicitement demandée
+ * entre un essai qui expire et une offre gratuite dont le quota est le
+ * modèle économique.
+ */
+const isQuotaLocked = (company: any, inv: any, allInvoicesSameCompany: any[]): boolean => {
+  if (!countsAgainstQuota(inv)) return false;
+  const quota = permanentDocumentQuotaOf(company);
+  if (!quota) return false;
+  return monthlyQuotaRank(inv, allInvoicesSameCompany) > quota;
+};
+
+/**
+ * Masque les montants d'un document verrouillé — la ligne (référence,
+ * client, date) reste visible, seuls les chiffres disparaissent, pour que
+ * l'écran dessine un flou + cadenas plutôt qu'un trou dans la liste ou dans
+ * l'export. `quotaLocked` est le seul champ ajouté ; tout le reste du
+ * document garde sa forme habituelle, juste avec des montants à `null`.
+ */
+const maskLockedInvoice = (inv: any) => ({
+  ...inv,
+  quotaLocked: true,
+  lines: (inv.lines || []).map((l: any) => ({ ...l, quantity: null, unitPrice: null, montantHT: null })),
+  vatBreakdown: [],
+  indicativeVatBreakdown: [],
+  indicativeVatTotal: null,
+  totalHT: null,
+  totalVAT: null,
+  totalTTC: null,
+  withholdingAmount: null,
+  stampDuty: null,
+  netToPay: null,
+  disbursementsLines: [],
+  disbursements: null,
+  advances: null,
+  totalNetToPay: null,
+});
+
+/** Applique le verrouillage éventuel avant qu'un document ne parte vers le client. */
+const withQuotaLock = (company: any, inv: any, allInvoicesSameCompany: any[]) =>
+  isQuotaLocked(company, inv, allInvoicesSameCompany) ? maskLockedInvoice(inv) : { ...inv, quotaLocked: false };
+
+const FREELANCER_LOCK_ERROR =
+  `Ce document dépasse le quota Freelance de 10 documents par mois. `
+  + `Passez à l'offre illimitée (${FREELANCER_UPGRADE_PRICE_DT} DT/mois — contactez-nous) pour le modifier.`;
+
+/**
+ * Le 10ᵉ document du mois d'un compte Freelance sans dérogation — envoyé une
+ * seule fois par mois, puisque le rang ne vaut exactement le quota qu'une
+ * fois (le document suivant a un rang de 11, pas de 10).
+ */
+const notifyFreelancerQuotaReached = async (company: any) => {
+  await sendMail({
+    to: 'contact@taches-and-cash.com',
+    subject: `Freelance — quota mensuel atteint (${company.name})`,
+    html: `
+      <p>Le compte Freelance <strong>${escapeHtml(company.name)}</strong> vient d'émettre son 10ᵉ document du mois.</p>
+      <p><strong>Contact :</strong> ${escapeHtml(company.contactName || '—')}</p>
+      <p><strong>Email :</strong> ${escapeHtml(company.contactEmail || '—')}</p>
+      <p><strong>Téléphone :</strong> ${escapeHtml(company.phone || '—')}</p>
+      <p><strong>Date :</strong> ${formatDateFR(new Date())}</p>
+    `,
+  });
+};
 
 /**
  * Les seuls chemins qu'un compte `CLIENT` peut atteindre.
@@ -1763,9 +1866,43 @@ async function startServer() {
 
     const used = users.filter((u: any) => (u.role === CLIENT_ROLE) === portal).length;
     if (used < limit) return null;
+    // Complet : le panier back-office est un plafond souple — voir
+    // planAllowsSeatOverage() et notifySeatOverageIfNeeded() plus bas. Le
+    // panier portail, lui, reste ferme pour toutes les offres, Complet
+    // compris : ce n'est pas ce que l'utilisateur a demandé d'assouplir.
+    if (!portal && planAllowsSeatOverage(company.plan)) return null;
     return portal
       ? `Limite de ${limit} compte(s) portail client atteinte pour votre offre.`
       : `Limite de ${limit} utilisateur(s) atteinte pour votre offre.`;
+  };
+
+  /**
+   * Sur Complet, dépasser le nombre de sièges souscrits reste autorisé (voir
+   * juste au-dessus) — mais chaque compte créé au-delà du quota envoie un
+   * e-mail à contact@ plutôt que de bloquer, pour que le cabinet facture le
+   * dépassement après coup. `usedBefore` est le nombre de comptes du panier
+   * back-office *avant* la création qui vient d'aboutir : `usedBefore >=
+   * limit` veut dire que ce nouveau compte est, lui, au-delà du quota.
+   */
+  const notifySeatOverageIfNeeded = async (company: any, usedBefore: number, role: string, newUsername: string) => {
+    if (!company || role === CLIENT_ROLE || !planAllowsSeatOverage(company.plan)) return;
+    const sellablePlan = SELLABLE_PLANS.find((p) => p.id === company.plan) || null;
+    const stored = Number(company.seatLimit);
+    const limit = Number.isFinite(stored) ? stored : (sellablePlan?.seatLimit ?? null);
+    if (limit === null || usedBefore < limit) return;
+    await sendMail({
+      to: 'contact@taches-and-cash.com',
+      subject: `Complet — dépassement de sièges (${company.name})`,
+      html: `
+        <p>L'entreprise <strong>${escapeHtml(company.name)}</strong> vient de créer un compte au-delà des sièges souscrits sur l'offre Complet.</p>
+        <p><strong>Contact :</strong> ${escapeHtml(company.contactName || '—')}</p>
+        <p><strong>Email :</strong> ${escapeHtml(company.contactEmail || '—')}</p>
+        <p><strong>Téléphone :</strong> ${escapeHtml(company.phone || '—')}</p>
+        <p><strong>Sièges souscrits :</strong> ${limit}</p>
+        <p><strong>Nouveau compte :</strong> ${escapeHtml(newUsername)}</p>
+        <p><strong>Date :</strong> ${formatDateFR(new Date())}</p>
+      `,
+    });
   };
 
   // POST /api/users
@@ -1779,8 +1916,14 @@ async function startServer() {
       }
 
       const company = await db.getCompanyById(req.user.companyId);
-      const seatError = await seatLimitError(company, await db.getAllUsers(req.user.companyId), role);
+      const allUsersBefore = await db.getAllUsers(req.user.companyId);
+      const seatError = await seatLimitError(company, allUsersBefore, role);
       if (seatError) return res.status(403).json({ error: seatError });
+      // Le nombre de comptes back-office *avant* cette création — c'est ce
+      // qui dit si le compte qu'on est en train de créer dépasse, lui, le
+      // quota de Complet (voir notifySeatOverageIfNeeded, appelée plus bas
+      // une fois la création aboutie).
+      const backOfficeUsedBefore = allUsersBefore.filter((u: any) => u.role !== CLIENT_ROLE).length;
 
       const hashed = await bcrypt.hash(password, 10);
 
@@ -1856,6 +1999,7 @@ async function startServer() {
         const linkedClient = await db.getClientById(req.user.companyId, newUser.clientId);
         (puNew as any).clientName = linkedClient?.name || null;
       }
+      await notifySeatOverageIfNeeded(company, backOfficeUsedBefore, role, username);
       res.json(puNew);
     } catch (error) {
       console.error(error);
@@ -1873,13 +2017,20 @@ async function startServer() {
       // contrôle, la limite se contournait en créant un compte portail puis
       // en le repassant collaborateur.
       const existingUser = await db.getUserById(req.user.companyId, id);
+      let overageCheck: { company: any; backOfficeUsedBefore: number } | null = null;
       if (existingUser && role && role !== existingUser.role
           && (role === CLIENT_ROLE) !== (existingUser.role === CLIENT_ROLE)) {
         const others = (await db.getAllUsers(req.user.companyId)).filter((u: any) => u.id !== id);
-        const seatError = await seatLimitError(await db.getCompanyById(req.user.companyId), others, role);
+        const companyForSeat = await db.getCompanyById(req.user.companyId);
+        const seatError = await seatLimitError(companyForSeat, others, role);
         if (seatError) return res.status(403).json({ error: seatError });
+        // Ce compte bascule dans le panier back-office : mêmes conditions
+        // que POST /api/users pour savoir si Complet vient de le dépasser.
+        if (role !== CLIENT_ROLE) {
+          overageCheck = { company: companyForSeat, backOfficeUsedBefore: others.filter((u: any) => u.role !== CLIENT_ROLE).length };
+        }
       }
-      
+
       const simSalaire = typeof salaireBrut === 'number' ? salaireBrut : 0;
       const simRegime = typeof regimeHoraire === 'number' ? regimeHoraire : 0;
       const totalChargesPct = (typeof cnss === 'number' ? cnss : 0) + 
@@ -1949,6 +2100,9 @@ async function startServer() {
       if (updatedUser.clientId != null) {
         const linkedClient = await db.getClientById(req.user.companyId, updatedUser.clientId);
         (puUpdated as any).clientName = linkedClient?.name || null;
+      }
+      if (overageCheck) {
+        await notifySeatOverageIfNeeded(overageCheck.company, overageCheck.backOfficeUsedBefore, role, existingUser.username);
       }
       res.json(puUpdated);
     } catch (error) {
@@ -4867,7 +5021,19 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     try {
       const company = await db.getCompanyById(req.user.companyId);
       const all = await db.getAllInvoices(req.user.companyId);
-      res.json(documentQuotaState(company, all));
+      // Le plafond d'essai (bloquant, éventuel — voir documentQuotaState)
+      // d'abord ; à défaut, le plafond permanent de Freelance (jamais
+      // bloquant, juste affiché). Les deux ne coexistent jamais dans le
+      // catalogue actuel, mais l'ordre reste correct si un jour ils le font.
+      const trial = documentQuotaState(company, all);
+      if (trial.limit) return res.json({ ...trial, permanent: false });
+      const permLimit = permanentDocumentQuotaOf(company);
+      if (permLimit) {
+        const month = formatDateISO(new Date()).slice(0, 7);
+        const used = all.filter((i: any) => countsAgainstQuota(i) && documentMonth(i) === month).length;
+        return res.json({ limit: permLimit, used, remaining: Math.max(0, permLimit - used), permanent: true });
+      }
+      res.json({ limit: null, used: 0, remaining: null, permanent: false });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -4875,6 +5041,7 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
 
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
+      const company = await db.getCompanyById(req.user.companyId);
       const all = await db.getAllInvoices(req.user.companyId);
       const q = String(req.query.q || '').toLowerCase();
       const kind = String(req.query.kind || '');
@@ -4898,6 +5065,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         // pas émis. Il est compté à part pour que le décompte de la ligne de
         // total ne semble pas se tromper.
         if (inv.status === 'DRAFT') { draftCount += 1; continue; }
+        // Un document verrouillé (Freelance, quota dépassé) n'entre pas non
+        // plus dans le total : ses montants ne sont pas montrés à l'écran, un
+        // total qui les compterait quand même les révélerait par soustraction.
+        if (isQuotaLocked(company, inv, all)) continue;
         const currency = String(inv.currency || 'TND');
         const acc = totalsByCurrency[currency] || { totalHT: 0, totalNetToPay: 0, count: 0 };
         acc.totalHT = round3(acc.totalHT + num(Number(inv.totalHT), 0));
@@ -4906,7 +5077,8 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         totalsByCurrency[currency] = acc;
       }
 
-      res.json({ data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset, totalsByCurrency, draftCount });
+      const page = filtered.slice(offset, offset + limit).map((inv: any) => withQuotaLock(company, inv, all));
+      res.json({ data: page, total: filtered.length, limit, offset, totalsByCurrency, draftCount });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -4917,7 +5089,9 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     try {
       const invoice = await db.getInvoiceById(req.user.companyId, req.params.id);
       if (!invoice) return res.status(404).json({ error: 'Document introuvable' });
-      res.json(invoice);
+      const company = await db.getCompanyById(req.user.companyId);
+      const all = await db.getAllInvoices(req.user.companyId);
+      res.json(withQuotaLock(company, invoice, all));
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -4973,11 +5147,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
        * chiffre d'affaires de documents qui n'existent pas encore.
        */
       const isDraft = body.status === 'DRAFT';
+      const company = await db.getCompanyById(req.user.companyId);
 
-      // Le plafond de l'offre ne porte que sur les documents émis : un
-      // brouillon passe toujours, c'est ce qui est vendu.
+      // Le plafond d'essai ne porte que sur les documents émis, et refuse
+      // toujours la création — un brouillon passe toujours. Le plafond
+      // permanent de Freelance, lui, ne refuse jamais rien ici : voir plus
+      // bas, une fois le document créé.
       if (!isDraft) {
-        const company = await db.getCompanyById(req.user.companyId);
         const quota = documentQuotaState(company, all);
         if (quota.limit && quota.remaining === 0) {
           return res.status(402).json({ error: QUOTA_REACHED_ERROR(quota.limit) });
@@ -5064,7 +5240,19 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       });
 
       await notifyPortalInvoice(req.user.companyId, invoice);
-      res.status(201).json(invoice);
+
+      // Freelance : le 10ᵉ document émis du mois avertit le cabinet lui-même
+      // par e-mail (contact@), pas seulement l'écran — pour qu'un dépassement
+      // se remarque même si personne ne regarde le badge de quota ce jour-là.
+      // La création elle-même n'a jamais été refusée : seule sa consultation
+      // se verrouille désormais (withQuotaLock), donc le document part quand
+      // même vers le client, simplement masqué s'il dépasse le quota.
+      const allAfter = await db.getAllInvoices(req.user.companyId);
+      const permQuota = permanentDocumentQuotaOf(company);
+      if (permQuota && countsAgainstQuota(invoice) && monthlyQuotaRank(invoice, allAfter) === permQuota) {
+        await notifyFreelancerQuotaReached(company);
+      }
+      res.status(201).json(withQuotaLock(company, invoice, allAfter));
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -5075,6 +5263,15 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     try {
       const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
       if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+
+      // Un document verrouillé (Freelance, quota mensuel dépassé) ne se
+      // modifie pas tant que le mois n'est pas repassé ou que la dérogation
+      // n'est pas posée — la création n'a jamais été refusée, mais l'usage
+      // du document, lui, est bien ce que l'upgrade paie.
+      const companyForLock = await db.getCompanyById(req.user.companyId);
+      if (isQuotaLocked(companyForLock, existing, await db.getAllInvoices(req.user.companyId))) {
+        return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
+      }
 
       const merged = { ...existing, ...req.body };
 
@@ -5196,7 +5393,16 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
         issuedAt: new Date().toISOString(),
       });
       await notifyPortalInvoice(req.user.companyId, issued);
-      res.json(issued);
+
+      // Même règle qu'à la création directe : le 10ᵉ document du mois avertit
+      // le cabinet, et la réponse porte le verrouillage éventuel — un
+      // brouillon émis peut très bien naître déjà au-delà du quota permanent.
+      const allAfterIssue = await db.getAllInvoices(req.user.companyId);
+      const permQuota = permanentDocumentQuotaOf(company);
+      if (permQuota && monthlyQuotaRank(issued, allAfterIssue) === permQuota) {
+        await notifyFreelancerQuotaReached(company);
+      }
+      res.json(withQuotaLock(company, issued, allAfterIssue));
     } catch (error) {
       console.error('Issue invoice error:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -5241,6 +5447,10 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       }
 
       const all = await db.getAllInvoices(req.user.companyId);
+      const companyForLock = await db.getCompanyById(req.user.companyId);
+      if (isQuotaLocked(companyForLock, existing, all)) {
+        return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
+      }
       const dateError = legalSequenceDateError(all, existing.id, Infinity, existing.issueDate);
       if (dateError) {
         return res.status(400).json({
@@ -8455,7 +8665,6 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   // deal is inherently a conversation, not a self-serve signup. The sellable
   // plans go through /api/signup below instead, which provisions a real
   // isolated company immediately.
-  const escapeHtml = (v: string) => v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
   app.post('/api/orders', async (req: any, res: any) => {
     try {
@@ -9053,6 +9262,14 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
       if (req.body?.subscriptionEndsAt !== undefined) {
         const d = String(req.body.subscriptionEndsAt || '').slice(0, 10);
         updates.subscriptionEndsAt = d ? new Date(`${d}T23:59:59Z`).toISOString() : null;
+      }
+      // La dérogation au quota mensuel de Freelance (voir plans.ts,
+      // `permanentDocumentQuotaFor`) — posée à la main une fois l'upgrade
+      // payé hors app, puisqu'aucun paiement en ligne n'existe ici. N'a
+      // d'effet que sur un compte Freelance ; sans risque à laisser posée sur
+      // une autre offre, elle n'y est simplement jamais lue.
+      if (req.body?.documentQuotaOverride !== undefined) {
+        updates.documentQuotaOverride = !!req.body.documentQuotaOverride;
       }
 
       res.json(await db.updateCompany(id, updates));

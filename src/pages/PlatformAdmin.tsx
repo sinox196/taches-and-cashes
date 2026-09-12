@@ -34,6 +34,8 @@ interface Company {
   phone?: string;
   ribSentAt?: string;
   pendingPlan?: string;
+  /** Dérogation au quota mensuel de 10 documents de Freelance — voir plans.ts. */
+  documentQuotaOverride?: boolean;
 }
 
 /** La remise encore due à une entreprise : 10 % de parrainage, tant qu'elle n'a pas souscrit. */

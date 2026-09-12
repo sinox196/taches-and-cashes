@@ -76,6 +76,18 @@ export interface PlanMeta {
    * le plafond, quel que soit ce nombre — c'est précisément ce qu'on vend.
    */
   trialDocumentQuota?: number;
+  /**
+   * Documents **émis** par mois, en permanence — pas seulement pendant un
+   * essai. Distinct de `trialDocumentQuota` : celui-ci disparaît dès que
+   * l'entreprise passe `ACTIVE`, alors que Freelance est `ACTIVE` dès sa
+   * création (voir plus bas) et garderait donc un `trialDocumentQuota` sans
+   * jamais l'appliquer. Voir `permanentDocumentQuotaFor()`. Et contrairement
+   * au plafond d'essai, dépasser celui-ci **ne bloque pas la création** — le
+   * document se crée quand même, seule sa consultation (voir/modifier/
+   * télécharger/imprimer) se verrouille tant que le mois n'est pas repassé ou
+   * que la dérogation n'est pas posée (server.ts, `isQuotaLocked`).
+   */
+  monthlyDocumentQuota?: number;
   /** Mise en avant sur la page de tarifs. */
   highlighted?: boolean;
   /**
@@ -153,13 +165,24 @@ export const PLANS: PlanMeta[] = [
   /**
    * Un seul siège, ADMIN, gratuit **pour de bon** — pas un essai qui expire :
    * `POST /api/signup` la reconnaît et pose l'entreprise `ACTIVE` d'emblée,
-   * sans `trialEndsAt`, pour qu'`expireTrialIfDue` n'ait jamais prise dessus
-   * et que `documentQuotaFor()` rende `null` (aucun plafond de documents)
-   * comme pour n'importe quel abonnement payé. Elle ouvre les mêmes vues que
-   * le pack Complet — `modules` absent — donc un indépendant seul y trouve
-   * tout le cabinet, juste sans personne à ajouter (le siège unique fait déjà
-   * ce que `seatLimitError()` ferait à la main). **En tête du catalogue** :
-   * c'est la première carte de la page de tarifs.
+   * sans `trialEndsAt`, pour qu'`expireTrialIfDue` n'ait jamais prise dessus.
+   * Elle ouvre les mêmes vues que le pack Complet — `modules` absent — donc
+   * un indépendant seul y trouve tout le cabinet, juste sans personne à
+   * ajouter (le siège unique fait déjà ce que `seatLimitError()` ferait à la
+   * main). **En tête du catalogue** : c'est la première carte de la page de
+   * tarifs.
+   *
+   * **`monthlyDocumentQuota: 10`** — contrairement à `documentQuotaFor()`
+   * (essai uniquement, jamais pertinent ici puisque Freelance est `ACTIVE`
+   * dès sa création), ce plafond-ci ne s'éteint jamais tout seul : c'est le
+   * modèle économique de l'offre, pas une période d'essai. Dépasser 10
+   * documents dans le mois **ne bloque pas la création** — server.ts continue
+   * de les créer, seule leur consultation se verrouille (montants masqués,
+   * voir `isQuotaLocked`/`maskLockedInvoice`) tant que le mois n'est pas
+   * repassé ou que l'entreprise n'a pas la dérogation `documentQuotaOverride`
+   * (un drapeau sur sa fiche, posé à la main depuis la console plateforme une
+   * fois l'upgrade payé hors app — voir `FREELANCER_UPGRADE_PRICE_DT`, aucun
+   * paiement en ligne n'existe dans cette application).
    */
   {
     id: 'FREELANCER',
@@ -168,21 +191,62 @@ export const PLANS: PlanMeta[] = [
     priceDT: 0,
     seatLimit: 1,
     portalSeatLimit: 0,
+    monthlyDocumentQuota: 10,
     features: CORE_FEATURES,
   },
   /**
-   * Équipe + RH + Gestion des paies, rien d'autre : un cabinet qui veut piloter
-   * ses collaborateurs (congés, présence, bulletins) sans le reste de
-   * l'application. `modules` liste HR en tête — c'est l'écran de travail
-   * quotidien de cette offre, Payroll et Users venant après (la paie se
-   * génère moins souvent que les congés se posent, et Users est un écran de
-   * réglage, pas un écran d'usage courant). `Parrainage` en dernier : c'est
-   * l'abonnement lui-même qui est en jeu, pas une fonctionnalité du métier —
-   * une offre restreinte n'a aucune raison de ne pas pouvoir parrainer.
+   * Le cabinet au complet — `modules` absent, donc toutes les vues. C'est
+   * l'unique pack payant du catalogue actuel : RH & Paie et Facturation, qui
+   * vendaient chacun un sous-ensemble de vues, ont été retirés de la vente
+   * (`legacy: true` ci-dessous) et fondus dans celui-ci à la demande de
+   * l'utilisateur — un cabinet qui ne veut que la paie ou que la facturation
+   * achète désormais Complet et laisse le reste de côté plutôt que de payer
+   * une offre à sa mesure.
+   *
+   * **`baseSeats: 1`** (plus `5` comme avant) : le siège de base est
+   * désormais un seul utilisateur, à **15 DT/mois**, et chaque utilisateur
+   * supplémentaire coûte le même montant (`pricePerExtraUserDT: 15`) — un
+   * tarif plat par tête, pas de palier. 5 utilisateurs valent donc
+   * `15 + 4×15 = 75` DT/mois, l'exemple donné par l'utilisateur.
+   * `planPriceForSeats()` n'a rien à savoir de ce changement, elle lit
+   * `baseSeats`/`pricePerExtraUserDT` comme pour n'importe quelle offre.
+   *
+   * **Le panier back-office est un plafond souple, uniquement pour cette
+   * offre** (`planAllowsSeatOverage`) : créer un utilisateur au-delà du
+   * nombre de sièges souscrits reste autorisé — `seatLimitError()` ne bloque
+   * plus dans ce cas précis — mais envoie un e-mail à contact@ (identité du
+   * client, date) plutôt que de refuser, pour que le dépassement se facture
+   * après coup au lieu de bloquer une création en plein travail. Voir
+   * `notifySeatOverageIfNeeded()` dans server.ts.
+   */
+  {
+    id: 'COMPLET',
+    label: 'Complet',
+    tagline: 'Le cabinet au complet, tous les modules',
+    priceDT: 15,
+    pricePerExtraUserDT: 15,
+    baseSeats: 1,
+    seatLimit: 1,
+    portalSeatLimit: 0,
+    features: CORE_FEATURES,
+  },
+
+  // ---- Offres retirées du catalogue ----
+  // Conservées pour les entreprises qui les portent déjà : leur fiche doit
+  // continuer à s'afficher avec un libellé et une limite de sièges justes.
+  /**
+   * RH & Paie et Facturation vendaient chacun un sous-ensemble de vues à un
+   * tarif dynamique identique (20 DT/1 utilisateur, +10 DT/utilisateur) —
+   * retirés de la vente à la demande de l'utilisateur, fondus dans Complet
+   * ci-dessus. `legacy: true`, pas une suppression pure : une entreprise déjà
+   * inscrite sous l'un des deux garde son libellé, son périmètre de vues
+   * (`modules`) et sa limite de sièges exactement comme avant — seule la
+   * page de tarifs et l'inscription cessent de les proposer
+   * (`SELLABLE_PLANS` les filtre déjà).
    */
   {
     id: 'RH_PAIE',
-    label: 'RH & Paie',
+    label: 'RH & Paie (offre retirée)',
     tagline: 'Ressources humaines et bulletins de paie',
     priceDT: 20,
     pricePerExtraUserDT: 10,
@@ -191,21 +255,11 @@ export const PLANS: PlanMeta[] = [
     portalSeatLimit: 0,
     modules: ['HR', 'Payroll', 'Users', 'Parrainage'],
     features: RH_PAIE_FEATURES,
+    legacy: true,
   },
-  /**
-   * Équipe + Clients + Cash : facturer et suivre la trésorerie, avec une
-   * équipe à plusieurs comptes (contrairement à l'ancien pack Facturation à
-   * un siège qu'il remplace). Clients en tête du `modules` et non Cash :
-   * App.tsx retombe sur le premier module de cette liste quand la section
-   * mémorisée est fermée par l'offre (le cas par défaut d'une première
-   * connexion), et c'est le fichier clients qu'on veut voir en arrivant —
-   * pas un formulaire de facture vide sans dossier encore choisi. Users en
-   * dernier, même raison que pour RH & Paie ci-dessus, `Parrainage` après
-   * lui pour la même raison aussi.
-   */
   {
     id: 'FACTURATION',
-    label: 'Facturation',
+    label: 'Facturation (offre retirée)',
     tagline: 'Facturation, clients et trésorerie',
     priceDT: 20,
     pricePerExtraUserDT: 10,
@@ -214,33 +268,8 @@ export const PLANS: PlanMeta[] = [
     portalSeatLimit: 0,
     modules: ['Clients', 'Cash', 'Users', 'Parrainage'],
     features: FACTURATION_FEATURES,
+    legacy: true,
   },
-  /**
-   * Le cabinet au complet — `modules` absent, donc toutes les vues, comme
-   * Freelancer mais à plusieurs comptes. C'est le pack généraliste, offre
-   * par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
-   * `baseSeats: 5` : les 50 DT couvrent d'emblée cinq utilisateurs, pas un
-   * seul — à la différence de RH & Paie et Facturation, qui partent d'un
-   * seul siège. Un sixième coûte le même +10 DT/utilisateur que les deux
-   * autres offres dynamiques ; `planPriceForSeats()` n'a rien à savoir de
-   * cette différence, elle lit `baseSeats` comme pour n'importe quelle
-   * offre.
-   */
-  {
-    id: 'COMPLET',
-    label: 'Complet',
-    tagline: 'Le cabinet au complet, tous les modules',
-    priceDT: 50,
-    pricePerExtraUserDT: 10,
-    baseSeats: 5,
-    seatLimit: 5,
-    portalSeatLimit: 0,
-    features: CORE_FEATURES,
-  },
-
-  // ---- Offres retirées du catalogue ----
-  // Conservées pour les entreprises qui les portent déjà : leur fiche doit
-  // continuer à s'afficher avec un libellé et une limite de sièges justes.
   {
     id: 'FREELANCE',
     label: 'Freelance (offre retirée)',
@@ -413,6 +442,41 @@ export const documentQuotaFor = (
   if (status === 'ACTIVE') return null;
   return planMeta(plan)?.trialDocumentQuota ?? null;
 };
+
+/**
+ * Le prix de l'upgrade « documents illimités » de Freelance — informatif
+ * seulement (affiché sur la page de tarifs et dans le message de
+ * verrouillage), puisque la levée du plafond se fait à la main depuis la
+ * console plateforme (`company.documentQuotaOverride`), pas par un second
+ * palier du catalogue : aucun paiement en ligne n'existe dans cette
+ * application, l'upgrade se traite comme le reste de la facturation, hors
+ * app, après un contact.
+ */
+export const FREELANCER_UPGRADE_PRICE_DT = 15;
+
+/**
+ * Le plafond mensuel **permanent** d'une entreprise — celui de
+ * `monthlyDocumentQuota`, jamais affecté par `status`, contrairement à
+ * `documentQuotaFor()` ci-dessus. `documentQuotaOverride` posé sur la fiche
+ * (console plateforme) le lève sans changer d'offre : Freelance reste
+ * Freelance, seul le plafond disparaît.
+ */
+export const permanentDocumentQuotaFor = (
+  plan: string | null | undefined,
+  documentQuotaOverride: boolean | null | undefined,
+): number | null => {
+  if (documentQuotaOverride) return null;
+  return planMeta(plan)?.monthlyDocumentQuota ?? null;
+};
+
+/**
+ * Complet est la seule offre dont le panier back-office est un plafond
+ * souple — voir le commentaire sur `COMPLET` ci-dessus. Une fonction plutôt
+ * qu'un `if (plan === 'COMPLET')` semé dans server.ts : la règle a un seul
+ * endroit où changer si une autre offre venait un jour à la rejoindre.
+ */
+export const planAllowsSeatOverage = (plan: string | null | undefined): boolean =>
+  plan === 'COMPLET';
 
 /** « 70 DT » — le prix seul, sans période, pour un tableau ou un e-mail. */
 export const formatDT = (amount: number): string =>

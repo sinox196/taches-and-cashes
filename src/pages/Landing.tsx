@@ -10,7 +10,7 @@ import { Reveal, CountUp } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
 import { ClientLogos } from '../components/landing/ClientLogos';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
-import { SELLABLE_PLANS, planMeta, planPriceForSeats, formatDT } from '../constants/plans';
+import { SELLABLE_PLANS, planMeta, planPriceForSeats, formatDT, FREELANCER_UPGRADE_PRICE_DT } from '../constants/plans';
 
 const CONTACT_EMAIL = 'contact@taches-and-cash.com';
 
@@ -963,16 +963,21 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 Un prix simple, qui grandit avec votre équipe
               </h1>
               <p className="mt-[18px] text-[16.5px] text-[#5B6472] leading-[1.6]">
-                Freelancer est gratuit pour un indépendant seul. Les trois autres offres ouvrent chacune un
-                périmètre différent — RH &amp; Paie, Facturation, ou le cabinet complet — et leur prix s'ajuste
-                instantanément au nombre d'utilisateurs.
+                Freelancer est gratuit pour un indépendant seul, avec 10 documents de facturation inclus chaque
+                mois. Complet ouvre tout le cabinet, à plusieurs comptes, et son prix s'ajuste instantanément au
+                nombre d'utilisateurs.
               </p>
             </div>
           </section>
 
-          {/* PRICING CARDS */}
+          {/* PRICING CARDS — deux offres seulement (Freelancer, Complet) : RH
+              & Paie et Facturation ont été retirées du catalogue et fondues
+              dans Complet (voir plans.ts). Le grid n'a donc plus besoin de
+              respirer sur quatre colonnes — resserré et recentré, sinon deux
+              cartes perdues dans une rangée de 1240px de large lisent comme
+              un catalogue à moitié vide plutôt que comme un choix simple. */}
           <section className="pt-6 px-6 sm:px-10 pb-[100px] bg-[#F2F4F7]">
-            <div className="max-w-[1240px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
+            <div className="max-w-[820px] mx-auto grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
               {PLANS.map(plan => {
                 const tone = TONES[plan.tone];
                 const meta = planMeta(plan.id);
@@ -1006,6 +1011,28 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   {plan.portalSeats && (
                     <p className={`text-[13px] ${tone.portal}`}>+ {plan.portalSeats}</p>
                   )}
+
+                  {/* Freelance seule porte un quota de documents — le dire ici
+                      évite la surprise du message de verrouillage à la 11ᵉ
+                      facture, et le lien mailto reprend l'adresse déjà utilisée
+                      partout ailleurs sur cette page plutôt qu'en inventer une. */}
+                  {plan.id === 'FREELANCER' && (
+                    <p className={`text-[12.5px] mt-3 leading-snug ${tone.muted}`}>
+                      10 factures/mois incluses. Besoin de plus ?{' '}
+                      <a href={`mailto:${CONTACT_EMAIL}`} className="text-turquoise font-semibold hover:underline">
+                        {FREELANCER_UPGRADE_PRICE_DT} DT/mois pour illimité
+                      </a>
+                    </p>
+                  )}
+
+                  {/* Paiement annuel : 2 mois offerts — une note, pas un
+                      calculateur : aucun paiement en ligne n'existe dans cette
+                      application, le tarif annuel se négocie comme le reste de
+                      la facturation, hors app, une fois contacté. En vert à la
+                      demande explicite de l'utilisateur, sur les deux offres. */}
+                  <p className="text-[12px] mt-2 font-semibold text-emerald-600">
+                    2 mois offerts en paiement annuel
+                  </p>
 
                   {/* Le calculateur : +10 DT par utilisateur au-delà du
                       premier, recalculé instantanément — aucun aller-retour
