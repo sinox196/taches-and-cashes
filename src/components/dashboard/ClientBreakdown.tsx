@@ -20,7 +20,7 @@ const fieldRaw = (c: any, field: SortField): number | string => {
 };
 
 /** Per-client drill-down task table (« Tâches réalisées ») — its own, independent sort. */
-type DetailSortField = 'date' | 'userName' | 'description' | 'mission' | 'taskType' | 'dureeSeconds' | 'cost' | 'statut';
+type DetailSortField = 'date' | 'userName' | 'mission' | 'taskType' | 'dureeSeconds' | 'cost' | 'statut';
 
 /**
  * `t.date` is a server-written DD/MM/YYYY display string (see CLAUDE.md « Date
@@ -37,7 +37,6 @@ const detailFieldRaw = (t: any, field: DetailSortField): number | string | null 
   switch (field) {
     case 'date': return toIsoDateKey(t.date);
     case 'userName': return (t.userName || '').toLowerCase();
-    case 'description': return (t.description || '').toLowerCase();
     case 'mission': return (t.mission || '').toLowerCase();
     case 'taskType': return (t.taskType || '').toLowerCase();
     case 'statut': return t.statut || '';
@@ -160,7 +159,7 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
       setDetailSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setDetailSortField(field);
-      setDetailSortDirection(field === 'date' || field === 'userName' || field === 'mission' || field === 'taskType' || field === 'description' ? 'asc' : 'desc');
+      setDetailSortDirection(field === 'date' || field === 'userName' || field === 'mission' || field === 'taskType' ? 'asc' : 'desc');
     }
   };
 
@@ -450,9 +449,6 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                                 <th onClick={() => handleDetailSort('userName')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
                                   Collaborateur {renderDetailSortIcon('userName')}
                                 </th>
-                                <th onClick={() => handleDetailSort('description')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
-                                  Activité {renderDetailSortIcon('description')}
-                                </th>
                                 <th onClick={() => handleDetailSort('mission')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
                                   Mission {renderDetailSortIcon('mission')}
                                 </th>
@@ -477,9 +473,6 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                                 <tr key={t.id} className="hover:bg-gray-50/60">
                                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{t.date}</td>
                                   <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{t.userName}</td>
-                                  <td className="px-3 py-2 text-gray-900 max-w-[220px] truncate" title={t.description}>
-                                    {t.description || <span className="text-gray-400 italic">Sans description</span>}
-                                  </td>
                                   <td className="px-3 py-2 text-gray-500">{t.mission || '—'}</td>
                                   <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate" title={t.taskType}>
                                     {t.taskType || <span className="text-gray-300">—</span>}
