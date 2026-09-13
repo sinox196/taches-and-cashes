@@ -1069,15 +1069,16 @@ Seules les tâches `COMPLETED` entrent en jeu, même règle que `/api/portal/tas
 
 **[clientReportPdf.ts](src/components/portal/clientReportPdf.ts) est le seul rendu, en PDF vectoriel** — mêmes primitives texte jsPDF que [invoicePdf.ts](src/components/cash/invoicePdf.ts)/[payslipPdf.ts](src/components/payroll/payslipPdf.ts), jamais une image rasterisée. L'écran (`ReportView` dans [ClientPortal.tsx](src/pages/ClientPortal.tsx)) n'en est qu'un aperçu synthétique ; le téléchargement est le seul point de sortie du rapport, pas d'impression construite pour l'instant faute de demande. Chargé paresseusement, seulement à l'ouverture de l'onglet — un calcul de plus par requête pour un onglet que tout le monde ne consulte pas à chaque visite.
 
-**Le client est notifié de quatre événements sur son propre dossier** —
-échéance modifiée, facture émise, item de livrable coché, tâche terminée —
-via le même mécanisme `notify()`/`notifications` que le reste de l'app, pas
-un chemin à part. `portalUserIdsFor(companyId, clientId)` (server.ts, juste
-après `notify()`) résout le ou les comptes `CLIENT` rattachés à un dossier —
-plusieurs si le gérant et son comptable en ont chacun un — et chaque
-déclencheur y notifie tous. Les quatre types (`PORTAL_ECHEANCE`,
-`PORTAL_INVOICE`, `PORTAL_DELIVERABLE`, `PORTAL_TASK_DONE`) ne partent
-jamais que vers un compte `CLIENT` :
+**Le client est notifié de cinq événements sur son propre dossier** —
+échéance modifiée, facture émise, item de livrable coché, tâche terminée,
+nouveau rapport mensuel disponible — via le même mécanisme
+`notify()`/`notifications` que le reste de l'app, pas un chemin à part.
+`portalUserIdsFor(companyId, clientId)` (server.ts, juste après `notify()`)
+résout le ou les comptes `CLIENT` rattachés à un dossier — plusieurs si le
+gérant et son comptable en ont chacun un — et chaque déclencheur y notifie
+tous. Les cinq types (`PORTAL_ECHEANCE`, `PORTAL_INVOICE`,
+`PORTAL_DELIVERABLE`, `PORTAL_TASK_DONE`, `PORTAL_REPORT`) ne partent jamais
+que vers un compte `CLIENT` :
 
 - **Échéance** — `PUT /api/echeance-statuses`, via `notifyEcheanceChange()`.
   Seul un statut posé à une valeur **non vide** notifie ; un effacement
@@ -1098,21 +1099,39 @@ jamais que vers un compte `CLIENT` :
   le même garde-fou qui pose déjà `heureFin` juste au-dessus dans cette
   route, pour qu'une tâche qui reste `COMPLETED` d'un PUT à l'autre ne
   renvoie pas une seconde notification.
+- **Rapport mensuel** — `maybeSendMonthlyReportNotifications()`, un cas à
+  part des quatre premiers : ceux-ci partent d'une mutation précise (un PUT,
+  un POST) ; celui-ci n'en a aucune à s'accrocher, puisque le rapport
+  lui-même n'est jamais créé ni stocké — voir « Un onglet « Rapport mensuel »
+  couvre toujours le mois civil précédent » plus haut. Il suit donc l'autre
+  idiome déjà présent dans cette app pour « quelque chose a changé sans
+  mutation à observer » : la même détection paresseuse « un nouveau mois a
+  commencé » que `maybeSendEcheanceReminder()`, appelée juste à côté dans
+  `authenticate`, à la prochaine requête de n'importe quel compte de
+  l'entreprise (client compris) — une marque `monthlyReportNotifiedMonth`
+  (`YYYY-MM`) sur la fiche entreprise, écrite après coup, plus une pose en
+  vol par entreprise pour dédupliquer une rafale de requêtes simultanées.
+  Contrairement au rappel d'échéances (réservé aux ADMIN/SUPERVISEUR d'un
+  secteur qui vend Ressources métier), celui-ci vise tous les comptes
+  `CLIENT` de l'entreprise, dossier par dossier (`portalUserIdsFor` sur
+  chaque client), sans garde de secteur ou d'offre : le rapport n'a jamais
+  dépendu de Ressources métier, donc rien ici n'a de raison d'en dépendre
+  non plus.
 
 Chacun résout le dossier via `clientId` (jamais un nom de client texte
 libre, qu'aucun compte portail ne peut porter) et n'aboutit à rien si le
 dossier n'a pas de compte `CLIENT` — silencieusement, ce n'est pas une
-erreur. **`NotificationBell.tsx`** porte les quatre types dans `TYPE_META`/
+erreur. **`NotificationBell.tsx`** porte les cinq types dans `TYPE_META`/
 `TOAST_VARIANT` comme tout le reste, et **`PUSH_NAV_FOR_TYPE`** côté
 serveur pour le Web Push. Leur `nav` désigne un onglet du **portail**
-(`Echeances`/`Statement`/`Deliverables`/`Tasks`), jamais une section du
-back-office comme les autres entrées de ces tables — `ClientPortal.tsx`
-traduit via `PORTAL_NAV_TO_TAB` avant d'appeler `setTab()`. Cette table a
-aussi corrigé un bug latent : `onNavigate` y était câblé en dur sur
-`() => setTab('messages')`, donc n'importe quelle notification (même une
-tâche assignée) atterrissait sur Messages — invisible tant qu'aucun type
-de notification n'atteignait un compte client, ce qui n'était le cas
-d'aucun avant ces quatre-là.
+(`Echeances`/`Statement`/`Deliverables`/`Tasks`/`Report`), jamais une
+section du back-office comme les autres entrées de ces tables —
+`ClientPortal.tsx` traduit via `PORTAL_NAV_TO_TAB` avant d'appeler
+`setTab()`. Cette table a aussi corrigé un bug latent : `onNavigate` y
+était câblé en dur sur `() => setTab('messages')`, donc n'importe quelle
+notification (même une tâche assignée) atterrissait sur Messages —
+invisible tant qu'aucun type de notification n'atteignait un compte
+client, ce qui n'était le cas d'aucun avant ces cinq-là.
 
 **Une ligne « Facture » du relevé s'ouvre au clic** et affiche le document
 complet, réutilisant [InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)

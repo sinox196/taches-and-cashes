@@ -1257,6 +1257,9 @@ async function startServer() {
       // prochaine requête plutôt que via un balayage périodique qui n'existe
       // pas dans cette application.
       await maybeSendEcheanceReminder(company);
+      // Même idiome, côté portail cette fois : le rapport mensuel du mois qui
+      // vient de se terminer est désormais disponible.
+      await maybeSendMonthlyReportNotifications(company);
       next();
     } catch (e) {
       res.status(401).json({ error: 'Invalid token' });
@@ -4433,6 +4436,72 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     })();
 
     echeanceReminderInFlight.set(company.id, run);
+    return run;
+  }
+
+  /**
+   * Prévient chaque compte portail qu'un nouveau « Rapport mensuel » est
+   * disponible — le mois qui vient de se terminer. Même idiome que
+   * `maybeSendEcheanceReminder()` juste au-dessus : `GET /api/portal/report`
+   * ne stocke jamais rien et ne prend aucun bouton d'envoi (voir CLAUDE.md,
+   * « Portail client »), donc « un nouveau mois a commencé » — le seul
+   * moment où le rapport du mois précédent devient complet — se détecte
+   * paresseusement ici, dans `authenticate`, à la prochaine requête de
+   * n'importe quel compte de l'entreprise (client compris).
+   *
+   * La marque (`monthlyReportNotifiedMonth`, `YYYY-MM`) vit sur la fiche
+   * entreprise, pas sur chaque client : le rappel part une fois par mois
+   * pour l'entreprise entière, à tous ses comptes portail à la fois. Une
+   * pose en vol dédupliquée évite qu'une rafale de requêtes simultanées au
+   * tout début du mois n'envoie chacune sa propre salve.
+   */
+  const monthlyReportInFlight = new Map<string, Promise<void>>();
+
+  async function maybeSendMonthlyReportNotifications(company: any): Promise<void> {
+    if (!company?.id) return;
+    const month = formatDateISO(new Date()).slice(0, 7);
+    if (company.monthlyReportNotifiedMonth === month) return;
+
+    const inFlight = monthlyReportInFlight.get(company.id);
+    if (inFlight) return inFlight;
+
+    const run = (async () => {
+      try {
+        // Le rapport lui-même couvre toujours le mois civil précédent — voir
+        // GET /api/portal/report — donc c'est ce mois-là, pas le mois
+        // courant, que le libellé de la notification doit nommer.
+        const now = civilParts(new Date());
+        const prevMonth = now.month === 1 ? 12 : now.month - 1;
+        const prevYear = now.month === 1 ? now.year - 1 : now.year;
+        // Même liste que ECHEANCE_REMINDER_MONTHS ci-dessus — réutilisée
+        // plutôt que recopiée une troisième fois.
+        const monthLabel = `${ECHEANCE_REMINDER_MONTHS[prevMonth - 1]} ${prevYear}`;
+
+        const clients = await db.getAllClients(company.id);
+        for (const client of clients) {
+          const portalIds = await portalUserIdsFor(company.id, client.id);
+          for (const uid of portalIds) {
+            await notify(
+              company.id,
+              uid,
+              'PORTAL_REPORT',
+              'Rapport mensuel disponible',
+              `Le rapport de ${monthLabel} est maintenant disponible au téléchargement.`,
+            );
+          }
+        }
+        // Écrite après coup, comme les autres semis/rappels : une exécution
+        // interrompue avant d'avoir notifié tout le monde se rejoue à la
+        // prochaine requête plutôt que de marquer le mois comme fait à tort.
+        await db.updateCompany(company.id, { monthlyReportNotifiedMonth: month });
+      } catch (e) {
+        console.error('[portal] notification rapport mensuel échouée', e);
+      } finally {
+        monthlyReportInFlight.delete(company.id);
+      }
+    })();
+
+    monthlyReportInFlight.set(company.id, run);
     return run;
   }
 
@@ -7899,12 +7968,13 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     LOAN_DECISION: 'HR',
     ADVANCE_REQUEST: 'HR',
     ADVANCE_DECISION: 'HR',
-    // Ces quatre-là ne partent jamais que vers un compte CLIENT — la
+    // Ces cinq-là ne partent jamais que vers un compte CLIENT — la
     // destination est un onglet du portail, pas une section du back-office.
     PORTAL_ECHEANCE: 'Echeances',
     PORTAL_INVOICE: 'Statement',
     PORTAL_DELIVERABLE: 'Deliverables',
     PORTAL_TASK_DONE: 'Tasks',
+    PORTAL_REPORT: 'Report',
   };
 
   /**

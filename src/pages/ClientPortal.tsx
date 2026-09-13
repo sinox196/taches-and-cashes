@@ -96,11 +96,11 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 /**
  * Où `NotificationBell` envoie le clic, traduit vers l'onglet du portail —
  * `TYPE_META`/`PUSH_NAV_FOR_TYPE` désignent la destination par ces mêmes
- * chaînes côté serveur (`Echeances`/`Statement`/`Deliverables`/`Tasks`), qui
- * n'existent que pour les quatre types de notification réservés à un compte
- * CLIENT. `Messages` couvre à la fois le type back-office par défaut
- * (`Dashboard`, absent d'ici, donc le repli) et le clic sur un contact aux
- * messages non lus, qui appelait déjà `onNavigate('Messages')` — c'était
+ * chaînes côté serveur (`Echeances`/`Statement`/`Deliverables`/`Tasks`/
+ * `Report`), qui n'existent que pour les cinq types de notification réservés
+ * à un compte CLIENT. `Messages` couvre à la fois le type back-office par
+ * défaut (`Dashboard`, absent d'ici, donc le repli) et le clic sur un contact
+ * aux messages non lus, qui appelait déjà `onNavigate('Messages')` — c'était
  * jusqu'ici la seule destination que ce callback savait atteindre.
  */
 const PORTAL_NAV_TO_TAB: Record<string, Tab> = {
@@ -108,6 +108,7 @@ const PORTAL_NAV_TO_TAB: Record<string, Tab> = {
   Statement: 'statement',
   Deliverables: 'deliverables',
   Tasks: 'tasks',
+  Report: 'report',
   Messages: 'messages',
 };
 
