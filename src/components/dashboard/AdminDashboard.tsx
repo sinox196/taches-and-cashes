@@ -12,6 +12,7 @@ import { AlertsPanel } from './AlertsPanel';
 import { ClientProfitability } from './ClientProfitability';
 import { ConcentrationCard } from './ConcentrationCard';
 import { TaskIntelligence } from './TaskIntelligence';
+import { AIDashboardSummary } from './AIDashboardSummary';
 
 /**
  * Un cran au-dessus des en-têtes de carte (« RENTABILITÉ DU PORTEFEUILLE »,
@@ -327,6 +328,7 @@ export const AdminDashboard: React.FC = () => {
                 document.getElementById('dashboard-rentabilite')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
               }}
             />
+            <AIDashboardSummary exec={exec} />
 
             <div id="dashboard-alertes" className="scroll-mt-4">
               <AlertsPanel

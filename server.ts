@@ -28,6 +28,7 @@ import {
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendMail } from './src/server/email.js';
+import { aiEnabled, summarizeDashboard } from './src/server/ai.js';
 import { initPush, pushEnabled, publicKey as pushPublicKey, sendPush } from './src/server/push.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-local-dev';
@@ -3659,6 +3660,38 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     res.json(payload);
   } catch (error) {
     console.error('Dashboard executive error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Analyse en langage naturel du tableau de bord, via Gemini Flash — voir
+ * [ai.ts](src/server/ai.ts). Le corps n'est **pas** recalculé ici : le client
+ * envoie un `context` déjà construit à partir de ce que `/api/dashboard/executive`
+ * lui a répondu (donc déjà filtré/dépouillé pour son rôle — un SUPERVISEUR ne
+ * peut pas envoyer de montants qu'il n'a jamais reçus). Même garde de rôle que
+ * l'exécutif — c'est le même écran — et une limite de taille sur le corps pour
+ * qu'un contexte mal construit ne consomme pas le quota gratuit pour rien.
+ */
+app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) => {
+  try {
+    if (!DASHBOARD_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (!aiEnabled()) {
+      return res.json({ available: false, text: null });
+    }
+    const context = req.body?.context;
+    if (!context || typeof context !== 'object') {
+      return res.status(400).json({ error: 'context manquant' });
+    }
+    if (JSON.stringify(context).length > 20000) {
+      return res.status(400).json({ error: 'Contexte trop volumineux pour être analysé.' });
+    }
+    const result = await summarizeDashboard(context);
+    res.json(result);
+  } catch (error) {
+    console.error('Dashboard AI summary error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
