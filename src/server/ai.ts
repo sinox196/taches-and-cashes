@@ -11,7 +11,16 @@
  * s'afficher.
  */
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+/**
+ * `gemini-flash-latest` est un alias maintenu par Google, pas un modèle figé
+ * — `gemini-2.0-flash` (le choix initial ici) a été retiré du catalogue en
+ * quelques mois à peine, avec un message d'erreur renvoyant vers la version
+ * suivante. Épingler un nom de modèle précis referait exactement ce piège ;
+ * l'alias, lui, suit le modèle Flash recommandé du moment sans qu'il faille
+ * revenir toucher ce fichier. `GEMINI_MODEL` reste le repli si l'alias
+ * lui-même venait à disparaître ou à mal convenir.
+ */
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
 
 export function aiEnabled(): boolean {
   return !!process.env.GEMINI_API_KEY;
@@ -44,7 +53,15 @@ export async function summarizeDashboard(context: Record<string, unknown>): Prom
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
+          // Les modèles Flash récents raisonnent avant de répondre
+          // (« thinking »), et ce raisonnement consomme le même budget que
+          // `maxOutputTokens` — mesuré à ~1 800-1 900 jetons de réflexion
+          // pour une analyse de ce format, avant même le texte final. Un
+          // plafond à 500 tronquait la réponse en plein milieu d'une phrase
+          // (`finishReason: 'MAX_TOKENS'`, texte coupé) ; 8192 laisse une
+          // marge large des deux côtés sans risque réel de dérive de coût,
+          // ce bouton n'étant jamais appelé qu'à la demande.
+          generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
         }),
       },
     );
