@@ -683,11 +683,17 @@ const EcheancesView: React.FC<{ data: EcheanceData | null }> = ({ data }) => {
 /**
  * Rapport mensuel — toujours le mois civil précédent, calculé à la demande
  * par `/api/portal/report`. Trois blocs, les mêmes questions que le tableau
- * de bord Direction (« Où est l'argent ? », « Où part le temps ? »,
- * l'activité du dossier), jamais de coût employeur ni de performance de
- * collaborateur — ce que le serveur envoie ne porte déjà aucun des deux.
- * Le PDF est le seul format de restitution ; l'écran n'en est qu'un aperçu
- * synthétique avant le téléchargement.
+ * de bord Direction (finances du mois, missions affectées, l'activité du
+ * dossier), jamais de coût employeur ni de performance de collaborateur —
+ * ce que le serveur envoie ne porte déjà aucun des deux. Le PDF est le seul
+ * format de restitution ; l'écran n'en est qu'un aperçu synthétique avant le
+ * téléchargement.
+ *
+ * Les titres « Où est l'argent ? » et « Où part le temps ? » — repris du
+ * tableau de bord Direction dans la première version — ont été retirés à la
+ * demande de l'utilisateur : le premier a disparu (les trois chiffres du
+ * bloc financier n'ont plus d'intitulé de section, seulement leurs propres
+ * libellés de carte), le second est devenu « Missions affectés ».
  */
 const ReportView: React.FC<{ report: ClientReport | null; loading: boolean; error: string }> = ({ report, loading, error }) => {
   if (loading) {
@@ -711,7 +717,7 @@ const ReportView: React.FC<{ report: ClientReport | null; loading: boolean; erro
       <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-[15px] font-semibold text-gray-900">Rapport mensuel — {report.period.label}</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Où est l'argent, où part le temps, et l'activité du dossier sur le mois écoulé.</p>
+          <p className="text-[12px] text-gray-500 mt-0.5">Finances, missions affectées et activité du dossier sur le mois écoulé.</p>
         </div>
         <button
           onClick={() => downloadClientReportPdf(report)}
@@ -729,7 +735,7 @@ const ReportView: React.FC<{ report: ClientReport | null; loading: boolean; erro
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 sm:px-5 py-3 border-b border-gray-100">
-          <h3 className="text-[14px] font-semibold text-gray-900">Où part le temps ?</h3>
+          <h3 className="text-[14px] font-semibold text-gray-900">Missions affectés</h3>
         </div>
         {report.missions.length === 0 ? (
           <Empty>Aucune activité enregistrée sur ce mois.</Empty>

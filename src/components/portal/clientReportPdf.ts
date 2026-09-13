@@ -88,8 +88,6 @@ export function buildClientReportPdf(report: ClientReport): jsPDF {
   rule(y);
   y += 10;
 
-  // ---- Où est l'argent ? ---------------------------------------------------
-  sectionTitle("Où est l'argent ?");
   const stats: [string, string][] = [
     ['Honoraires facturés', money(report.finance.honoraires)],
     ['Encaissements', money(report.finance.encaisse)],
@@ -107,8 +105,8 @@ export function buildClientReportPdf(report: ClientReport): jsPDF {
   rule(y);
   y += 10;
 
-  // ---- Où part le temps ? ---------------------------------------------------
-  sectionTitle('Où part le temps ?');
+  // ---- Missions affectés ---------------------------------------------------
+  sectionTitle('Missions affectés');
   if (report.missions.length === 0) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); setInk(MUTED);
     text('Aucune activité enregistrée sur ce mois.', M, y);
