@@ -45,36 +45,62 @@ export async function summarizeDashboard(context: Record<string, unknown>): Prom
     'Données :\n', JSON.stringify(context),
   ].join('');
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          // Les modèles Flash récents raisonnent avant de répondre
-          // (« thinking »), et ce raisonnement consomme le même budget que
-          // `maxOutputTokens` — mesuré à ~1 800-1 900 jetons de réflexion
-          // pour une analyse de ce format, avant même le texte final. Un
-          // plafond à 500 tronquait la réponse en plein milieu d'une phrase
-          // (`finishReason: 'MAX_TOKENS'`, texte coupé) ; 8192 laisse une
-          // marge large des deux côtés sans risque réel de dérive de coût,
-          // ce bouton n'étant jamais appelé qu'à la demande.
-          generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
-        }),
-      },
-    );
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.error('[ai] Gemini request failed:', res.status, body.slice(0, 500));
-      return { available: true, text: null, error: `Gemini a répondu ${res.status}` };
+  // Le palier gratuit renvoie un 503 « High demand » de façon intermittente
+  // (mesuré ~1 appel sur 3 dans des tests en rafale), pas un vrai défaut de
+  // configuration — une nouvelle tentative immédiate réussit le plus souvent.
+  // Deux essais de plus, avec une courte pause, avant de renoncer et de
+  // laisser l'appelant afficher l'échec : le bouton reste "à la demande",
+  // jamais quelque chose qui bloque en boucle sur un palier gratuit.
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = 1500;
+
+  let lastStatus: number | null = null;
+  let lastBody = '';
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            // Les modèles Flash récents raisonnent avant de répondre
+            // (« thinking »), et ce raisonnement consomme le même budget que
+            // `maxOutputTokens` — mesuré à ~1 800-1 900 jetons de réflexion
+            // pour une analyse de ce format, avant même le texte final. Un
+            // plafond à 500 tronquait la réponse en plein milieu d'une phrase
+            // (`finishReason: 'MAX_TOKENS'`, texte coupé) ; 8192 laisse une
+            // marge large des deux côtés sans risque réel de dérive de coût,
+            // ce bouton n'étant jamais appelé qu'à la demande.
+            generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+          }),
+        },
+      );
+      if (!res.ok) {
+        lastStatus = res.status;
+        lastBody = await res.text().catch(() => '');
+        console.error('[ai] Gemini request failed:', res.status, lastBody.slice(0, 500), `(tentative ${attempt}/${MAX_ATTEMPTS})`);
+        // Seul le 503 (surcharge temporaire) mérite une nouvelle tentative —
+        // un 400/401/404 est stable et rejouer l'appel ne changerait rien.
+        if (res.status === 503 && attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        return { available: true, text: null, error: `Gemini a répondu ${res.status}` };
+      }
+      const data: any = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('').trim() || null;
+      return { available: true, text };
+    } catch (error) {
+      console.error('[ai] Gemini call failed:', error, `(tentative ${attempt}/${MAX_ATTEMPTS})`);
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      return { available: true, text: null, error: 'Appel IA impossible' };
     }
-    const data: any = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('').trim() || null;
-    return { available: true, text };
-  } catch (error) {
-    console.error('[ai] Gemini call failed:', error);
-    return { available: true, text: null, error: 'Appel IA impossible' };
   }
+  // Inatteignable : la boucle retourne toujours avant sa dernière itération.
+  return { available: true, text: null, error: `Gemini a répondu ${lastStatus}` };
 }
