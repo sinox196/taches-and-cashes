@@ -315,7 +315,7 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                 <React.Fragment key={key}>
                   <tr
                     onClick={() => toggleRow(client)}
-                    className={`cursor-pointer transition-colors group ${isOpen ? 'bg-blue-50/70 hover:bg-blue-50' : 'hover:bg-gray-50'}`}
+                    className={`cursor-pointer transition-colors group ${isOpen ? 'bg-[#1aadaa]/10 hover:bg-[#1aadaa]/15' : 'hover:bg-gray-50'}`}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -404,7 +404,7 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
 
                   {isOpen && (
                     <tr>
-                      <td colSpan={isAdmin ? 9 : 4} className="px-4 pb-4 pt-1 bg-blue-50/40">
+                      <td colSpan={isAdmin ? 9 : 4} className="px-4 pb-4 pt-1 bg-[#1aadaa]/5">
                         {/* Who worked on this client */}
                         <div className="mb-3">
                           <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
@@ -414,7 +414,7 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                             {client.contributors.map((c: any) => (
                               <span
                                 key={c.userId}
-                                className="inline-flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-2.5 py-1"
+                                className="inline-flex items-center gap-2 bg-[#1aadaa]/10 border border-[#1aadaa]/30 rounded-lg px-2.5 py-1"
                               >
                                 <span className="font-semibold text-gray-900 text-[12px]">{c.name}</span>
                                 <span className="text-[11px] text-gray-500">
@@ -431,46 +431,46 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                           Tâches réalisées
                         </div>
                         {loaded?.loading ? (
-                          <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-4 text-[12px] text-gray-400 italic">
+                          <div className="bg-[#1aadaa]/10 border border-[#1aadaa]/30 rounded-lg px-3 py-4 text-[12px] text-gray-400 italic">
                             Chargement des tâches…
                           </div>
                         ) : loaded?.error ? (
-                          <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-4 text-[12px] text-red-600">
+                          <div className="bg-[#1aadaa]/10 border border-[#1aadaa]/30 rounded-lg px-3 py-4 text-[12px] text-red-600">
                             Impossible de charger les tâches de ce client.
                           </div>
                         ) : (
-                        <div className="bg-blue-50 border border-blue-100 rounded-lg overflow-hidden">
+                        <div className="bg-[#1aadaa]/10 border border-[#1aadaa]/30 rounded-lg overflow-hidden">
                           <table className="w-full text-left text-[12px]">
                             <thead>
-                              <tr className="text-[10px] uppercase tracking-wider text-gray-400 border-b border-blue-100">
-                                <th onClick={() => handleDetailSort('date')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-blue-100 transition-colors">
+                              <tr className="text-[10px] uppercase tracking-wider text-gray-400 border-b border-[#1aadaa]/30">
+                                <th onClick={() => handleDetailSort('date')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-[#1aadaa]/20 transition-colors">
                                   Date {renderDetailSortIcon('date')}
                                 </th>
-                                <th onClick={() => handleDetailSort('userName')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-blue-100 transition-colors">
+                                <th onClick={() => handleDetailSort('userName')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-[#1aadaa]/20 transition-colors">
                                   Collaborateur {renderDetailSortIcon('userName')}
                                 </th>
-                                <th onClick={() => handleDetailSort('mission')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-blue-100 transition-colors">
+                                <th onClick={() => handleDetailSort('mission')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-[#1aadaa]/20 transition-colors">
                                   Mission {renderDetailSortIcon('mission')}
                                 </th>
-                                <th onClick={() => handleDetailSort('taskType')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-blue-100 transition-colors">
+                                <th onClick={() => handleDetailSort('taskType')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-[#1aadaa]/20 transition-colors">
                                   Type de tâche {renderDetailSortIcon('taskType')}
                                 </th>
-                                <th onClick={() => handleDetailSort('dureeSeconds')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-blue-100 transition-colors">
+                                <th onClick={() => handleDetailSort('dureeSeconds')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-[#1aadaa]/20 transition-colors">
                                   Durée {renderDetailSortIcon('dureeSeconds')}
                                 </th>
                                 {isAdmin && (
-                                  <th onClick={() => handleDetailSort('cost')} className="px-3 py-2 font-semibold text-right cursor-pointer select-none group/th hover:bg-blue-100 transition-colors">
+                                  <th onClick={() => handleDetailSort('cost')} className="px-3 py-2 font-semibold text-right cursor-pointer select-none group/th hover:bg-[#1aadaa]/20 transition-colors">
                                     Coût {renderDetailSortIcon('cost')}
                                   </th>
                                 )}
-                                <th onClick={() => handleDetailSort('statut')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-blue-100 transition-colors">
+                                <th onClick={() => handleDetailSort('statut')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-[#1aadaa]/20 transition-colors">
                                   Statut {renderDetailSortIcon('statut')}
                                 </th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-blue-100">
+                            <tbody className="divide-y divide-[#1aadaa]/20">
                               {sortDetailTasks(loaded?.tasks ?? []).map((t: any) => (
-                                <tr key={t.id} className="hover:bg-blue-100/50">
+                                <tr key={t.id} className="hover:bg-[#1aadaa]/15">
                                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{t.date}</td>
                                   <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{t.userName}</td>
                                   <td className="px-3 py-2 text-gray-500">{t.mission || '—'}</td>
@@ -489,7 +489,7 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                             </tbody>
                           </table>
                           {loaded?.truncated > 0 && (
-                            <div className="px-3 py-2 text-[11px] text-gray-500 bg-blue-100/40 border-t border-blue-100">
+                            <div className="px-3 py-2 text-[11px] text-gray-500 bg-[#1aadaa]/15 border-t border-[#1aadaa]/30">
                               Les {loaded.tasks.length} tâches les plus longues sont affichées ·{' '}
                               {loaded.truncated} autre(s) non listée(s).
                             </div>
