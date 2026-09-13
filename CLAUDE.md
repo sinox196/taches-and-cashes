@@ -400,19 +400,23 @@ ligne : une valeur corrigée sur la page de tarifs mais pas côté serveur
 produirait une page qui annonce un montant et un e-mail de RIB qui en
 demande un autre.
 
-**Quatre offres, dans cet ordre** — Freelancer en tête, puis RH & Paie,
-Facturation, Complet — chacune ouvrant un périmètre différent :
+**Deux offres vendues aujourd'hui** — Freelancer et Complet, chacune ouvrant
+toutes les vues (`modules` absent) :
 
-- **Freelancer** — gratuit, un siège, ADMIN, toutes les vues (`modules`
-  absent). Voir plus bas.
-- **RH & Paie** (`RH_PAIE`) — 20 DT/mois pour 1 utilisateur, +10 DT par
-  utilisateur supplémentaire. `modules: ['HR', 'Payroll', 'Users']` — Équipe,
-  RH et Gestion des paies, rien d'autre.
-- **Facturation** (`FACTURATION`) — même tarif, `modules: ['Clients', 'Cash',
-  'Users']` — Équipe, Clients et Cash.
-- **Complet** (`COMPLET`) — 50 DT/mois pour **5 utilisateurs inclus**, +10 DT
-  par utilisateur supplémentaire, `modules` absent (toutes les vues). Offre
-  par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
+- **Freelancer** — gratuit, un siège, ADMIN. Voir plus bas — et voir « Le
+  quota mensuel de Freelance » plus loin pour son plafond de 10 documents.
+- **Complet** (`COMPLET`) — **15 DT/mois pour 1 utilisateur**, +15 DT par
+  utilisateur supplémentaire (5 utilisateurs = `15 + 4×15 = 75` DT/mois).
+  Offre par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
+
+**RH & Paie et Facturation ont été retirées de la vente et fondues dans
+Complet**, à la demande explicite de l'utilisateur — chacune ne vendait
+qu'un sous-ensemble de vues (Équipe + RH + Paie pour l'une, Équipe + Clients
++ Cash pour l'autre) au même tarif dynamique que Complet porte désormais
+seul. `legacy: true` (voir « Les offres retirées restent dans la liste »
+ci-dessous) : une entreprise déjà inscrite sous l'une des deux garde
+exactement son périmètre de vues, son tarif et sa fiche — seule la vente
+s'arrête.
 
 **Pack 5/10/15 et l'ancien pack Facturation à 30 DT (un siège) ont été
 supprimés du catalogue purement et simplement**, pas seulement retirés
@@ -425,26 +429,31 @@ retirée qu'on veut au contraire préserver pour ses entreprises existantes
 suit toujours le chemin `legacy: true` — voir `FREELANCE`/`EQUIPE`/
 `CROISSANCE` ci-dessous, inchangé.
 
-**Le tarif par utilisateur supplémentaire est le cœur du nouveau catalogue.**
-`PlanMeta.pricePerExtraUserDT` (10 DT pour les trois offres non-Freelancer) et
-`PlanMeta.baseSeats` définissent une offre **dynamique** — 1 pour RH & Paie et
-Facturation, mais **5 pour Complet** : ses 50 DT couvrent d'emblée cinq
-comptes, pas un seul. `planPriceForSeats(meta, seats)` dans plans.ts n'a rien
-à savoir de cette différence — elle lit `baseSeats` par offre — et en est
-l'unique implémentation : `priceDT` tel quel si `pricePerExtraUserDT` est
-absent (Freelancer, ou une offre retirée), sinon `priceDT + (seats −
-baseSeats) × pricePerExtraUserDT`. **Une seule fonction, appelée aux quatre
-endroits qui
+**Le tarif par utilisateur supplémentaire est le cœur du catalogue.**
+`PlanMeta.pricePerExtraUserDT` et `PlanMeta.baseSeats` définissent une offre
+**dynamique** — Complet vaut **15 DT pour 1 utilisateur, +15 DT par
+utilisateur supplémentaire** (`baseSeats: 1`) : contrairement à l'ancien
+catalogue, où ses 50 DT couvraient d'emblée cinq comptes, c'est maintenant un
+tarif plat par tête, sans palier. `planPriceForSeats(meta, seats)` dans
+plans.ts n'a rien à savoir de ce changement — elle lit `baseSeats` par
+offre — et en est l'unique implémentation : `priceDT` tel quel si
+`pricePerExtraUserDT` est absent (Freelancer, ou une offre retirée), sinon
+`priceDT + (seats − baseSeats) × pricePerExtraUserDT`. **Une seule fonction,
+appelée aux quatre endroits qui
 doivent absolument s'accorder** — le calculateur de la page Tarifs, l'aperçu
 de prix dans la modale d'inscription, le mail de RIB
 (`POST /api/platform/companies/:id/send-rib`) et la confirmation de paiement
 (`POST /api/platform/companies/:id/confirm`) — sinon un montant annoncé au
 client et un montant encaissé finiraient tôt ou tard par diverger, exactement
-le piège que `computeInvoiceTotals()` évite déjà côté facturation.
+le piège que `computeInvoiceTotals()` évite déjà côté facturation. RH & Paie
+et Facturation, désormais `legacy`, gardent leur ancien tarif (20 DT/1
+utilisateur, +10 DT/utilisateur) inchangé sur les fiches qui les portent
+encore — `planPriceForSeats()` ne fait aucune distinction entre une offre
+vendue et une offre retirée, elle lit `PlanMeta` telle qu'elle est.
 
 **`PlanMeta.seatLimit` sur une offre dynamique n'est qu'un repli
-d'affichage** (égal à `baseSeats` — 1 pour RH & Paie/Facturation, 5 pour
-Complet) — **jamais** le nombre réellement
+d'affichage** (égal à `baseSeats` — **1 pour Complet**, comme pour RH & Paie
+et Facturation avant elle) — **jamais** le nombre réellement
 accordé à une entreprise. Ce nombre-là vit sur la fiche
 (`company.seatLimit`), posé au nombre demandé à l'inscription
 (`POST /api/signup`, champ `seats` du corps de la requête, borné par
@@ -455,7 +464,7 @@ le reste des sièges). `POST /api/platform/companies/:id/confirm` **ne
 réécrit jamais `seatLimit`/`portalSeatLimit` depuis le catalogue statique
 pour une offre dynamique** — seule une offre à prix plat (aucune sellable
 aujourd'hui hormis Freelancer) reprend encore son `seatLimit` fixe à la
-confirmation ; sans cette garde, confirmer une entreprise sur RH & Paie à 4
+confirmation ; sans cette garde, confirmer une entreprise sur Complet à 4
 sièges l'aurait silencieusement ramenée à 1.
 
 **Toute lecture de `seatLimit` côté client doit suivre le même ordre de
@@ -493,54 +502,108 @@ sans règle à part. « Gratuit, sans période d'essai » n'est pas ce que
 `trialEndsAt`, quelle que soit l'offre. Le Freelancer est donc reconnu à part
 (`plan === 'FREELANCER'`) et posé `ACTIVE` d'emblée, `trialEndsAt: null` —
 `expireTrialIfDue` ne touche que `status === 'TRIAL'`, donc un compte qui
-n'y entre jamais n'expire jamais, et `documentQuotaFor()` rend `null` (aucun
-plafond) exactement comme pour un abonnement payé confirmé. La page de
-tarifs affiche « Gratuit » plutôt que « 0 DT/mois » pour la même offre — un
-prix à zéro se lit comme un champ oublié, pas comme une promesse.
+n'y entre jamais n'expire jamais. La page de tarifs affiche « Gratuit »
+plutôt que « 0 DT/mois » pour la même offre — un prix à zéro se lit comme un
+champ oublié, pas comme une promesse.
+
+**Le quota mensuel de Freelance — 10 documents, en permanence, pas seulement
+pendant un essai.** `PlanMeta.monthlyDocumentQuota: 10` sur `FREELANCER` est
+distinct de `trialDocumentQuota` (voir plus bas) : celui-ci s'éteint dès que
+l'entreprise passe `ACTIVE`, ce que Freelance est déjà dès sa création — un
+`trialDocumentQuota` n'y aurait donc jamais d'effet. `permanentDocumentQuotaFor(plan,
+documentQuotaOverride)` dans plans.ts le rend, sauf si `company.documentQuotaOverride`
+est posé (dérogation manuelle depuis la console plateforme, une fois l'upgrade
+payé hors app — aucun paiement en ligne n'existe dans cette application ;
+`FREELANCER_UPGRADE_PRICE_DT = 15` est purement informatif, affiché sur la
+page de tarifs et dans le message de verrouillage).
+
+**Dépasser le quota ne bloque jamais la création — contrairement au plafond
+d'essai — seule la consultation d'un document au-delà se verrouille.**
+`isQuotaLocked(company, inv, allInvoicesSameCompany)` dans server.ts calcule
+le rang (1-based) du document parmi ceux du même mois qui comptent dans le
+quota (`countsAgainstQuota`, triés par création) : au-delà de 10, il est
+« verrouillé ». `maskLockedInvoice()` renvoie alors le document avec
+`quotaLocked: true` et tous ses champs de montant à `null` (`totalHT`,
+`totalTTC`, `totalNetToPay`, les lignes, les débours…) — la fiche existe
+toujours (numéro, client, date), mais aucun chiffre n'y figure, appliqué par
+`withQuotaLock()` dans `GET /api/invoices`, `GET /api/invoices/:id`,
+`POST /api/invoices` et `POST /api/invoices/:id/issue`. `PUT
+/api/invoices/:id` et `POST /api/invoices/:id/convert-to-legal` refusent
+purement et simplement (402, `FREELANCER_LOCK_ERROR`) de modifier ou de
+convertir un document verrouillé. Le Total Général de Cash (`GET
+/api/invoices`) exclut aussi ces documents de la somme — les compter aurait
+révélé leur montant par soustraction, exactement ce que le masquage cherche
+à éviter.
+
+Côté écran, [InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)
+affiche le corps du document flouté (`blur-sm`) sous une carte de
+verrouillage (cadenas, message, lien `mailto:` vers contact@) dès
+l'ouverture — ouvrir l'aperçu *est* déjà la tentative de consultation, donc
+le message est visible sans clic de plus ; Télécharger/Imprimer sont
+désactivés et Modifier est carrément absent du bandeau (l'éditeur ouvrirait
+sur des montants déjà masqués par le serveur). [CashManagement.tsx](src/components/cash/CashManagement.tsx)
+badge chaque ligne verrouillée (« Verrouillé », les deux colonnes de montant
+en pointillés gris) et ne garde que Supprimer parmi les actions de ligne —
+Émettre/Convertir/Modifier disparaissent, la suppression ne demandant pas de
+consulter les montants.
+
+`GET /api/cash/document-quota` porte les deux mécanismes sous un seul champ
+`permanent` : `false` pour l'ancien plafond d'essai (bloquant), `true` pour
+le quota permanent de Freelance — la carte Cash choisit son libellé
+(« Essai gratuit » contre « Offre Freelance ») sur ce booléen plutôt que sur
+un second appel.
+
+**Le 10ᵉ document du mois avertit le cabinet par e-mail, pas seulement
+l'écran.** `notifyFreelancerQuotaReached(company)` envoie à contact@ (nom,
+e-mail, téléphone du contact de l'entreprise, date) exactement quand le rang
+du document créé vaut le quota — jamais au-delà, donc une seule fois par
+mois : le document suivant a un rang de 11, pas de 10. Appelée depuis
+`POST /api/invoices` et `POST /api/invoices/:id/issue`, les deux routes où un
+document peut naître.
 
 **Les offres retirées restent dans la liste** (`legacy: true`) — `FREELANCE`,
-`EQUIPE`, `CROISSANCE`. Une entreprise inscrite sous l'ancien catalogue les
-porte encore dans sa fiche ; les effacer lui ferait perdre son libellé et sa
-limite de sièges du jour au lendemain. Elles ne sont simplement plus proposées,
-ni sur la page publique, ni à l'inscription (`isSellablePlan`), et la console ne
-garde leur option dans le `<select>` que pour l'entreprise qui les porte. Même
-règle de récupération que `normalizeBalance()` : on lit la forme ancienne, on ne
-la réécrit pas.
+`EQUIPE`, `CROISSANCE`, et désormais `RH_PAIE`/`FACTURATION`. Une entreprise
+inscrite sous l'ancien catalogue les porte encore dans sa fiche ; les effacer
+lui ferait perdre son libellé et sa limite de sièges du jour au lendemain.
+Elles ne sont simplement plus proposées, ni sur la page publique, ni à
+l'inscription (`isSellablePlan`), et la console ne garde leur option dans le
+`<select>` que pour l'entreprise qui les porte. Même règle de récupération
+que `normalizeBalance()` : on lit la forme ancienne, on ne la réécrit pas.
 
-**Une offre peut n'ouvrir qu'une partie de l'application.** `PlanMeta.modules`
-porte les vues qu'elle vend, désignées par l'identifiant que porte déjà leur
-entrée de barre latérale (`Cash`, `Clients`, `HR`…) — **absent = toutes**, ce
-qui est le cas de Freelancer et de Complet, et ce qui fait qu'ajouter une
-offre restreinte n'a touché à rien de ce qui existait. Les deux offres
-restreintes (RH & Paie, Facturation) suivent la même règle littérale que
-l'ancien pack Facturation à un siège : **seules les vues explicitement
-listées s'ouvrent**, Tableau de bord, Pointage, Ressources métier et
-Messages compris — ce n'est pas un oubli, c'est ce que l'utilisateur a
-demandé (« ken », *seulement*, dans sa description des deux offres). L'ordre
-compte dans chaque liste : Facturation déclare `Clients` avant `Cash` avant
-`Users`, parce que c'est le premier module de la liste qu'App.tsx ouvre par
-défaut, et c'est le fichier clients qu'on veut voir en arrivant — pas un
-formulaire de facture sans dossier encore choisi ; RH & Paie déclare `HR`
-avant `Payroll` avant `Users`, parce que c'est l'écran de travail quotidien
-de cette offre, la paie se générant moins souvent que les congés ne se
-posent, et Équipe étant un écran de réglage plutôt qu'un écran d'usage
-courant. `Users` (Équipe) figurant désormais dans ces deux offres — à la
-différence de l'ancien pack Facturation à un siège, qui l'excluait faute de
-personne à gérer — un cabinet sur l'une d'elles peut ajouter des
-collaborateurs, ce qui est précisément ce que le tarif par utilisateur
-supplémentaire vend.
+**Une offre peut n'ouvrir qu'une partie de l'application — plus aucune
+offre vendue aujourd'hui ne le fait, mais le mécanisme reste actif pour RH &
+Paie et Facturation, `legacy` désormais, et pour la prochaine offre
+restreinte qui voudrait le réutiliser.** `PlanMeta.modules` porte les vues
+qu'une offre vend, désignées par l'identifiant que porte déjà leur entrée de
+barre latérale (`Cash`, `Clients`, `HR`…) — **absent = toutes**, ce qui est
+le cas de Freelancer et de Complet, les deux seules offres en vente. RH &
+Paie et Facturation suivaient la même règle littérale que l'ancien pack
+Facturation à un siège : **seules les vues explicitement listées
+s'ouvrent**, Tableau de bord, Pointage, Ressources métier et Messages
+compris — ce n'était pas un oubli, c'est ce que l'utilisateur avait demandé
+(« ken », *seulement*, dans sa description des deux offres) avant qu'elles
+ne soient retirées de la vente. L'ordre comptait dans chaque liste :
+Facturation déclarait `Clients` avant `Cash` avant `Users`, parce que c'est
+le premier module de la liste qu'App.tsx ouvre par défaut, et c'est le
+fichier clients qu'on veut voir en arrivant — pas un formulaire de facture
+sans dossier encore choisi ; RH & Paie déclarait `HR` avant `Payroll` avant
+`Users`, parce que c'est l'écran de travail quotidien de cette offre, la
+paie se générant moins souvent que les congés ne se posent, et Équipe étant
+un écran de réglage plutôt qu'un écran d'usage courant. Ces deux listes
+restent inchangées sur les entrées `legacy` de plans.ts — une entreprise
+déjà inscrite sous l'une d'elles garde exactement le même périmètre.
 
-**`Parrainage` figure en dernier dans les deux listes**, à côté de `Users` —
-contrairement aux autres vues restreintes, ce n'est pas une fonctionnalité du
-métier mais l'abonnement de l'entreprise lui-même qui est en jeu
-(`canRefer`/`settleReferralOnPayment()`, voir « Parrainage » plus bas), donc
-il n'y avait aucune raison de le réserver aux deux offres généralistes :
-n'importe quel abonnement `ACTIVE` peut parrainer, quelle que soit l'offre
-qu'il vend. Manquait initialement des deux listes — l'écran restait donc
-invisible sur RH & Paie et Facturation alors que la logique serveur
-(`/api/referral`, gardée par `MANAGE_USERS` et par `PLAN_MODULE_ROUTES` qui
-mappe déjà `/api/referral` sur `Parrainage`) n'avait jamais rien d'autre à
-changer pour l'ouvrir.
+**`Parrainage` figurait en dernier dans les deux listes**, à côté de
+`Users` — contrairement aux autres vues restreintes, ce n'est pas une
+fonctionnalité du métier mais l'abonnement de l'entreprise lui-même qui est
+en jeu (`canRefer`/`settleReferralOnPayment()`, voir « Parrainage » plus
+bas), donc il n'y avait aucune raison de le réserver aux offres
+généralistes : n'importe quel abonnement `ACTIVE` peut parrainer, quelle que
+soit l'offre qu'il vend. Manquait initialement des deux listes — l'écran
+restait donc invisible sur RH & Paie et Facturation alors que la logique
+serveur (`/api/referral`, gardée par `MANAGE_USERS` et par
+`PLAN_MODULE_ROUTES` qui mappe déjà `/api/referral` sur `Parrainage`)
+n'avait jamais rien d'autre à changer pour l'ouvrir.
 
 L'éditeur de document reste capable de se passer du fichier clients : il
 demande `hasPermission('VIEW_CLIENTS')` — qui consulte déjà l'offre — et sans
@@ -590,16 +653,19 @@ pas — un collaborateur en première connexion sans ce droit retombe donc sur
 la même chaîne de secours qu'un compte sur une offre qui ne vend pas Équipe,
 plutôt que sur « section en cours de développement ».
 
-**Le plafond de documents est ce que lève l'abonnement — aucune offre du
-catalogue actuel n'en pose un.** `PlanMeta.trialDocumentQuota` plafonne les
-documents **émis** par mois tant que l'entreprise n'est pas `ACTIVE` ;
-`documentQuotaFor()` rend `null` dès qu'elle l'est — c'est précisément ce
-qu'on vend. L'ancien pack Facturation à un siège en portait un (10/mois) ;
-le pack Facturation qui l'a remplacé n'en a délibérément pas, comme les
-trois autres offres — rien dans la demande n'en redemandait un, et le champ
-reste disponible pour la prochaine offre qui en aura besoin. Trois
-précisions qui décident du comportement, pour l'offre qui viendrait en
-poser un :
+**Le plafond de documents *d'essai* est ce que lève l'abonnement — aucune
+offre du catalogue actuel n'en pose un.** `PlanMeta.trialDocumentQuota`
+plafonne les documents **émis** par mois tant que l'entreprise n'est pas
+`ACTIVE` ; `documentQuotaFor()` rend `null` dès qu'elle l'est — c'est
+précisément ce qu'on vend. L'ancien pack Facturation à un siège en portait un
+(10/mois) ; ni Complet ni les deux offres `legacy` qu'il a remplacées n'en
+ont — rien dans la demande n'en redemandait un, et le champ reste disponible
+pour la prochaine offre qui en aura besoin. **Ne pas confondre avec le quota
+permanent de Freelance** (`monthlyDocumentQuota`, « Le quota mensuel de
+Freelance » ci-dessus) : celui-là ne dépend pas de `status`, ne bloque jamais
+la création, et vit dans `permanentDocumentQuotaFor()`, une fonction
+distincte. Trois précisions qui décident du comportement du plafond
+*d'essai*, pour l'offre qui viendrait un jour en poser un :
 
 - **Un brouillon ne compte pas** (`countsAgainstQuota` : tout sauf `DRAFT`).
   On en prépare autant qu'on veut ; c'est à l'**émission** que la place est
@@ -629,24 +695,22 @@ n'a jamais souscrit de quota de comptes portail et lui en imposer un
 casserait un portail déjà en service. Un `0` écrit sur la fiche, lui, veut bien
 dire zéro : c'est une valeur saisie, pas une absence.
 
-**`seatLimitError()` ne plafonne plus le back-office d'une offre dynamique.** RH & Paie, Facturation et Complet vendent déjà un siège de plus au-delà de `baseSeats` (`pricePerExtraUserDT`) — refuser sa création plutôt que le facturer n'avait pas de sens, et c'était le seul frein qui empêchait un cabinet de simplement grandir. `seatLimitError()` retourne donc `null` sans même regarder `seatLimit` dès que `!portal && sellablePlan?.pricePerExtraUserDT` — le siège se crée, et c'est le mail + la console plateforme ci-dessous qui portent l'information de facturation, plus une erreur bloquante. `company.seatLimit` reste écrit et affiché ailleurs (nombre demandé à l'inscription ou négocié, prix calculé dessus par `planPriceForSeats`) mais n'arrête plus `POST`/`PUT /api/users` pour ces trois offres. Freelancer (prix plat, un seul siège) et les offres retirées n'ont pas `pricePerExtraUserDT` : elles gardent le plafond dur, faute de tarif au siège pour facturer un compte de plus. Le portail client (`portalSeatLimit`) est **inchangé** — aucune offre ne vend de tarif par compte portail, donc aucune n'a de raison d'en laisser passer au-delà de sa limite.
+**`seatLimitError()` ne plafonne plus le back-office de Complet — et seulement Complet, à la demande explicite de l'utilisateur.** Une version antérieure de cette règle l'avait ouverte à toute offre dynamique (`sellablePlan?.pricePerExtraUserDT`, ce qui couvrait alors RH & Paie et Facturation aussi) ; une fois les deux retirées de la vente (`legacy: true`, voir « Offres et sièges »), `SELLABLE_PLANS.find(...)` ne les trouve plus et cette condition générique serait revenue, par accident, au même résultat que la restriction explicite ci-dessous — mais s'appuyer sur cet accident aurait laissé la porte ouverte à ce qu'une future offre dynamique hérite du plafond souple sans qu'on l'ait décidé. `planAllowsSeatOverage(plan)` (`plan === 'COMPLET'` seul) est donc la unique condition, posée après le calcul normal de `used`/`limit` : quand le panier concerné est le back-office et que l'offre l'autorise, `seatLimitError()` rend `null` (pas de refus) même une fois la limite atteinte — le panier portail, lui, reste ferme pour toutes les offres, Complet compris : ce n'est pas ce qui a été demandé d'assouplir. `company.seatLimit` reste écrit et affiché ailleurs (nombre demandé à l'inscription ou négocié, prix calculé dessus par `planPriceForSeats`) mais n'arrête plus `POST`/`PUT /api/users` pour Complet. RH & Paie et Facturation `legacy`, elles, retombent sur le plafond dur normal — leurs fiches existantes ne changent pas de comportement du seul fait d'être retirées de la vente.
 
-**Les trois offres dynamiques posent `portalSeatLimit: 0` au catalogue —
-aucun chiffre n'a été demandé pour ce panier-là, seul le tarif par
-utilisateur du back-office l'a été.** Zéro est le même défaut sûr que
-« aucune offre » ci-dessus : ça n'empêche personne de négocier un quota par
-fiche via `CompanyEditModal.tsx`, et ça n'invente pas un nombre qui
-tromperait un vrai client sur ce qu'il achète. Facturation et Complet
-ouvrent tous deux le module Clients (donc le portail client a un sens
-fonctionnel pour eux, contrairement à RH & Paie) — si un chiffre est
-souhaité pour ce panier, c'est une ligne à ajouter dans plans.ts, pas une
-correction de bug.
+**`notifySeatOverageIfNeeded(company, usedBefore, role, newUsername)`**, appelée juste après une création ou un changement de rôle réussi dans `POST /api/users` et `PUT /api/users/:id`, envoie un e-mail à contact@ (nom, e-mail, téléphone du contact, sièges souscrits, nom et date du nouveau compte, total de comptes back-office et combien au-delà du quota, et le **montant mensuel dû pour ce nombre d'utilisateurs** via `planPriceForSeats()` — la même fonction que la page Tarifs et la confirmation de paiement, jamais un second calcul qui pourrait diverger) plutôt que de bloquer — un dépassement se facture après coup plutôt que d'arrêter une création en plein travail. `usedBefore` est le nombre de comptes back-office *avant* la création qui vient d'aboutir : `usedBefore >= limit` dit que ce nouveau compte-là dépasse, lui, le quota. `POST /api/users` écrit aussi un `createdAt` sur chaque compte créé (absent avant ce champ — un compte plus ancien reste simplement sans date, même règle de récupération de forme héritée que `normalizeBalance()`), pour que la console plateforme puisse dater chaque compte sans dépendre du mail.
 
-**Créer un utilisateur au-delà de `baseSeats` avertit le cabinet, par mail et dans la console plateforme — c'est le siège que `pricePerExtraUserDT` facture en plus.** `POST /api/users` écrit désormais un `createdAt` sur chaque compte créé (absent avant ce champ — un compte plus ancien reste simplement sans date, même règle de récupération de forme héritée que `normalizeBalance()`), et, juste après la création, compare le nombre de comptes back-office (rôle ≠ `CLIENT`, le portail comptant dans son propre panier) à `baseSeats` de l'offre. Ce n'est vérifié — et ce mail n'est envoyé — que pour une offre **dynamique** (`meta.pricePerExtraUserDT` défini : RH & Paie, Facturation, Complet) ; Freelancer (un seul siège, prix plat) et les offres retirées n'ont aucun concept de siège supplémentaire à signaler. Le mail part vers `contact@taches-and-cash.com` — la même adresse interne que la notification d'inscription, et non vers l'entreprise elle-même : c'est le cabinet qui gère la plateforme qui doit savoir qu'il y a un siège de plus à facturer, pas son client. Il porte aussi le **montant mensuel dû pour le nombre d'utilisateurs actuel** (`planPriceForSeats(meta, seatUsers.length)` — la même fonction que la page Tarifs et la confirmation de paiement, jamais un second calcul qui pourrait diverger), pas seulement le fait qu'un siège de plus a été créé : c'est ce montant-là qu'il faut effectivement encaisser, une fois `seatLimitError()` levé pour ce panier (voir plus haut) — sans plafond, chaque compte de plus doit se retrouver dans une facture, pas seulement dans un compteur. Best-effort et jamais bloquant (`sendMail(...).catch(() => {})`), même idiome que les autres mails internes de cette route.
+Exemple : un compte Complet à 1 siège souscrit ; le deuxième utilisateur créé déclenche le mail avec son nom et sa date de création, le total de comptes (2) et le montant mensuel dû pour ce nombre (`planPriceForSeats(meta, 2)` = 30 DT) — le premier, lui, n'en déclenche aucun puisqu'il était inclus.
 
-Exemple donné : un compte Complet démarre avec ses 5 sièges inclus ; le sixième utilisateur créé, quatre mois plus tard, déclenche le mail avec son nom et sa date de création — les cinq premiers, eux, n'en déclenchent aucun.
+**La console plateforme (`PlatformUsersModal.tsx`) rend une information voisine sans attendre un mail** — combien de comptes sont inclus dans `baseSeats` et lesquels sont « en supplément » (badge sur chaque ligne au-delà), plus un bandeau avec le montant mensuel dû, calculés côté client depuis `planMeta(plan).baseSeats`/`pricePerExtraUserDT`. Cet affichage reste générique à toute offre dynamique (pas restreint à Complet comme `seatLimitError()`) : il ne fait que *décrire* la tarification par siège d'une offre, ce qui reste vrai de RH & Paie/Facturation `legacy` pour les entreprises qui les portent encore, même si leur panier back-office à elles reste à plafond dur.
 
-**La console plateforme (`PlatformUsersModal.tsx`) rend la même information sans attendre un mail.** Elle reçoit désormais `plan` depuis la ligne entreprise déjà chargée par `PlatformAdmin.tsx`, et calcule côté client — sur les mêmes règles que le serveur, `baseSeats`/`pricePerExtraUserDT` de `planMeta(plan)` — combien de comptes sont inclus et lesquels sont en supplément : les comptes back-office triés par `createdAt` (une chaîne vide, pour un compte antérieur à ce champ, se trie avant tout le reste — c'est correct ici, puisqu'un tel compte a nécessairement été créé le premier), tout ce qui dépasse `baseSeats` porte le badge « Siège supplémentaire ». Chaque ligne affiche aussi sa date de création (« Créé le JJ/MM/AAAA », ou « Date de création inconnue » pour un compte hérité) — c'est le « geddch 3ml men compte w date de creation » demandé : combien de comptes, et depuis quand chacun existe, visible depuis la console sans dépendre du mail. Un bandeau au-dessus de la liste affiche en plus le **montant mensuel dû pour le nombre d'utilisateurs actuel** (même `planPriceForSeats()` que le mail et que le reste de l'app) — puisque la création n'est plus plafonnée à `seatLimit` pour ces offres, ce montant n'est plus un repère théorique mais ce qu'il faut réellement facturer chaque mois, et il évolue de lui-même à chaque compte créé ou supprimé sans qu'aucun humain n'ait à le recalculer.
+**Complet pose `portalSeatLimit: 0` au catalogue — aucun chiffre n'a été
+demandé pour ce panier-là, seul le tarif par utilisateur du back-office l'a
+été.** Zéro est le même défaut sûr que « aucune offre » ci-dessus : ça
+n'empêche personne de négocier un quota par fiche via
+`CompanyEditModal.tsx`, et ça n'invente pas un nombre qui tromperait un vrai
+client sur ce qu'il achète. Complet ouvre le module Clients (donc le
+portail client a un sens fonctionnel) — si un chiffre est souhaité pour ce
+panier, c'est une ligne à ajouter dans plans.ts, pas une correction de bug.
 
 ### Parrainage
 
@@ -1198,7 +1262,7 @@ plus désigner la même date. Un compte en essai ou actif sans échéance affich
 qu'on cherche pour relancer, et un tiret la laissait passer inaperçue. Un compte
 expiré ou suspendu garde le tiret — il n'y a rien à y échoir.
 
-`PUT /api/platform/companies/:id` travaille sur une **liste blanche** : nom, contact, email, téléphone, secteur, sièges, fin d'essai. `status` et `plan` en sont volontairement absents — ils se changent par la confirmation de paiement, qui porte ses propres effets de bord ; les accepter ici ouvrirait un second chemin capable d'activer un compte sans paiement.
+`PUT /api/platform/companies/:id` travaille sur une **liste blanche** : nom, contact, email, téléphone, secteur, sièges, fin d'essai, et `documentQuotaOverride` (la dérogation au quota mensuel de Freelance — voir « Le quota mensuel de Freelance » dans « Offres et sièges » ; sans effet sur une autre offre, donc sans risque à laisser posée si l'entreprise change de plan). `status` et `plan` en sont volontairement absents — ils se changent par la confirmation de paiement, qui porte ses propres effets de bord ; les accepter ici ouvrirait un second chemin capable d'activer un compte sans paiement.
 
 `DELETE /api/platform/companies/:id` supprime **le tenant entier** : `deleteCompany()` purge chaque collection portant un `companyId`, plus `settingsByCompany` (indexé par `id`, que le filtre générique n'attrape pas) et, sous Postgres, `leave_balances` et `settings` qui ont leur propre colonne `company_id` — le tout dans une transaction, une purge à moitié faite laisserait des utilisateurs sans entreprise. `orders` n'est jamais touché : une demande d'accès précède l'entreprise et ne porte pas de `companyId`.
 
@@ -1259,6 +1323,12 @@ Le seul graphique restant sur ce tableau de bord est le nuage de points de [Clie
 Le per-client breakdown ([ClientBreakdown.tsx](src/components/dashboard/ClientBreakdown.tsx)) reste une **table, pas un graphique** — plusieurs mesures par ligne plus un drill-down, c'est du travail tabulaire. Les montants y utilisent `formatCostTND` partout, y compris le total de ligne, pour qu'un total et ses parties ne soient jamais affichés à des précisions différentes.
 
 **Trois tables ont maintenant des en-têtes de colonne cliquables avec flèche de tri** ([ClientProfitability.tsx](src/components/dashboard/ClientProfitability.tsx), [TaskIntelligence.tsx](src/components/dashboard/TaskIntelligence.tsx), [ClientBreakdown.tsx](src/components/dashboard/ClientBreakdown.tsx)) — le même idiome que [EmployeeTable.tsx](src/components/dashboard/EmployeeTable.tsx) pratiquait déjà seul (`ArrowUpDown` au repos, `ArrowUp`/`ArrowDown` une fois la colonne active, un second clic inverse le sens). Les deux premières avaient un `<select>` de tri à la place — retiré, parce que deux façons de faire la même chose sur le même écran finissent par ne plus être lues comme équivalentes. Une valeur `null` (taux de marge « n/a », honoraires/heure indéfini) va **toujours en fin de liste, quel que soit le sens du tri** — elle n'est ni la plus grande ni la plus petite, elle est hors classement, et la mêler au tri numérique la ferait lire comme un zéro qu'elle n'est pas.
+
+**Le drill-down « Tâches réalisées » d'`ClientBreakdown.tsx` a désormais son propre tri, indépendant du tableau des clients au-dessus.** Chaque client ouvert affiche ses tâches (Date, Collaborateur, Activité, Mission, Type de tâche, Durée, Coût, Statut) ; les huit colonnes sont maintenant cliquables avec le même idiome `ArrowUpDown`/`ArrowUp`/`ArrowDown`, `detailSortField`/`detailSortDirection` étant partagé par tous les tiroirs ouverts à la fois plutôt qu'un état par client — la même simplification que fait déjà `sortField` pour le tableau extérieur. `Coût` est `null` pour une tâche sans taux configuré et va en fin de liste quel que soit le sens, même règle que partout ailleurs. `Date` compare `t.date` (un `DD/MM/YYYY` écrit par le serveur) réordonné en `YYYY-MM-DD` avant la comparaison de chaînes — le même idiome `toIsoDateKey` que `TimeTrackingTable.tsx`, pour ne jamais faire de round-trip par `Date`.
+
+**Une ligne dépliée — mission dans `TaskIntelligence.tsx`, client dans `ClientBreakdown.tsx` — se colore pendant qu'elle est ouverte, et redevient neutre à la fermeture.** La ligne cliquée passe en `bg-blue-50/70` (et son survol en `bg-blue-50`), et son contenu déplié (les types de tâche d'une mission, le bloc Intervenants/Tâches réalisées d'un client) en `bg-blue-50/40` — un ton plus clair pour rester lisible sous le texte. C'est un simple ternaire sur `isOpen`/`open`, donc replier la ligne revient exactement à l'état neutre d'avant (`hover:bg-gray-50`) sans code séparé pour « réinitialiser » la couleur. Le bleu est choisi parce que c'est déjà l'accent générique de l'app (Cash-Facturation, l'icône de `EmployeeTasksModal.tsx`…), jamais un des jetons réservés `run`/`done`/`pause`/`late`/`admin`/`collab`.
+
+**`EmployeeTasksModal.tsx` (« Clients traités », ouvert depuis une ligne du tableau de performance) affichait encore une colonne « Pôle » — restée en toutes lettres alors que `TaskIntelligence.tsx` et `ClientBreakdown.tsx` disent déjà « Mission » ailleurs sur le même tableau de bord.** Renommée en « Mission », et une colonne « Type de tâche » ajoutée juste à côté (`t.taskType`, déjà renvoyé par `/api/kpi/employee-tasks` mais jusque-là ignoré côté écran) — les deux informations qui identifient une tâche vont ensemble, comme dans les deux autres cartes.
 
 **Le tableau de bord Admin se lit maintenant comme une suite de questions, pas une pile de cartes.** `SectionHeading` (dans `AdminDashboard.tsx`, pas un fichier à part — trop petit pour ça) place un intitulé au-dessus de chaque groupe de cartes qui répond ensemble à une seule question : « 01 · Vue d'ensemble — Comment va l'entreprise ? », « 02 · Rentabilité — Où est l'argent ? », « 03 · Opérations — Où part le temps ? », « 04 · Clients & équipe — Qui fait quoi ? ». C'est un cran au-dessus des en-têtes de carte existants (« RENTABILITÉ DU PORTEFEUILLE », « MISSIONS & TYPES DE TÂCHE »…), qui eux nomment une carte — celui-ci nomme le groupe, et le titre est la question elle-même plutôt qu'un nom de module.
 
@@ -1481,6 +1551,10 @@ Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use
 ### Page d'accueil publique
 
 [Landing.tsx](src/pages/Landing.tsx) porte trois vues (`home` / `tarifs` / `apropos`) sans routeur, comme le reste de l'application. La page valorise les **douze modules** — pas une sélection : une page qui ne montre que le pointage laisse croire que le reste n'existe pas. Six d'entre eux ont leur section en grand (pointage, facturation) ou leur bandeau (parrainage) ; les six autres passent par [ModuleExplorer.tsx](src/components/landing/ModuleExplorer.tsx), un panneau à onglets — six sections de plus en pleine largeur feraient une page qu'on ne finit pas, et ces écrans se comparent. Ses maquettes sont **dessinées en HTML**, pas exportées en images : elles suivent les tokens de la charte, restent nettes à tout zoom, et un libellé qui change dans l'application se corrige sans repasser par un export.
+
+**La grille de tarifs ne montre plus que deux cartes, Freelancer et Complet** — RH & Paie et Facturation, retirées de la vente (voir « Offres et sièges »), disparaissent automatiquement puisque les cartes sont dérivées de `SELLABLE_PLANS`. Le conteneur est passé de `xl:grid-cols-4` (`max-w-[1240px]`) à `sm:grid-cols-2` (`max-w-[820px]`) — deux cartes perdues dans une rangée pensée pour quatre lisaient comme un catalogue à moitié vide plutôt que comme un choix simple. La carte Freelancer porte une ligne « 10 factures/mois incluses. Besoin de plus ? 15 DT/mois pour illimité » (le lien pointe vers `mailto:${CONTACT_EMAIL}`, la même adresse que le reste de la page) — voir « Le quota mensuel de Freelance » côté serveur pour le mécanisme qu'elle annonce. Les deux cartes portent aussi une note verte « 2 mois offerts en paiement annuel », à la demande explicite de l'utilisateur — une note, pas un calculateur ou un bouton mensuel/annuel : aucun paiement en ligne n'existe dans cette application, le tarif annuel se négocie hors app comme le reste de la facturation.
+
+**Le titre et le sous-titre du hero ont été réécrits à la demande explicite de l'utilisateur.** Le `<h1>` était scindé en deux morceaux (« Logiciel de gestion — » en texte plein, puis « pour tous les professionnels des services. » dans un double `<span className="relative">…<span className="relative z-10">` vestige d'une décoration de soulignement déjà retirée — voir plus haut, « The decorative underline bar… ») ; c'est maintenant une phrase unique, sans tiret ni span imbriqué, ces derniers ne servant plus à rien depuis que la décoration qu'ils portaient est partie. Le sous-titre (un seul `<p>`, « Suivi du temps, missions, échéances fiscales… ») est devenu trois lignes dans un seul bloc `Reveal` (une seule animation d'entrée pour les trois, puisqu'elles forment un seul message) : une accroche en gras navy (« Gérez mieux, facturez plus, gagnez en rentabilité »), une ligne d'audience plus petite mais toujours en semi-gras (« Pour les comptables, auditeurs, fiscalistes… »), puis le corps du sous-titre d'origine reformulé (« Centralisez vos missions, pilotez vos équipes… »).
 
 **« À propos » (`view === 'apropos'`, `goToAPropos()`) reprend le contenu réel remis par l'utilisateur** — histoire/constat, mission, quatre piliers (`ABOUT_PILLARS`), trois chiffres d'impact — pas du remplissage, même règle que le reste des maquettes de cette page. Elle réutilise les briques déjà en place plutôt que d'en inventer de nouvelles : `Reveal`/`CountUp` pour les animations (`CountUp` n'avait encore aucun appelant — les deux premiers chiffres d'impact, 12 modules et 100 % de conformité, sont son premier usage réel), la même carte à icône que la section Fonctionnalités pour les piliers, et la carte navy déjà utilisée pour les offres mises en avant pour la citation de mission. Le bandeau CTA partagé en bas de page (rendu après les trois vues, pas dans leur ternaire) porte désormais un titre et un sous-titre à trois branches (`view === 'apropos'` ajouté à côté de `'home'`/`'tarifs'`) et un second bouton « Découvrir les modules » (`goToAnchor('modules')`) qui n'apparaît que sur cette vue — les deux autres vues gardent un seul bouton, inchangé. Le lien de nav vit entre Tarifs et Contact ; le lien de pied de page vit dans la colonne Entreprise, au-dessus de Contact.
 

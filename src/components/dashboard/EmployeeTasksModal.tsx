@@ -198,7 +198,8 @@ export const EmployeeTasksModal: React.FC<EmployeeTasksModalProps> = ({ employee
                       <tr className="text-[10px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
                         <th className="px-4 py-2 font-semibold">Date</th>
                         <th className="px-4 py-2 font-semibold">Activité</th>
-                        <th className="px-4 py-2 font-semibold">Pôle</th>
+                        <th className="px-4 py-2 font-semibold">Mission</th>
+                        <th className="px-4 py-2 font-semibold">Type de tâche</th>
                         <th className="px-4 py-2 font-semibold whitespace-nowrap">Début → Fin</th>
                         <th className="px-4 py-2 font-semibold">Durée</th>
                         <th className="px-4 py-2 font-semibold">Statut</th>
@@ -212,6 +213,9 @@ export const EmployeeTasksModal: React.FC<EmployeeTasksModalProps> = ({ employee
                             {t.description || <span className="text-gray-400 italic">Sans description</span>}
                           </td>
                           <td className="px-4 py-2 text-gray-500">{t.pole || '—'}</td>
+                          <td className="px-4 py-2 text-gray-500 max-w-[180px] truncate" title={t.taskType}>
+                            {t.taskType || <span className="text-gray-300">—</span>}
+                          </td>
                           <td className="px-4 py-2 font-mono text-gray-500 whitespace-nowrap">
                             {t.heureDebut || '—'} → {t.heureFin || <span className="text-gray-300">—</span>}
                           </td>

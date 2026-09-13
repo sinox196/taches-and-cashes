@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
-import { X, Printer, Download, Pencil, Trash2 } from 'lucide-react';
+import { X, Printer, Download, Pencil, Trash2, Lock } from 'lucide-react';
 import { amountToFrenchWords } from '../../utils/amountToWords';
 import { useAuth } from '../../context/AuthContext';
 import { downloadInvoicePdf, printInvoicePdf, CompanyBlock } from './invoicePdf';
 import { normalizeDisbursementLines } from '../../constants/disbursements';
+import { FREELANCER_UPGRADE_PRICE_DT } from '../../constants/plans';
+
+/** Même adresse que le lien « Contact » de la page publique et le repli de sendMail() côté serveur. */
+const CONTACT_EMAIL = 'contact@taches-and-cash.com';
 
 const money = (v: number) =>
   (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -59,6 +63,13 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
   const custom = Object.entries(invoice.customFields || {});
   const currency = invoice.currency || 'TND';
   const currencySuffix = CURRENCY_SUFFIX[currency] || currency;
+  // Freelance, quota mensuel dépassé — le serveur a déjà masqué les montants
+  // (voir maskLockedInvoice côté server.ts) ; ce drapeau ne fait que dessiner
+  // le flou et le message, il ne décide de rien côté sécurité.
+  const locked = !!invoice.quotaLocked;
+  /** Empêche l'action (elle ne servirait de toute façon à rien sur des
+   *  montants masqués) — l'overlay ci-dessous porte déjà le message. */
+  const guarded = (action: () => void) => () => { if (!locked) action(); };
   // Même normalisation que l'éditeur et le PDF : l'aperçu et le document
   // imprimé ne peuvent pas afficher des débours différents.
   const debLines = normalizeDisbursementLines(invoice);
@@ -83,7 +94,10 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
             {invoice.title} {displayNumber(invoice)}
           </h2>
           <div className="flex items-center gap-2">
-            {onEdit && (
+            {/* Modifier reste caché (au lieu de désactivé) sur un document
+                verrouillé : l'éditeur ouvrirait sur des montants déjà masqués
+                par le serveur, une confusion pire qu'un bouton absent. */}
+            {onEdit && !locked && (
               <button
                 onClick={() => onEdit(invoice)}
                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
@@ -100,16 +114,18 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               </button>
             )}
             <button
-              onClick={() => downloadInvoicePdf(invoice, block)}
-              title="Enregistrer le document sur votre poste"
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+              onClick={guarded(() => downloadInvoicePdf(invoice, block))}
+              title={locked ? 'Document verrouillé — voir le message ci-dessous' : 'Enregistrer le document sur votre poste'}
+              disabled={locked}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               <Download className="w-3.5 h-3.5" /> Télécharger PDF
             </button>
             <button
-              onClick={() => printInvoicePdf(invoice, block)}
-              title="Imprimer — choisissez « Enregistrer au format PDF » pour obtenir un PDF"
-              className="px-3 py-1.5 bg-navy text-white rounded-lg text-[12px] font-medium hover:bg-navy-hover flex items-center gap-1.5"
+              onClick={guarded(() => printInvoicePdf(invoice, block))}
+              title={locked ? 'Document verrouillé — voir le message ci-dessous' : 'Imprimer — choisissez « Enregistrer au format PDF » pour obtenir un PDF'}
+              disabled={locked}
+              className="px-3 py-1.5 bg-navy text-white rounded-lg text-[12px] font-medium hover:bg-navy-hover flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-navy"
             >
               <Printer className="w-3.5 h-3.5" /> Imprimer / PDF
             </button>
@@ -119,7 +135,8 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
           </div>
         </div>
 
-        <div className="p-8 space-y-6">
+        <div className="relative">
+        <div className={`p-8 space-y-6 ${locked ? 'blur-sm select-none pointer-events-none' : ''}`}>
           <div className="flex items-start justify-between gap-6">
             {/* Header carries the company name alone, in bold, stacked under
                 the logo — address, MF and contact details are printed once in
@@ -345,6 +362,28 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
               )}
             </div>
           </div>
+        </div>
+        {/* Overlay plutôt que popup séparée : ouvrir cet aperçu *est* déjà la
+            tentative de consultation, donc le message est visible dès
+            l'ouverture, sans clic supplémentaire pour le déclencher. */}
+        {locked && (
+          <div className="no-print absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[1px] rounded-b-xl">
+            <div className="max-w-sm mx-4 bg-white border border-amber-200 rounded-xl shadow-lg p-5 text-center">
+              <Lock className="w-8 h-8 text-amber-500 mx-auto mb-2" />
+              <p className="text-[13.5px] font-semibold text-gray-900 mb-1">Vous avez dépassé la limite du mois</p>
+              <p className="text-[12.5px] text-gray-600 mb-4">
+                L'offre Freelance inclut 10 documents par mois. Passez à l'offre illimitée
+                ({FREELANCER_UPGRADE_PRICE_DT} DT/mois) pour consulter, modifier, télécharger et imprimer ce document.
+              </p>
+              <a
+                href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Passer à l'offre Freelance illimitée")}`}
+                className="inline-block px-4 py-2 bg-navy text-white rounded-lg text-[12.5px] font-medium hover:bg-navy-hover"
+              >
+                Contactez-nous
+              </a>
+            </div>
+          </div>
+        )}
         </div>
       </div>
     </div>

@@ -19,6 +19,33 @@ const fieldRaw = (c: any, field: SortField): number | string => {
   }
 };
 
+/** Per-client drill-down task table (« Tâches réalisées ») — its own, independent sort. */
+type DetailSortField = 'date' | 'userName' | 'description' | 'mission' | 'taskType' | 'dureeSeconds' | 'cost' | 'statut';
+
+/**
+ * `t.date` is a server-written DD/MM/YYYY display string (see CLAUDE.md « Date
+ * formats are mixed ») — rearranged to YYYY-MM-DD it sorts correctly as a
+ * plain string, no `Date` round-trip needed (same idiom as
+ * TimeTrackingTable.tsx's `toIsoDateKey`).
+ */
+const toIsoDateKey = (frDate: string): string => {
+  const [day, month, year] = (frDate || '').split('/');
+  return day && month && year ? `${year}-${month}-${day}` : '';
+};
+
+const detailFieldRaw = (t: any, field: DetailSortField): number | string | null => {
+  switch (field) {
+    case 'date': return toIsoDateKey(t.date);
+    case 'userName': return (t.userName || '').toLowerCase();
+    case 'description': return (t.description || '').toLowerCase();
+    case 'mission': return (t.mission || '').toLowerCase();
+    case 'taskType': return (t.taskType || '').toLowerCase();
+    case 'statut': return t.statut || '';
+    case 'cost': return t.cost ?? null;
+    default: return t[field] ?? 0;
+  }
+};
+
 interface ClientBreakdownProps {
   clients: any[];
   /** Dashboard filters, replayed when fetching a client's tasks. */
@@ -122,6 +149,41 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
       ? <ArrowUp className="w-3 h-3 text-navy inline ml-1" />
       : <ArrowDown className="w-3 h-3 text-navy inline ml-1" />;
   };
+
+  // Shared by every open drill-down table rather than one state per client —
+  // the same simplification the outer table's single sortField already makes.
+  const [detailSortField, setDetailSortField] = useState<DetailSortField>('dureeSeconds');
+  const [detailSortDirection, setDetailSortDirection] = useState<SortDirection>('desc');
+
+  const handleDetailSort = (field: DetailSortField) => {
+    if (detailSortField === field) {
+      setDetailSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setDetailSortField(field);
+      setDetailSortDirection(field === 'date' || field === 'userName' || field === 'mission' || field === 'taskType' || field === 'description' ? 'asc' : 'desc');
+    }
+  };
+
+  const renderDetailSortIcon = (field: DetailSortField) => {
+    if (detailSortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 group-hover/th:text-gray-500 inline ml-1 transition-colors" />;
+    return detailSortDirection === 'asc'
+      ? <ArrowUp className="w-3 h-3 text-navy inline ml-1" />
+      : <ArrowDown className="w-3 h-3 text-navy inline ml-1" />;
+  };
+
+  // `cost` can be null (no employer rate configured) — always last, whichever
+  // direction is picked, same rule as every other money column in this app.
+  const sortDetailTasks = (tasks: any[]) => [...tasks].sort((a, b) => {
+    const av = detailFieldRaw(a, detailSortField);
+    const bv = detailFieldRaw(b, detailSortField);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string') {
+      return detailSortDirection === 'asc' ? av.localeCompare(bv as string) : (bv as string).localeCompare(av);
+    }
+    return detailSortDirection === 'asc' ? (av as number) - (bv as number) : (bv as number) - (av as number);
+  });
 
   // Hundreds of clients would mean hundreds of DOM rows; show the costliest
   // first and reveal more on demand.
@@ -254,7 +316,7 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                 <React.Fragment key={key}>
                   <tr
                     onClick={() => toggleRow(client)}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors group"
+                    className={`cursor-pointer transition-colors group ${isOpen ? 'bg-blue-50/70 hover:bg-blue-50' : 'hover:bg-gray-50'}`}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -343,7 +405,7 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
 
                   {isOpen && (
                     <tr>
-                      <td colSpan={isAdmin ? 9 : 4} className="px-4 pb-4 pt-1 bg-gray-50/50">
+                      <td colSpan={isAdmin ? 9 : 4} className="px-4 pb-4 pt-1 bg-blue-50/40">
                         {/* Who worked on this client */}
                         <div className="mb-3">
                           <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
@@ -382,18 +444,36 @@ export const ClientBreakdown: React.FC<ClientBreakdownProps> = ({ clients, filte
                           <table className="w-full text-left text-[12px]">
                             <thead>
                               <tr className="text-[10px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
-                                <th className="px-3 py-2 font-semibold">Date</th>
-                                <th className="px-3 py-2 font-semibold">Collaborateur</th>
-                                <th className="px-3 py-2 font-semibold">Activité</th>
-                                <th className="px-3 py-2 font-semibold">Mission</th>
-                                <th className="px-3 py-2 font-semibold">Type de tâche</th>
-                                <th className="px-3 py-2 font-semibold">Durée</th>
-                                {isAdmin && <th className="px-3 py-2 font-semibold text-right">Coût</th>}
-                                <th className="px-3 py-2 font-semibold">Statut</th>
+                                <th onClick={() => handleDetailSort('date')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                  Date {renderDetailSortIcon('date')}
+                                </th>
+                                <th onClick={() => handleDetailSort('userName')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                  Collaborateur {renderDetailSortIcon('userName')}
+                                </th>
+                                <th onClick={() => handleDetailSort('description')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                  Activité {renderDetailSortIcon('description')}
+                                </th>
+                                <th onClick={() => handleDetailSort('mission')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                  Mission {renderDetailSortIcon('mission')}
+                                </th>
+                                <th onClick={() => handleDetailSort('taskType')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                  Type de tâche {renderDetailSortIcon('taskType')}
+                                </th>
+                                <th onClick={() => handleDetailSort('dureeSeconds')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                  Durée {renderDetailSortIcon('dureeSeconds')}
+                                </th>
+                                {isAdmin && (
+                                  <th onClick={() => handleDetailSort('cost')} className="px-3 py-2 font-semibold text-right cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                    Coût {renderDetailSortIcon('cost')}
+                                  </th>
+                                )}
+                                <th onClick={() => handleDetailSort('statut')} className="px-3 py-2 font-semibold cursor-pointer select-none group/th hover:bg-gray-100 transition-colors">
+                                  Statut {renderDetailSortIcon('statut')}
+                                </th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                              {(loaded?.tasks ?? []).map((t: any) => (
+                              {sortDetailTasks(loaded?.tasks ?? []).map((t: any) => (
                                 <tr key={t.id} className="hover:bg-gray-50/60">
                                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{t.date}</td>
                                   <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{t.userName}</td>
