@@ -12,15 +12,30 @@
  */
 
 /**
- * `gemini-flash-latest` est un alias maintenu par Google, pas un modèle figé
- * — `gemini-2.0-flash` (le choix initial ici) a été retiré du catalogue en
- * quelques mois à peine, avec un message d'erreur renvoyant vers la version
- * suivante. Épingler un nom de modèle précis referait exactement ce piège ;
- * l'alias, lui, suit le modèle Flash recommandé du moment sans qu'il faille
- * revenir toucher ce fichier. `GEMINI_MODEL` reste le repli si l'alias
- * lui-même venait à disparaître ou à mal convenir.
+ * Un alias Google maintenu, pas un modèle figé — `gemini-2.0-flash` (le choix
+ * initial ici) a été retiré du catalogue en quelques mois à peine, avec un
+ * message d'erreur renvoyant vers la version suivante. Épingler un nom de
+ * modèle précis referait exactement ce piège ; l'alias suit le modèle
+ * recommandé du moment sans qu'il faille revenir toucher ce fichier.
+ * `GEMINI_MODEL` reste le repli si l'alias lui-même venait à disparaître ou
+ * à mal convenir.
+ *
+ * **`-lite-latest`, pas `-flash-latest`.** Vérifié en direct : `gemini-flash-latest`
+ * pointe aujourd'hui vers un modèle Flash « preview » de dernière génération
+ * dont le palier gratuit n'accorde que **20 requêtes par JOUR** — un 429
+ * remonté par un cabinet après quelques clics était donc ce quota journalier
+ * épuisé, pas une surcharge passagère, et aucune nouvelle tentative ne peut y
+ * faire quoi que ce soit avant le lendemain. `gemini-flash-lite-latest`
+ * pointe vers un modèle « lite » plus établi, dont le palier gratuit est
+ * mesuré à **15 requêtes par MINUTE** — un quota qui se reconstitue en
+ * quelques secondes, largement suffisant pour un bouton qu'on clique de
+ * temps en temps plutôt qu'un flux continu. Vérifié aussi que la qualité de
+ * l'analyse en français ne s'en trouve pas dégradée pour ce cas d'usage
+ * précis (résumer des agrégats déjà calculés), et que ce modèle ne consomme
+ * aucun jeton de « réflexion » interne (voir plus bas) — un `usageMetadata`
+ * sans `thoughtsTokenCount`, contrairement au modèle Flash complet.
  */
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
 
 export function aiEnabled(): boolean {
   return !!process.env.GEMINI_API_KEY;
@@ -65,14 +80,18 @@ export async function summarizeDashboard(context: Record<string, unknown>): Prom
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            // Les modèles Flash récents raisonnent avant de répondre
+            // Certains modèles Flash raisonnent avant de répondre
             // (« thinking »), et ce raisonnement consomme le même budget que
             // `maxOutputTokens` — mesuré à ~1 800-1 900 jetons de réflexion
-            // pour une analyse de ce format, avant même le texte final. Un
-            // plafond à 500 tronquait la réponse en plein milieu d'une phrase
-            // (`finishReason: 'MAX_TOKENS'`, texte coupé) ; 8192 laisse une
-            // marge large des deux côtés sans risque réel de dérive de coût,
-            // ce bouton n'étant jamais appelé qu'à la demande.
+            // pour une analyse de ce format sur le modèle Flash complet, avant
+            // même le texte final. Un plafond à 500 tronquait la réponse en
+            // plein milieu d'une phrase (`finishReason: 'MAX_TOKENS'`, texte
+            // coupé). Le modèle « lite » par défaut ne raisonne pas (pas de
+            // `thoughtsTokenCount` dans sa réponse) et n'en a donc pas besoin,
+            // mais 8192 reste la valeur : une marge large ne coûte rien de
+            // plus tant que le bouton n'est appelé qu'à la demande, et
+            // `GEMINI_MODEL` peut toujours être surchargé vers un modèle qui,
+            // lui, en a besoin.
             generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
           }),
         },
@@ -83,6 +102,10 @@ export async function summarizeDashboard(context: Record<string, unknown>): Prom
         console.error('[ai] Gemini request failed:', res.status, lastBody.slice(0, 500), `(tentative ${attempt}/${MAX_ATTEMPTS})`);
         // Seul le 503 (surcharge temporaire) mérite une nouvelle tentative —
         // un 400/401/404 est stable et rejouer l'appel ne changerait rien.
+        // Un 429 (quota épuisé) n'est pas retenté non plus : la fenêtre de
+        // reconstitution mesurée pour le modèle par défaut est de l'ordre de
+        // la minute (voir GEMINI_MODEL plus haut), bien au-delà des 1,5 s
+        // d'attente ici — le bouton resterait figé pour rien.
         if (res.status === 503 && attempt < MAX_ATTEMPTS) {
           await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
           continue;

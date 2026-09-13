@@ -20,7 +20,7 @@ Local development still needs no database running.
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | no | Web Push. Without them the running chronometer still shows in the app, the tab title and (while the browser is open) a system notification — but it cannot reach a **closed** browser. Generate once with `node -e "console.log(JSON.stringify(require('web-push').generateVAPIDKeys()))"` and never rotate them: changing the keys silently invalidates every device subscription already issued. |
 | `VAPID_SUBJECT` | no | `mailto:` address for the push service to contact. Defaults to `mailto:support@taches-and-cash.com`. |
 | `GEMINI_API_KEY` | no | AI analysis on the executive dashboard's "Analyser avec l'IA" button (Gemini Flash's free tier). Unset, the button says the feature isn't configured instead of failing — no other part of the app depends on it. |
-| `GEMINI_MODEL` | no | Overrides the Gemini model id. Defaults to `gemini-flash-latest` (a Google-maintained alias, not a pinned version — see CLAUDE.md). |
+| `GEMINI_MODEL` | no | Overrides the Gemini model id. Defaults to `gemini-flash-lite-latest` (a Google-maintained alias, not a pinned version — see CLAUDE.md; chosen over `gemini-flash-latest` because that alias's free tier is capped at 20 requests/**day**, while the lite alias's is 15/**minute**). |
 
 ## Railway (the production target)
 
