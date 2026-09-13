@@ -1055,6 +1055,18 @@ de grille d'échéances semée ; lui montrer l'onglet serait une carte
 aussi l'appel réseau correspondant quand l'onglet n'est de toute façon pas
 montré, une requête de plus par chargement pour rien.
 
+**Un onglet « Rapport mensuel » couvre toujours le mois civil précédent, jamais un autre.** Pas de sélecteur de période côté client : `GET /api/portal/report` recalcule à la demande, chaque fois qu'on ouvre l'onglet — même logique que les semis « à la prochaine requête » ailleurs dans l'app (`seedSectorMissions`, `maybeSendEcheanceReminder`), en encore plus simple puisqu'il n'y a même pas de drapeau à poser : rien n'est stocké, tout est recalculé. Pas d'e-mail non plus, ni de bouton admin pour « envoyer » quoi que ce soit — c'était la demande explicite : le rapport du mois qui vient de se terminer est simplement toujours disponible au téléchargement.
+
+Trois sections, les mêmes questions que le tableau de bord Direction, **mais jamais de coût employeur ni de performance de collaborateur** — c'était la seconde demande explicite :
+
+- **« Où est l'argent ? »** — honoraires facturés et encaissements du mois, TND uniquement (`isTnd`), documents comptant comme des honoraires uniquement (`countsAsBilled`, déjà appliqué par `portalInvoicesFor`), filtrés sur `issueDate` tombant dans le mois. Le solde net du mois (`honoraires − encaissements`) suit la même logique que le « Grand-livre client » du tableau de bord Direction — sans `soldeAnterieur`, un solde d'ouverture sans date propre que l'additionner à chaque mois ferait compter indéfiniment.
+- **« Où part le temps ? »** — heures et tâches par mission puis par type de tâche (un type de tâche se juge dans sa mission, même règle que partout ailleurs), sur les tâches `COMPLETED` du client durant le mois — la même agrégation que `missions` dans `/api/dashboard/executive`, dépouillée de `cout`/`tachesSansTaux`.
+- **Activité du dossier** — une ligne par tâche terminée (date, mission, type de tâche, collaborateur, durée, statut). `responsable` (le nom du collaborateur) est repris tel quel de `/api/portal/tasks`, qui l'affiche déjà au client depuis le début — ce n'est pas une performance qu'on juge, juste une attribution de qui a fait le travail.
+
+Seules les tâches `COMPLETED` entrent en jeu, même règle que `/api/portal/tasks` : une tâche en cours n'est pas une information que le client doit lire en direct, et sa durée n'est de toute façon pas figée. `client.id` filtre les entrées comme partout ailleurs côté portail (`clientBucketKey`), jamais un paramètre de requête.
+
+**[clientReportPdf.ts](src/components/portal/clientReportPdf.ts) est le seul rendu, en PDF vectoriel** — mêmes primitives texte jsPDF que [invoicePdf.ts](src/components/cash/invoicePdf.ts)/[payslipPdf.ts](src/components/payroll/payslipPdf.ts), jamais une image rasterisée. L'écran (`ReportView` dans [ClientPortal.tsx](src/pages/ClientPortal.tsx)) n'en est qu'un aperçu synthétique ; le téléchargement est le seul point de sortie du rapport, pas d'impression construite pour l'instant faute de demande. Chargé paresseusement, seulement à l'ouverture de l'onglet — un calcul de plus par requête pour un onglet que tout le monde ne consulte pas à chaque visite.
+
 **Le client est notifié de quatre événements sur son propre dossier** —
 échéance modifiée, facture émise, item de livrable coché, tâche terminée —
 via le même mécanisme `notify()`/`notifications` que le reste de l'app, pas

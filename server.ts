@@ -6757,6 +6757,129 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     }
   });
 
+  /**
+   * Rapport mensuel du dossier — toujours le mois civil *précédent*, jamais
+   * un autre : pas de sélecteur de période côté client, le rapport du mois
+   * qui vient de se terminer est simplement disponible au téléchargement dès
+   * qu'on le demande, sans qu'aucun envoi ni bouton admin ne soit
+   * nécessaire — la même idée que les semis « à la prochaine requête »
+   * ailleurs dans cette app, en encore plus simple puisqu'il n'y a même pas
+   * de drapeau à poser : tout est recalculé à la demande.
+   *
+   * Trois sections, les mêmes questions que le tableau de bord Direction,
+   * mais **jamais** de coût employeur ni de performance de collaborateur :
+   * « Où est l'argent ? » (honoraires facturés / encaissés sur le mois,
+   * TND uniquement — mêmes gardes `countsAsBilled`/`isTnd` que le relevé),
+   * « Où part le temps ? » (heures par mission puis par type de tâche, sans
+   * coût — la même forme que `missions` de `/api/dashboard/executive` mais
+   * dépouillée de `cout`/`tachesSansTaux`), et l'activité détaillée du
+   * dossier sur le mois (une ligne par tâche terminée, sans coût).
+   *
+   * Seules les tâches `COMPLETED` entrent en jeu, même règle que
+   * `/api/portal/tasks` : une tâche en cours n'est pas une information que
+   * le client doit lire en direct, et sa durée n'est de toute façon pas
+   * figée.
+   */
+  app.get('/api/portal/report', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+
+      const MOIS_LABELS_FR = [
+        'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+        'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+      ];
+      const now = civilParts(new Date());
+      const month = now.month === 1 ? 12 : now.month - 1;
+      const year = now.month === 1 ? now.year - 1 : now.year;
+      const startTs = Date.UTC(year, month - 1, 1);
+      const endTs = Date.UTC(year, month - 1, lastDayOfMonth(year, month), 23, 59, 59, 999);
+      const periodLabel = `${MOIS_LABELS_FR[month - 1]} ${year}`;
+
+      // ---- Où est l'argent ? -------------------------------------------
+      const invoices = (await portalInvoicesFor(req.user.companyId, client))
+        .filter(isTnd)
+        .filter((inv: any) => {
+          const ts = inv.issueDate ? new Date(inv.issueDate).getTime() : NaN;
+          return Number.isFinite(ts) && ts >= startTs && ts <= endTs;
+        });
+      const encaissements = (await portalEncaissementsFor(req.user.companyId, client))
+        .filter((e: any) => {
+          const ts = e.date ? new Date(e.date).getTime() : NaN;
+          return Number.isFinite(ts) && ts >= startTs && ts <= endTs;
+        });
+      const honoraires = round3(invoices.reduce((s: number, i: any) => s + num(Number(i.totalNetToPay), 0), 0));
+      const encaisse = round3(encaissements.reduce((s: number, e: any) => s + num(Number(e.amount), 0), 0));
+
+      // ---- Où part le temps ? / activité du dossier ---------------------
+      const users = await db.getAllUsers(req.user.companyId);
+      const entries = (await db.getAllTimeEntries(req.user.companyId))
+        .filter((t: any) => {
+          const key = clientBucketKey(t);
+          return key === String(client.id) || key === `name:${client.name}`;
+        })
+        .filter((t: any) => t.statut === 'COMPLETED')
+        .filter((t: any) => {
+          const ts = parseFrenchDateTs(t.date);
+          return ts >= startTs && ts <= endTs;
+        });
+
+      const missionAgg = new Map<string, any>();
+      for (const t of entries) {
+        const key = t.pole || 'Sans mission';
+        let row = missionAgg.get(key);
+        if (!row) { row = { pole: key, heures: 0, taches: 0, types: new Map<string, any>() }; missionAgg.set(key, row); }
+        const secs = t.dureeSeconds || 0;
+        row.heures += secs / 3600;
+        row.taches += 1;
+        const typeKey = t.taskType || 'Non précisé';
+        let typeRow = row.types.get(typeKey);
+        if (!typeRow) { typeRow = { name: typeKey, heures: 0, taches: 0 }; row.types.set(typeKey, typeRow); }
+        typeRow.heures += secs / 3600;
+        typeRow.taches += 1;
+      }
+      const missions = Array.from(missionAgg.values())
+        .map((r: any) => ({
+          pole: r.pole,
+          heures: round3(r.heures),
+          taches: r.taches,
+          types: Array.from(r.types.values())
+            .map((tr: any) => ({ name: tr.name, heures: round3(tr.heures), taches: tr.taches }))
+            .sort((a: any, b: any) => b.heures - a.heures),
+        }))
+        .sort((a: any, b: any) => b.heures - a.heures);
+
+      const isoKeyOf = (frDate: string) => {
+        const [d, m, y] = String(frDate || '').split('/');
+        return d && m && y ? `${y}-${m}-${d}` : '';
+      };
+      const activites = [...entries]
+        .sort((a: any, b: any) => isoKeyOf(a.date).localeCompare(isoKeyOf(b.date)))
+        .map((t: any) => {
+          const secs = t.dureeSeconds || 0;
+          return {
+            date: t.date || '',
+            mission: t.pole || '',
+            typeTache: t.taskType || '',
+            responsable: users.find((u: any) => u.id === t.userId)?.fullName
+              || users.find((u: any) => u.id === t.userId)?.username || '',
+            dureeFormatted: `${Math.floor(secs / 3600)}h${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}`,
+            statut: t.statut,
+          };
+        });
+
+      res.json({
+        client: { name: client.name, taxId: client.taxId || '' },
+        period: { year, month, label: periodLabel },
+        finance: { honoraires, encaisse, soldeNet: round3(honoraires - encaisse) },
+        missions,
+        activites,
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET Leave Balance
   app.get('/api/hr/balance', authenticate, async (req: any, res: any) => {
     try {
