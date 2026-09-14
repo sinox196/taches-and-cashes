@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, X, Search, Loader2, Trash2, Pencil, Check, Table2, CalendarDays } from 'lucide-react';
 import { friendlyError } from '../../utils/errors';
@@ -40,6 +40,43 @@ interface StatusOption {
   label: string;
   sortOrder: number;
   color?: string;
+}
+
+/**
+ * Garde un panneau flottant (`position: fixed`) entièrement dans le
+ * viewport. Les trois panneaux de cet écran (menu de cellule, éditeur de
+ * colonne, panneau Quittance) se positionnent au point de clic — mais un
+ * clic près du bord bas ou droit de l'écran (une des dernières lignes de la
+ * liste, une des dernières colonnes visibles du tableau) poussait le
+ * panneau hors champ : ses options existaient toujours dans le DOM, mais
+ * invisibles ou coupées, sans qu'aucun défilement ne les ramène puisque
+ * `position: fixed` échappe au défilement du tableau — exactement le
+ * symptôme remonté (« les choix ne s'affichent pas, ou s'affichent
+ * incomplets »). Mesuré après montage, même idée que le correctif déjà en
+ * place pour le panneau de `SearchableSelect` (`ResizeObserver`/`panelEl` —
+ * voir CLAUDE.md, « Missions and types de tâches ») : ici la taille ne
+ * dépend que du contenu déjà rendu à cet instant, donc un ajustement en
+ * `useLayoutEffect` (avant peinture, donc sans clignotement) suffit — pas
+ * besoin d'observer les changements de taille en continu. Appelé sans
+ * tableau de dépendances : ces trois panneaux changent rarement de forme en
+ * restant ouverts (« Ajouter une valeur », l'édition d'une valeur…), et
+ * remesurer à chaque rendu est largement assez bon marché pour ce volume de
+ * DOM.
+ */
+function useClampToViewport(ref: React.RefObject<HTMLElement>, anchor: { x: number; y: number } | null | undefined) {
+  useLayoutEffect(() => {
+    if (!anchor || !ref.current) return;
+    const margin = 8;
+    const rect = ref.current.getBoundingClientRect();
+    let left = anchor.x;
+    let top = anchor.y;
+    if (left + rect.width > window.innerWidth - margin) left = window.innerWidth - margin - rect.width;
+    if (top + rect.height > window.innerHeight - margin) top = window.innerHeight - margin - rect.height;
+    if (left < margin) left = margin;
+    if (top < margin) top = margin;
+    ref.current.style.left = `${left}px`;
+    ref.current.style.top = `${top}px`;
+  });
 }
 
 /**
@@ -132,6 +169,11 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
   const [editLabel, setEditLabel] = useState('');
   const [editPos, setEditPos] = useState<{ x: number; y: number } | null>(null);
   const editRef = useRef<HTMLDivElement>(null);
+
+  // Garde les trois panneaux flottants dans l'écran — voir useClampToViewport.
+  useClampToViewport(menuRef, menu);
+  useClampToViewport(editRef, editPos);
+  useClampToViewport(quittanceRef, quittanceModal);
 
   const currentYear = new Date().getFullYear();
   const [customYears, setCustomYears] = useState<number[]>([]);
