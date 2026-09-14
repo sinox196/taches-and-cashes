@@ -3,6 +3,7 @@ import { Logo } from '../components/Logo';
 import { NotificationBell } from '../components/NotificationBell';
 import { ChatPage } from '../components/chat/ChatPage';
 import { InvoicePreview } from '../components/cash/InvoicePreview';
+import { downloadClientReportPdf, ClientReport } from '../components/portal/clientReportPdf';
 import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { useAuth } from '../context/AuthContext';
 import { formatCostTND } from '../utils/formatters';
@@ -10,7 +11,7 @@ import { paymentModeLabel, isCashMode } from '../constants/paymentModes';
 import { companyHasResourcesModule } from '../constants/secteurs';
 import {
   LogOut, FileText, ClipboardCheck, FolderCheck, CalendarClock, MessageCircle,
-  AlertTriangle, CheckCircle2, Loader2, Menu, X, Wallet,
+  AlertTriangle, CheckCircle2, Loader2, Menu, X, Wallet, BarChart3, Download,
 } from 'lucide-react';
 
 /**
@@ -78,7 +79,7 @@ interface EcheanceStatusCell { columnId: string; status: string | null }
 interface EcheanceStatusOption { id: string; label: string; color?: string }
 interface EcheanceData { columns: EcheanceColumn[]; statuses: EcheanceStatusCell[]; statusOptions: EcheanceStatusOption[] }
 
-type Tab = 'statement' | 'tasks' | 'deliverables' | 'echeances' | 'messages';
+type Tab = 'statement' | 'tasks' | 'deliverables' | 'echeances' | 'report' | 'messages';
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'statement', label: 'Relevé de compte', icon: FileText },
@@ -88,17 +89,18 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   // garde que `companyHasResourcesModule` ailleurs, sinon l'onglet serait
   // toujours vide pour une entreprise qui n'a jamais eu de grille.
   { id: 'echeances', label: 'Échéances', icon: CalendarClock },
+  { id: 'report', label: 'Rapport mensuel', icon: BarChart3 },
   { id: 'messages', label: 'Messages', icon: MessageCircle },
 ];
 
 /**
  * Où `NotificationBell` envoie le clic, traduit vers l'onglet du portail —
  * `TYPE_META`/`PUSH_NAV_FOR_TYPE` désignent la destination par ces mêmes
- * chaînes côté serveur (`Echeances`/`Statement`/`Deliverables`/`Tasks`), qui
- * n'existent que pour les quatre types de notification réservés à un compte
- * CLIENT. `Messages` couvre à la fois le type back-office par défaut
- * (`Dashboard`, absent d'ici, donc le repli) et le clic sur un contact aux
- * messages non lus, qui appelait déjà `onNavigate('Messages')` — c'était
+ * chaînes côté serveur (`Echeances`/`Statement`/`Deliverables`/`Tasks`/
+ * `Report`), qui n'existent que pour les cinq types de notification réservés
+ * à un compte CLIENT. `Messages` couvre à la fois le type back-office par
+ * défaut (`Dashboard`, absent d'ici, donc le repli) et le clic sur un contact
+ * aux messages non lus, qui appelait déjà `onNavigate('Messages')` — c'était
  * jusqu'ici la seule destination que ce callback savait atteindre.
  */
 const PORTAL_NAV_TO_TAB: Record<string, Tab> = {
@@ -106,6 +108,7 @@ const PORTAL_NAV_TO_TAB: Record<string, Tab> = {
   Statement: 'statement',
   Deliverables: 'deliverables',
   Tasks: 'tasks',
+  Report: 'report',
   Messages: 'messages',
 };
 
@@ -167,6 +170,13 @@ export const ClientPortal: React.FC = () => {
   // charger), donc pas de round-trip réseau ici.
   const [openReglement, setOpenReglement] = useState<StatementLine | null>(null);
 
+  // Rapport mensuel — chargé seulement quand l'onglet est ouvert, pas dans le
+  // chargement initial : c'est un calcul de plus par requête pour un onglet
+  // que tout le monde ne consulte pas à chaque visite.
+  const [report, setReport] = useState<ClientReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState('');
+
   const get = useCallback(async (path: string) => {
     const res = await fetch(`/api/portal/${path}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -185,6 +195,18 @@ export const ClientPortal: React.FC = () => {
       .catch(e => { if (!cancelled) { setInvoiceError(e.message || 'Erreur de chargement.'); setOpenInvoiceId(null); } });
     return () => { cancelled = true; };
   }, [openInvoiceId, get]);
+
+  useEffect(() => {
+    if (tab !== 'report' || report) return;
+    let cancelled = false;
+    setReportLoading(true);
+    setReportError('');
+    get('report')
+      .then(r => { if (!cancelled) setReport(r); })
+      .catch(e => { if (!cancelled) setReportError(e.message || 'Erreur de chargement.'); })
+      .finally(() => { if (!cancelled) setReportLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab, report, get]);
 
   useEffect(() => {
     if (!token) return;
@@ -288,8 +310,9 @@ export const ClientPortal: React.FC = () => {
               {/* Situation financière — visible sur les onglets de suivi qui en
                   parlent, c'est la question que le client se pose en
                   arrivant ; absente sur Échéances, qui ne porte aucun
-                  montant. */}
-              {summary && tab !== 'echeances' && (
+                  montant, et sur Rapport mensuel, qui porte les siennes
+                  propres (bornées au mois, pas au solde global). */}
+              {summary && tab !== 'echeances' && tab !== 'report' && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <StatCard label="Solde antérieur" value={formatCostTND(summary.soldeAnterieur)} />
                   <StatCard label="Total facturé" value={formatCostTND(summary.montantFacture)} />
@@ -308,6 +331,7 @@ export const ClientPortal: React.FC = () => {
               {tab === 'tasks' && <TasksView tasks={tasks} />}
               {tab === 'deliverables' && <DeliverablesView deliverables={deliverables} />}
               {tab === 'echeances' && <EcheancesView data={echeances} />}
+              {tab === 'report' && <ReportView report={report} loading={reportLoading} error={reportError} />}
             </>
           )}
         </main>
@@ -653,6 +677,114 @@ const EcheancesView: React.FC<{ data: EcheanceData | null }> = ({ data }) => {
           ))}
         </div>
       )}
+    </div>
+  );
+};
+
+/**
+ * Rapport mensuel — toujours le mois civil précédent, calculé à la demande
+ * par `/api/portal/report`. Trois blocs, les mêmes questions que le tableau
+ * de bord Direction (finances du mois, missions affectées, l'activité du
+ * dossier), jamais de coût employeur ni de performance de collaborateur —
+ * ce que le serveur envoie ne porte déjà aucun des deux. Le PDF est le seul
+ * format de restitution ; l'écran n'en est qu'un aperçu synthétique avant le
+ * téléchargement.
+ *
+ * Les titres « Où est l'argent ? » et « Où part le temps ? » — repris du
+ * tableau de bord Direction dans la première version — ont été retirés à la
+ * demande de l'utilisateur : le premier a disparu (les trois chiffres du
+ * bloc financier n'ont plus d'intitulé de section, seulement leurs propres
+ * libellés de carte), le second est devenu « Missions affectés ».
+ */
+const ReportView: React.FC<{ report: ClientReport | null; loading: boolean; error: string }> = ({ report, loading, error }) => {
+  if (loading) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl py-16 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl">
+        <Empty>{error}</Empty>
+      </div>
+    );
+  }
+  if (!report) return null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-gray-900">Rapport mensuel — {report.period.label}</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Finances, missions affectées et activité du dossier sur le mois écoulé.</p>
+        </div>
+        <button
+          onClick={() => downloadClientReportPdf(report)}
+          className="inline-flex items-center gap-2 px-3.5 py-2 bg-navy text-white text-[13px] font-medium rounded-lg hover:bg-navy-hover transition-colors"
+        >
+          <Download className="w-4 h-4" /> Télécharger le PDF
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StatCard label="Honoraires facturés" value={formatCostTND(report.finance.honoraires)} />
+        <StatCard label="Encaissements" value={formatCostTND(report.finance.encaisse)} tone="good" />
+        <StatCard label="Solde net du mois" value={formatCostTND(report.finance.soldeNet)} tone={report.finance.soldeNet > 0 ? 'due' : 'good'} strong />
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 sm:px-5 py-3 border-b border-gray-100">
+          <h3 className="text-[14px] font-semibold text-gray-900">Missions affectés</h3>
+        </div>
+        {report.missions.length === 0 ? (
+          <Empty>Aucune activité enregistrée sur ce mois.</Empty>
+        ) : (
+          <ul className="divide-y divide-gray-100">
+            {report.missions.map(m => (
+              <li key={m.pole} className="px-4 sm:px-5 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[13.5px] font-medium text-gray-900">{m.pole}</span>
+                  <span className="text-[12.5px] text-gray-500 shrink-0">{m.taches} tâche(s) · {m.heures.toFixed(1)} h</span>
+                </div>
+                <ul className="mt-1.5 flex flex-col gap-0.5">
+                  {m.types.map(t => (
+                    <li key={t.name} className="flex items-center justify-between gap-3 text-[12px] text-gray-500 pl-3">
+                      <span>{t.name}</span>
+                      <span className="shrink-0">{t.taches} · {t.heures.toFixed(1)} h</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 sm:px-5 py-3 border-b border-gray-100">
+          <h3 className="text-[14px] font-semibold text-gray-900">Activité du dossier</h3>
+        </div>
+        {report.activites.length === 0 ? (
+          <Empty>Aucune tâche terminée sur ce mois.</Empty>
+        ) : (
+          <ul className="divide-y divide-gray-100">
+            {report.activites.map((a, i) => (
+              <li key={i} className="px-4 sm:px-5 py-2.5 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] text-gray-900">{[a.mission, a.typeTache].filter(Boolean).join(' · ') || '—'}</p>
+                  {a.responsable && <p className="text-[11.5px] text-gray-500">{a.responsable}</p>}
+                </div>
+                <div className="flex items-center gap-3 shrink-0 text-[12px] text-gray-500">
+                  <span>{a.date}</span>
+                  <span className="font-mono">{a.dureeFormatted}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };

@@ -1057,15 +1057,30 @@ de grille d'échéances semée ; lui montrer l'onglet serait une carte
 aussi l'appel réseau correspondant quand l'onglet n'est de toute façon pas
 montré, une requête de plus par chargement pour rien.
 
-**Le client est notifié de quatre événements sur son propre dossier** —
-échéance modifiée, facture émise, item de livrable coché, tâche terminée —
-via le même mécanisme `notify()`/`notifications` que le reste de l'app, pas
-un chemin à part. `portalUserIdsFor(companyId, clientId)` (server.ts, juste
-après `notify()`) résout le ou les comptes `CLIENT` rattachés à un dossier —
-plusieurs si le gérant et son comptable en ont chacun un — et chaque
-déclencheur y notifie tous. Les quatre types (`PORTAL_ECHEANCE`,
-`PORTAL_INVOICE`, `PORTAL_DELIVERABLE`, `PORTAL_TASK_DONE`) ne partent
-jamais que vers un compte `CLIENT` :
+**Un onglet « Rapport mensuel » couvre toujours le mois civil précédent, jamais un autre.** Pas de sélecteur de période côté client : `GET /api/portal/report` recalcule à la demande, chaque fois qu'on ouvre l'onglet — même logique que les semis « à la prochaine requête » ailleurs dans l'app (`seedSectorMissions`, `maybeSendEcheanceReminder`), en encore plus simple puisqu'il n'y a même pas de drapeau à poser : rien n'est stocké, tout est recalculé. Pas d'e-mail non plus, ni de bouton admin pour « envoyer » quoi que ce soit — c'était la demande explicite : le rapport du mois qui vient de se terminer est simplement toujours disponible au téléchargement.
+
+Trois sections, les mêmes questions que le tableau de bord Direction, **mais jamais de coût employeur ni de performance de collaborateur** — c'était la seconde demande explicite :
+
+- **Finances du mois** — honoraires facturés et encaissements du mois, TND uniquement (`isTnd`), documents comptant comme des honoraires uniquement (`countsAsBilled`, déjà appliqué par `portalInvoicesFor`), filtrés sur `issueDate` tombant dans le mois. Le solde net du mois (`honoraires − encaissements`) suit la même logique que le « Grand-livre client » du tableau de bord Direction — sans `soldeAnterieur`, un solde d'ouverture sans date propre que l'additionner à chaque mois ferait compter indéfiniment. Le PDF n'affiche plus de titre de section au-dessus de ces trois chiffres — voir plus bas.
+- **« Missions affectés »** — heures et tâches par mission puis par type de tâche (un type de tâche se juge dans sa mission, même règle que partout ailleurs), sur les tâches `COMPLETED` du client durant le mois — la même agrégation que `missions` dans `/api/dashboard/executive`, dépouillée de `cout`/`tachesSansTaux`.
+- **Activité du dossier** — une ligne par tâche terminée (date, mission, type de tâche, collaborateur, durée, statut). `responsable` (le nom du collaborateur) est repris tel quel de `/api/portal/tasks`, qui l'affiche déjà au client depuis le début — ce n'est pas une performance qu'on juge, juste une attribution de qui a fait le travail.
+
+**Les deux premiers titres empruntaient au départ le vocabulaire du tableau de bord Direction (« Où est l'argent ? », « Où part le temps ? ») ; les deux ont été changés à la demande explicite de l'utilisateur.** Le premier a été retiré purement et simplement — les trois chiffres financiers gardent leurs propres libellés de carte (Honoraires facturés, Encaissements, Solde net du mois) mais n'ont plus d'intitulé de section au-dessus, ni dans le PDF ni à l'écran. Le second est devenu « Missions affectés », un intitulé plus proche de ce que la section montre réellement (un temps ventilé par mission, pas une réponse à « où part le temps » en général). `GET /api/portal/report` n'a pas changé : ces libellés sont un rendu, jamais transportés dans la réponse JSON du serveur.
+
+Seules les tâches `COMPLETED` entrent en jeu, même règle que `/api/portal/tasks` : une tâche en cours n'est pas une information que le client doit lire en direct, et sa durée n'est de toute façon pas figée. `client.id` filtre les entrées comme partout ailleurs côté portail (`clientBucketKey`), jamais un paramètre de requête.
+
+**[clientReportPdf.ts](src/components/portal/clientReportPdf.ts) est le seul rendu, en PDF vectoriel** — mêmes primitives texte jsPDF que [invoicePdf.ts](src/components/cash/invoicePdf.ts)/[payslipPdf.ts](src/components/payroll/payslipPdf.ts), jamais une image rasterisée. L'écran (`ReportView` dans [ClientPortal.tsx](src/pages/ClientPortal.tsx)) n'en est qu'un aperçu synthétique ; le téléchargement est le seul point de sortie du rapport, pas d'impression construite pour l'instant faute de demande. Chargé paresseusement, seulement à l'ouverture de l'onglet — un calcul de plus par requête pour un onglet que tout le monde ne consulte pas à chaque visite.
+
+**Le client est notifié de cinq événements sur son propre dossier** —
+échéance modifiée, facture émise, item de livrable coché, tâche terminée,
+nouveau rapport mensuel disponible — via le même mécanisme
+`notify()`/`notifications` que le reste de l'app, pas un chemin à part.
+`portalUserIdsFor(companyId, clientId)` (server.ts, juste après `notify()`)
+résout le ou les comptes `CLIENT` rattachés à un dossier — plusieurs si le
+gérant et son comptable en ont chacun un — et chaque déclencheur y notifie
+tous. Les cinq types (`PORTAL_ECHEANCE`, `PORTAL_INVOICE`,
+`PORTAL_DELIVERABLE`, `PORTAL_TASK_DONE`, `PORTAL_REPORT`) ne partent jamais
+que vers un compte `CLIENT` :
 
 - **Échéance** — `PUT /api/echeance-statuses`, via `notifyEcheanceChange()`.
   Seul un statut posé à une valeur **non vide** notifie ; un effacement
@@ -1086,21 +1101,39 @@ jamais que vers un compte `CLIENT` :
   le même garde-fou qui pose déjà `heureFin` juste au-dessus dans cette
   route, pour qu'une tâche qui reste `COMPLETED` d'un PUT à l'autre ne
   renvoie pas une seconde notification.
+- **Rapport mensuel** — `maybeSendMonthlyReportNotifications()`, un cas à
+  part des quatre premiers : ceux-ci partent d'une mutation précise (un PUT,
+  un POST) ; celui-ci n'en a aucune à s'accrocher, puisque le rapport
+  lui-même n'est jamais créé ni stocké — voir « Un onglet « Rapport mensuel »
+  couvre toujours le mois civil précédent » plus haut. Il suit donc l'autre
+  idiome déjà présent dans cette app pour « quelque chose a changé sans
+  mutation à observer » : la même détection paresseuse « un nouveau mois a
+  commencé » que `maybeSendEcheanceReminder()`, appelée juste à côté dans
+  `authenticate`, à la prochaine requête de n'importe quel compte de
+  l'entreprise (client compris) — une marque `monthlyReportNotifiedMonth`
+  (`YYYY-MM`) sur la fiche entreprise, écrite après coup, plus une pose en
+  vol par entreprise pour dédupliquer une rafale de requêtes simultanées.
+  Contrairement au rappel d'échéances (réservé aux ADMIN/SUPERVISEUR d'un
+  secteur qui vend Ressources métier), celui-ci vise tous les comptes
+  `CLIENT` de l'entreprise, dossier par dossier (`portalUserIdsFor` sur
+  chaque client), sans garde de secteur ou d'offre : le rapport n'a jamais
+  dépendu de Ressources métier, donc rien ici n'a de raison d'en dépendre
+  non plus.
 
 Chacun résout le dossier via `clientId` (jamais un nom de client texte
 libre, qu'aucun compte portail ne peut porter) et n'aboutit à rien si le
 dossier n'a pas de compte `CLIENT` — silencieusement, ce n'est pas une
-erreur. **`NotificationBell.tsx`** porte les quatre types dans `TYPE_META`/
+erreur. **`NotificationBell.tsx`** porte les cinq types dans `TYPE_META`/
 `TOAST_VARIANT` comme tout le reste, et **`PUSH_NAV_FOR_TYPE`** côté
 serveur pour le Web Push. Leur `nav` désigne un onglet du **portail**
-(`Echeances`/`Statement`/`Deliverables`/`Tasks`), jamais une section du
-back-office comme les autres entrées de ces tables — `ClientPortal.tsx`
-traduit via `PORTAL_NAV_TO_TAB` avant d'appeler `setTab()`. Cette table a
-aussi corrigé un bug latent : `onNavigate` y était câblé en dur sur
-`() => setTab('messages')`, donc n'importe quelle notification (même une
-tâche assignée) atterrissait sur Messages — invisible tant qu'aucun type
-de notification n'atteignait un compte client, ce qui n'était le cas
-d'aucun avant ces quatre-là.
+(`Echeances`/`Statement`/`Deliverables`/`Tasks`/`Report`), jamais une
+section du back-office comme les autres entrées de ces tables —
+`ClientPortal.tsx` traduit via `PORTAL_NAV_TO_TAB` avant d'appeler
+`setTab()`. Cette table a aussi corrigé un bug latent : `onNavigate` y
+était câblé en dur sur `() => setTab('messages')`, donc n'importe quelle
+notification (même une tâche assignée) atterrissait sur Messages —
+invisible tant qu'aucun type de notification n'atteignait un compte
+client, ce qui n'était le cas d'aucun avant ces cinq-là.
 
 **Une ligne « Facture » du relevé s'ouvre au clic** et affiche le document
 complet, réutilisant [InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)
@@ -1305,6 +1338,20 @@ Les **seuils d'alerte** vivent dans `settings.alertThresholds`, avec des valeurs
 **« Missions & types de tâche » ([TaskIntelligence.tsx](src/components/dashboard/TaskIntelligence.tsx)) dit où part le temps — jamais une rentabilité.** `missions` dans la réponse d'`/api/dashboard/executive` agrège les mêmes `entries` déjà filtrées, par `pole` puis par `taskType` à l'intérieur de chaque mission (un type de tâche se juge dans sa mission, même règle que partout ailleurs dans l'app) : heures, tâches, collaborateurs et clients distincts, durée moyenne, et `cout` **seulement** quand `showMoney` — la même garde que le reste de la route, jamais envoyé à un non-ADMIN plutôt que simplement masqué. Délibérément aucune marge ni rentabilité par mission ou type : rien ne relie une tâche à une facture (Q-03 ci-dessus), donc en inventer une ici serait exactement ce que la règle des taux interdit. C'est un outil opérationnel — un type de tâche qui consomme 30 % du temps se voit — pas un outil de tarification.
 
 **Le tableau de performance affiche enfin la capacité et l'occupation que les alertes A7/A8 lui reprochent déjà.** `exec.collaborateurs` (capacité nette, taux d'occupation, évolution) était calculé depuis le début pour ces deux alertes, mais jamais transporté jusqu'à [EmployeeTable.tsx](src/components/dashboard/EmployeeTable.tsx), qui lit `/api/kpi/dashboard` — une route distincte, sans ces champs. `AdminDashboard.tsx` fusionne les deux par `userId` avant de les passer au tableau plutôt que de dupliquer le calcul côté serveur, pour que les deux routes gardent leur périmètre propre. `exec.collaborateurs` ne porte pas la ligne ADMIN (construit sur `employees`/`STAFF_ROLES`, sans le complément que `performanceUsers` ajoute dans `/api/kpi/dashboard`) : la ligne d'un administrateur dans le tableau affiche donc « — » en occupation, ce qui est correct — cette donnée n'existe simplement pas pour lui à cet endroit.
+
+### Analyse IA du tableau de bord
+
+Un bouton « Analyser avec l'IA » ([AIDashboardSummary.tsx](src/components/dashboard/AIDashboardSummary.tsx)), sous l'`ExecutiveBar`, envoie un résumé en langage naturel du tableau de bord Direction via **Gemini Flash** (palier gratuit de Google) — la réponse à la question posée par l'utilisateur : un LLM gratuit, choisi pour ce cas précis (analyser des chiffres et rédiger en français) plutôt que Groq, dont les modèles ouverts sont moins bons en rédaction française sur des données structurées.
+
+**Optionnel, exactement comme SMTP et Web Push** — [ai.ts](src/server/ai.ts) exporte `aiEnabled()` (vrai seulement si `GEMINI_API_KEY` est posée) et `summarizeDashboard()`, qui ne lève jamais : sans clé, `{ available: false, text: null }` ; un appel Gemini qui échoue (quota, réseau, clé invalide) rend `{ available: true, text: null, error }` plutôt que de planter la route. Un palier gratuit n'offre aucune garantie de débit ni de disponibilité, donc ce reste un bouton qu'on clique — jamais quelque chose dont l'affichage du tableau de bord dépend. `GEMINI_MODEL` (env, défaut `gemini-flash-lite-latest` — voir juste en-dessous) permet de changer de modèle sans toucher au code.
+
+**Un alias `-latest` maintenu par Google, pas un modèle figé — mais tous les alias `-latest` ne se valent pas.** `gemini-2.0-flash` (le choix initial ici) a été retiré du catalogue quelques mois à peine après cette intégration, avec un message d'erreur renvoyant vers la version suivante ; épingler un nom de modèle précis referait le même piège à chaque dépréciation. Mais `gemini-flash-latest` — le premier alias essayé — pointe aujourd'hui vers un modèle Flash « preview » dont le palier gratuit n'accorde que **20 requêtes par jour** (`quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier`, vérifié en reproduisant le 429 en direct) : un cabinet qui clique le bouton plusieurs fois dans la journée épuise ce quota pour de bon jusqu'au lendemain, ce qui s'est produit en usage réel (« Gemini a répondu 429 »). `gemini-flash-lite-latest` pointe vers un modèle « lite » plus établi, dont le palier gratuit est mesuré à **15 requêtes par minute** — un quota qui se reconstitue en quelques secondes plutôt qu'en un jour, largement suffisant pour un bouton cliqué occasionnellement. Vérifié aussi que la qualité de l'analyse en français ne s'en trouve pas dégradée pour ce cas d'usage précis (résumer des agrégats déjà calculés). Corollaire mesuré en testant les deux : le modèle Flash complet raisonne avant de répondre (« thinking »), et ce raisonnement consomme le même budget que `maxOutputTokens` — ~1 800-1 900 jetons de réflexion pour une analyse de ce format, avant même le texte final ; le modèle « lite » par défaut, lui, ne raisonne pas (`usageMetadata` sans `thoughtsTokenCount`). `maxOutputTokens: 8192` (au lieu d'un plafond à 500, qui tronquait la réponse en plein milieu d'une phrase, `finishReason: 'MAX_TOKENS'`) reste la valeur par défaut malgré tout — une marge large ne coûte rien de plus tant que le bouton n'est appelé qu'à la demande, et `GEMINI_MODEL` peut toujours pointer vers un modèle qui, lui, en a besoin.
+
+**Le 503 (« high demand », palier gratuit surchargé) est retenté automatiquement, pas seulement affiché.** Mesuré en pratique à environ un appel sur trois en rafale — un défaut d'upstream intermittent, pas une panne de configuration. `summarizeDashboard()` retente jusqu'à deux fois de plus, avec une pause de 1,5 s, avant de renoncer et de renvoyer l'erreur telle quelle. Seul le 503 déclenche une nouvelle tentative : un 400/401/404 est stable (mauvaise clé, modèle inconnu) et rejouer l'appel ne changerait rien ; un 429 (quota épuisé) non plus — pas seulement par principe : la fenêtre de reconstitution mesurée pour le modèle par défaut est de l'ordre de la minute (« Please retry in Ns », le `RetryInfo` renvoyé par Gemini), bien au-delà des 1,5 s d'attente ici, donc retenter immédiatement ne ferait que consommer un peu plus du quota sans attendre la fenêtre qui le libère. Ce n'est toujours qu'un bouton qu'on clique — la retentative réduit la fréquence de l'échec visible, elle ne le supprime pas.
+
+**Le serveur ne recalcule rien** : `POST /api/dashboard/ai-summary` (gardée comme `/api/dashboard/executive` — `DASHBOARD_ROLES` seulement) prend un `context` déjà construit côté client à partir de ce que `/api/dashboard/executive` lui a renvoyé — indicateurs du bandeau, huit premières alertes, cinq clients les plus fragiles, concentration, cinq missions principales. Puisque `exec` est déjà filtré/dépouillé pour le rôle appelant (un SUPERVISEUR n'a par exemple aucun montant dans sa réponse), le contexte envoyé à l'IA hérite automatiquement de la même restriction — rien à reproduire ici. Le corps est plafonné à 20 000 caractères pour qu'un contexte mal construit ne consomme pas le quota gratuit pour rien.
+
+Le prompt (dans `ai.ts`) demande explicitement de ne jamais inventer un chiffre absent des données fournies et de ne pas mentionner un champ `null` plutôt que de deviner — même principe que `tachesSansTaux`/`devisesExclues` ailleurs dans cette route : dire ce qu'on ne sait pas plutôt que de le déguiser en certitude.
 
 ### Dashboard charts
 

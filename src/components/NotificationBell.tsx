@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, BellRing, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check, Wallet, FileClock, FileText, FolderCheck } from 'lucide-react';
+import { Bell, BellRing, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check, Wallet, FileClock, FileText, FolderCheck, BarChart3 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast, type ToastVariant } from '../context/ToastContext';
 import {
@@ -40,13 +40,14 @@ const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClas
   LOAN_DECISION: { icon: Wallet, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
   ADVANCE_REQUEST: { icon: Wallet, nav: 'HR', iconClass: 'bg-amber-50 text-amber-600' },
   ADVANCE_DECISION: { icon: Wallet, nav: 'HR', iconClass: 'bg-emerald-50 text-emerald-600' },
-  // Ces quatre-là ne partent jamais que vers un compte CLIENT — `nav` cible
+  // Ces cinq-là ne partent jamais que vers un compte CLIENT — `nav` cible
   // un onglet du portail (voir ClientPortal.tsx), pas une section du
   // back-office comme les autres entrées de cette table.
   PORTAL_ECHEANCE: { icon: FileClock, nav: 'Echeances', iconClass: 'bg-purple-50 text-purple-600' },
   PORTAL_INVOICE: { icon: FileText, nav: 'Statement', iconClass: 'bg-blue-50 text-blue-600' },
   PORTAL_DELIVERABLE: { icon: FolderCheck, nav: 'Deliverables', iconClass: 'bg-emerald-50 text-emerald-600' },
   PORTAL_TASK_DONE: { icon: ClipboardCheck, nav: 'Tasks', iconClass: 'bg-emerald-50 text-emerald-600' },
+  PORTAL_REPORT: { icon: BarChart3, nav: 'Report', iconClass: 'bg-blue-50 text-blue-600' },
 };
 
 /**
@@ -108,6 +109,7 @@ const TOAST_VARIANT: Record<string, ToastVariant> = {
   PORTAL_INVOICE: 'info',
   PORTAL_DELIVERABLE: 'info',
   PORTAL_TASK_DONE: 'info',
+  PORTAL_REPORT: 'info',
 };
 
 /** "il y a 5 min" — coarse on purpose, this is a notification list, not a log. */

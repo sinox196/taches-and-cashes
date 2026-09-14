@@ -29,6 +29,7 @@ import {
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendMail } from './src/server/email.js';
+import { aiEnabled, summarizeDashboard } from './src/server/ai.js';
 import { initPush, pushEnabled, publicKey as pushPublicKey, sendPush } from './src/server/push.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-local-dev';
@@ -1256,6 +1257,9 @@ async function startServer() {
       // prochaine requête plutôt que via un balayage périodique qui n'existe
       // pas dans cette application.
       await maybeSendEcheanceReminder(company);
+      // Même idiome, côté portail cette fois : le rapport mensuel du mois qui
+      // vient de se terminer est désormais disponible.
+      await maybeSendMonthlyReportNotifications(company);
       next();
     } catch (e) {
       res.status(401).json({ error: 'Invalid token' });
@@ -3779,6 +3783,38 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
   }
 });
 
+/**
+ * Analyse en langage naturel du tableau de bord, via Gemini Flash — voir
+ * [ai.ts](src/server/ai.ts). Le corps n'est **pas** recalculé ici : le client
+ * envoie un `context` déjà construit à partir de ce que `/api/dashboard/executive`
+ * lui a répondu (donc déjà filtré/dépouillé pour son rôle — un SUPERVISEUR ne
+ * peut pas envoyer de montants qu'il n'a jamais reçus). Même garde de rôle que
+ * l'exécutif — c'est le même écran — et une limite de taille sur le corps pour
+ * qu'un contexte mal construit ne consomme pas le quota gratuit pour rien.
+ */
+app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) => {
+  try {
+    if (!DASHBOARD_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (!aiEnabled()) {
+      return res.json({ available: false, text: null });
+    }
+    const context = req.body?.context;
+    if (!context || typeof context !== 'object') {
+      return res.status(400).json({ error: 'context manquant' });
+    }
+    if (JSON.stringify(context).length > 20000) {
+      return res.status(400).json({ error: 'Contexte trop volumineux pour être analysé.' });
+    }
+    const result = await summarizeDashboard(context);
+    res.json(result);
+  } catch (error) {
+    console.error('Dashboard AI summary error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 
   app.post('/api/clients', authenticate, requirePermission('CREATE_CLIENTS'), async (req: any, res: any) => {
@@ -4400,6 +4436,72 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     })();
 
     echeanceReminderInFlight.set(company.id, run);
+    return run;
+  }
+
+  /**
+   * Prévient chaque compte portail qu'un nouveau « Rapport mensuel » est
+   * disponible — le mois qui vient de se terminer. Même idiome que
+   * `maybeSendEcheanceReminder()` juste au-dessus : `GET /api/portal/report`
+   * ne stocke jamais rien et ne prend aucun bouton d'envoi (voir CLAUDE.md,
+   * « Portail client »), donc « un nouveau mois a commencé » — le seul
+   * moment où le rapport du mois précédent devient complet — se détecte
+   * paresseusement ici, dans `authenticate`, à la prochaine requête de
+   * n'importe quel compte de l'entreprise (client compris).
+   *
+   * La marque (`monthlyReportNotifiedMonth`, `YYYY-MM`) vit sur la fiche
+   * entreprise, pas sur chaque client : le rappel part une fois par mois
+   * pour l'entreprise entière, à tous ses comptes portail à la fois. Une
+   * pose en vol dédupliquée évite qu'une rafale de requêtes simultanées au
+   * tout début du mois n'envoie chacune sa propre salve.
+   */
+  const monthlyReportInFlight = new Map<string, Promise<void>>();
+
+  async function maybeSendMonthlyReportNotifications(company: any): Promise<void> {
+    if (!company?.id) return;
+    const month = formatDateISO(new Date()).slice(0, 7);
+    if (company.monthlyReportNotifiedMonth === month) return;
+
+    const inFlight = monthlyReportInFlight.get(company.id);
+    if (inFlight) return inFlight;
+
+    const run = (async () => {
+      try {
+        // Le rapport lui-même couvre toujours le mois civil précédent — voir
+        // GET /api/portal/report — donc c'est ce mois-là, pas le mois
+        // courant, que le libellé de la notification doit nommer.
+        const now = civilParts(new Date());
+        const prevMonth = now.month === 1 ? 12 : now.month - 1;
+        const prevYear = now.month === 1 ? now.year - 1 : now.year;
+        // Même liste que ECHEANCE_REMINDER_MONTHS ci-dessus — réutilisée
+        // plutôt que recopiée une troisième fois.
+        const monthLabel = `${ECHEANCE_REMINDER_MONTHS[prevMonth - 1]} ${prevYear}`;
+
+        const clients = await db.getAllClients(company.id);
+        for (const client of clients) {
+          const portalIds = await portalUserIdsFor(company.id, client.id);
+          for (const uid of portalIds) {
+            await notify(
+              company.id,
+              uid,
+              'PORTAL_REPORT',
+              'Rapport mensuel disponible',
+              `Le rapport de ${monthLabel} est maintenant disponible au téléchargement.`,
+            );
+          }
+        }
+        // Écrite après coup, comme les autres semis/rappels : une exécution
+        // interrompue avant d'avoir notifié tout le monde se rejoue à la
+        // prochaine requête plutôt que de marquer le mois comme fait à tort.
+        await db.updateCompany(company.id, { monthlyReportNotifiedMonth: month });
+      } catch (e) {
+        console.error('[portal] notification rapport mensuel échouée', e);
+      } finally {
+        monthlyReportInFlight.delete(company.id);
+      }
+    })();
+
+    monthlyReportInFlight.set(company.id, run);
     return run;
   }
 
@@ -6724,6 +6826,129 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     }
   });
 
+  /**
+   * Rapport mensuel du dossier — toujours le mois civil *précédent*, jamais
+   * un autre : pas de sélecteur de période côté client, le rapport du mois
+   * qui vient de se terminer est simplement disponible au téléchargement dès
+   * qu'on le demande, sans qu'aucun envoi ni bouton admin ne soit
+   * nécessaire — la même idée que les semis « à la prochaine requête »
+   * ailleurs dans cette app, en encore plus simple puisqu'il n'y a même pas
+   * de drapeau à poser : tout est recalculé à la demande.
+   *
+   * Trois sections, les mêmes questions que le tableau de bord Direction,
+   * mais **jamais** de coût employeur ni de performance de collaborateur :
+   * « Où est l'argent ? » (honoraires facturés / encaissés sur le mois,
+   * TND uniquement — mêmes gardes `countsAsBilled`/`isTnd` que le relevé),
+   * « Où part le temps ? » (heures par mission puis par type de tâche, sans
+   * coût — la même forme que `missions` de `/api/dashboard/executive` mais
+   * dépouillée de `cout`/`tachesSansTaux`), et l'activité détaillée du
+   * dossier sur le mois (une ligne par tâche terminée, sans coût).
+   *
+   * Seules les tâches `COMPLETED` entrent en jeu, même règle que
+   * `/api/portal/tasks` : une tâche en cours n'est pas une information que
+   * le client doit lire en direct, et sa durée n'est de toute façon pas
+   * figée.
+   */
+  app.get('/api/portal/report', authenticate, async (req: any, res: any) => {
+    try {
+      const client = await requirePortalClient(req, res);
+      if (!client) return;
+
+      const MOIS_LABELS_FR = [
+        'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+        'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+      ];
+      const now = civilParts(new Date());
+      const month = now.month === 1 ? 12 : now.month - 1;
+      const year = now.month === 1 ? now.year - 1 : now.year;
+      const startTs = Date.UTC(year, month - 1, 1);
+      const endTs = Date.UTC(year, month - 1, lastDayOfMonth(year, month), 23, 59, 59, 999);
+      const periodLabel = `${MOIS_LABELS_FR[month - 1]} ${year}`;
+
+      // ---- Où est l'argent ? -------------------------------------------
+      const invoices = (await portalInvoicesFor(req.user.companyId, client))
+        .filter(isTnd)
+        .filter((inv: any) => {
+          const ts = inv.issueDate ? new Date(inv.issueDate).getTime() : NaN;
+          return Number.isFinite(ts) && ts >= startTs && ts <= endTs;
+        });
+      const encaissements = (await portalEncaissementsFor(req.user.companyId, client))
+        .filter((e: any) => {
+          const ts = e.date ? new Date(e.date).getTime() : NaN;
+          return Number.isFinite(ts) && ts >= startTs && ts <= endTs;
+        });
+      const honoraires = round3(invoices.reduce((s: number, i: any) => s + num(Number(i.totalNetToPay), 0), 0));
+      const encaisse = round3(encaissements.reduce((s: number, e: any) => s + num(Number(e.amount), 0), 0));
+
+      // ---- Où part le temps ? / activité du dossier ---------------------
+      const users = await db.getAllUsers(req.user.companyId);
+      const entries = (await db.getAllTimeEntries(req.user.companyId))
+        .filter((t: any) => {
+          const key = clientBucketKey(t);
+          return key === String(client.id) || key === `name:${client.name}`;
+        })
+        .filter((t: any) => t.statut === 'COMPLETED')
+        .filter((t: any) => {
+          const ts = parseFrenchDateTs(t.date);
+          return ts >= startTs && ts <= endTs;
+        });
+
+      const missionAgg = new Map<string, any>();
+      for (const t of entries) {
+        const key = t.pole || 'Sans mission';
+        let row = missionAgg.get(key);
+        if (!row) { row = { pole: key, heures: 0, taches: 0, types: new Map<string, any>() }; missionAgg.set(key, row); }
+        const secs = t.dureeSeconds || 0;
+        row.heures += secs / 3600;
+        row.taches += 1;
+        const typeKey = t.taskType || 'Non précisé';
+        let typeRow = row.types.get(typeKey);
+        if (!typeRow) { typeRow = { name: typeKey, heures: 0, taches: 0 }; row.types.set(typeKey, typeRow); }
+        typeRow.heures += secs / 3600;
+        typeRow.taches += 1;
+      }
+      const missions = Array.from(missionAgg.values())
+        .map((r: any) => ({
+          pole: r.pole,
+          heures: round3(r.heures),
+          taches: r.taches,
+          types: Array.from(r.types.values())
+            .map((tr: any) => ({ name: tr.name, heures: round3(tr.heures), taches: tr.taches }))
+            .sort((a: any, b: any) => b.heures - a.heures),
+        }))
+        .sort((a: any, b: any) => b.heures - a.heures);
+
+      const isoKeyOf = (frDate: string) => {
+        const [d, m, y] = String(frDate || '').split('/');
+        return d && m && y ? `${y}-${m}-${d}` : '';
+      };
+      const activites = [...entries]
+        .sort((a: any, b: any) => isoKeyOf(a.date).localeCompare(isoKeyOf(b.date)))
+        .map((t: any) => {
+          const secs = t.dureeSeconds || 0;
+          return {
+            date: t.date || '',
+            mission: t.pole || '',
+            typeTache: t.taskType || '',
+            responsable: users.find((u: any) => u.id === t.userId)?.fullName
+              || users.find((u: any) => u.id === t.userId)?.username || '',
+            dureeFormatted: `${Math.floor(secs / 3600)}h${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}`,
+            statut: t.statut,
+          };
+        });
+
+      res.json({
+        client: { name: client.name, taxId: client.taxId || '' },
+        period: { year, month, label: periodLabel },
+        finance: { honoraires, encaisse, soldeNet: round3(honoraires - encaisse) },
+        missions,
+        activites,
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET Leave Balance
   app.get('/api/hr/balance', authenticate, async (req: any, res: any) => {
     try {
@@ -7743,12 +7968,13 @@ app.post('/api/dashboard/executive', authenticate, async (req: any, res: any) =>
     LOAN_DECISION: 'HR',
     ADVANCE_REQUEST: 'HR',
     ADVANCE_DECISION: 'HR',
-    // Ces quatre-là ne partent jamais que vers un compte CLIENT — la
+    // Ces cinq-là ne partent jamais que vers un compte CLIENT — la
     // destination est un onglet du portail, pas une section du back-office.
     PORTAL_ECHEANCE: 'Echeances',
     PORTAL_INVOICE: 'Statement',
     PORTAL_DELIVERABLE: 'Deliverables',
     PORTAL_TASK_DONE: 'Tasks',
+    PORTAL_REPORT: 'Report',
   };
 
   /**
