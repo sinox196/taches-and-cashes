@@ -10,7 +10,7 @@ import { Reveal, CountUp } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
 import { ClientLogos } from '../components/landing/ClientLogos';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
-import { SELLABLE_PLANS, planMeta, planPriceForSeats, formatDT, FREELANCER_UPGRADE_PRICE_DT } from '../constants/plans';
+import { SELLABLE_PLANS, planMeta, planPriceForSeats, planListPriceForSeats, formatDT, FREELANCER_UPGRADE_PRICE_DT } from '../constants/plans';
 
 const CONTACT_EMAIL = 'contact@taches-and-cash.com';
 
@@ -36,6 +36,8 @@ interface PricingPlan {
   cta: string;
   highlighted?: boolean;
   tone: Tone;
+  /** Remise de lancement en %, si l'offre en porte une — voir plans.ts. */
+  launchDiscountPercent?: number;
 }
 
 /**
@@ -104,6 +106,7 @@ const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
   cta: 'Commencez gratuitement !',
   highlighted: p.highlighted,
   tone: p.highlighted ? 'navy' : p.standalone ? 'accent' : 'plain',
+  launchDiscountPercent: p.launchDiscountPercent,
 }));
 
 /**
@@ -1004,7 +1007,23 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   <h3 className={`text-[15px] font-bold ${tone.title}`}>{plan.name}</h3>
                   <p className={`text-[13.5px] mt-1.5 ${tone.muted}`}>{plan.tagline}</p>
 
+                  {/* Remise de lancement : le tarif catalogue (25 DT/utilisateur/mois)
+                      barré à côté du tarif réellement facturé (15 DT), dérivé de
+                      `planListPriceForSeats()` — jamais un second prix saisi à la
+                      main qui pourrait diverger du montant que le mail de RIB et
+                      la confirmation de paiement annoncent réellement. */}
+                  {plan.launchDiscountPercent != null && (
+                    <span className={`inline-flex items-center gap-1 mt-3 px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-[0.03em] ${tone.bullet}`}>
+                      Offre de lancement · −{plan.launchDiscountPercent}%
+                    </span>
+                  )}
+
                   <div className="mt-6 flex items-baseline gap-1.5">
+                    {!plan.isFree && plan.launchDiscountPercent != null && (
+                      <span className={`text-[20px] font-semibold line-through ${tone.muted}`}>
+                        {formatDT(planListPriceForSeats(meta, seats) ?? 0)}
+                      </span>
+                    )}
                     <span className={`text-[40px] font-extrabold ${tone.title}`}>{plan.isFree ? 'Gratuit' : formatDT(priceDT)}</span>
                     {!plan.isFree && <span className={`text-[14px] ${tone.muted}`}>/mois</span>}
                   </div>

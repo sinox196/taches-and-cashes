@@ -101,6 +101,17 @@ export interface PlanMeta {
   standalone?: boolean;
   /** Offre retirée du catalogue : encore portée par des entreprises, plus vendue. */
   legacy?: boolean;
+  /**
+   * Remise de lancement, en pourcentage, appliquée au tarif par utilisateur
+   * (`priceDT`/`pricePerExtraUserDT` sont déjà le tarif **remisé** — celui
+   * réellement facturé, celui que `planPriceForSeats()` rend, celui du mail
+   * de RIB et de la confirmation de paiement). Ce champ ne sert qu'à
+   * reconstituer le tarif catalogue barré sur la page de tarifs
+   * (`planListPriceForSeats()`) : il n'entre dans aucun calcul de montant dû
+   * — changer `priceDT` sans ajuster ce pourcentage ne fausse jamais ce qui
+   * est facturé, seulement le prix barré affiché.
+   */
+  launchDiscountPercent?: number;
 }
 
 /**
@@ -218,6 +229,11 @@ export const PLANS: PlanMeta[] = [
    * client, date) plutôt que de refuser, pour que le dépassement se facture
    * après coup au lieu de bloquer une création en plein travail. Voir
    * `notifySeatOverageIfNeeded()` dans server.ts.
+   *
+   * **`launchDiscountPercent: 40`** — le tarif catalogue est 25 DT/mois par
+   * utilisateur ; `priceDT`/`pricePerExtraUserDT` portent déjà le tarif remisé
+   * (15 DT, soit 25 × 0,6) puisque c'est lui qui est réellement facturé. Le
+   * 25 DT barré n'existe que sur la page de tarifs, via `planListPriceForSeats()`.
    */
   {
     id: 'COMPLET',
@@ -229,6 +245,7 @@ export const PLANS: PlanMeta[] = [
     seatLimit: 1,
     portalSeatLimit: 0,
     features: CORE_FEATURES,
+    launchDiscountPercent: 40,
   },
 
   // ---- Offres retirées du catalogue ----
@@ -352,6 +369,22 @@ export const planPriceForSeats = (meta: PlanMeta | null, seats: number | null | 
   const requested = Math.round(Number(seats));
   const extra = Math.max(0, (Number.isFinite(requested) ? requested : base) - base);
   return Math.round((meta.priceDT + extra * meta.pricePerExtraUserDT) * 1000) / 1000;
+};
+
+/**
+ * Le tarif catalogue, avant la remise de lancement — pour l'afficher barré
+ * à côté du tarif réel sur la page de tarifs, jamais pour calculer un
+ * montant dû. `null` pour une offre sans `launchDiscountPercent` (aucune
+ * offre ne se trouve alors avoir de prix barré). Dérivé de
+ * `planPriceForSeats()` plutôt que d'un second champ figé : diviser par
+ * `(1 - remise)` ne peut jamais diverger du tarif réellement facturé, quand
+ * bien même `priceDT`/`pricePerExtraUserDT` changeraient sans qu'on pense à
+ * toucher ce fichier ailleurs.
+ */
+export const planListPriceForSeats = (meta: PlanMeta | null, seats: number | null | undefined): number | null => {
+  if (!meta?.launchDiscountPercent) return null;
+  const price = planPriceForSeats(meta, seats);
+  return Math.round((price / (1 - meta.launchDiscountPercent / 100)) * 1000) / 1000;
 };
 
 /**
