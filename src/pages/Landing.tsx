@@ -361,38 +361,48 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
       {view === 'home' ? (
         <>
-          {/* HERO */}
+          {/* HERO — full-bleed photo blending straight into the page's own
+              light background via a mask (no boxed card, no dark scrim),
+              at the user's explicit request to match a reference layout:
+              the photo is pinned to the right edge and fades to transparent
+              on its own left edge, so the copy sits on the ordinary light
+              gradient rather than needing white text over a photo. */}
           <section
-            className="relative pt-[76px] px-6 sm:px-10 pb-10 overflow-hidden"
+            className="relative overflow-hidden"
             style={{ background: 'linear-gradient(180deg,#FBFCFD 0%, #F2F4F7 100%)' }}
           >
-            {/* Décor : deux nappes turquoise qui dérivent, plus une trame de
-                lignes très pâle. `pointer-events-none` — rien ici ne doit
-                intercepter un clic destiné au bouton d'essai. */}
+            {/* Décor : une seule nappe turquoise côté texte — les autres
+                nappes/la trame de la version précédente tombaient sous la
+                photo et ne se voyaient plus. */}
             <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
               <div
-                className="absolute -top-[18%] right-[-10%] w-[760px] h-[760px] animate-[landingAurora_18s_ease-in-out_infinite]"
-                style={{ background: 'radial-gradient(circle, rgba(0,179,166,0.16), rgba(0,179,166,0) 68%)' }}
-              />
-              <div
-                className="absolute top-[24%] left-[-14%] w-[620px] h-[620px] animate-[landingAuroraAlt_22s_ease-in-out_infinite]"
+                className="absolute top-[8%] left-[-16%] w-[560px] h-[560px] animate-[landingAuroraAlt_22s_ease-in-out_infinite]"
                 style={{ background: 'radial-gradient(circle, rgba(59,82,196,0.10), rgba(59,82,196,0) 68%)' }}
-              />
-              <div
-                className="absolute inset-0 opacity-[0.35]"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(rgba(13,27,42,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(13,27,42,0.045) 1px, transparent 1px)',
-                  backgroundSize: '58px 58px',
-                  maskImage: 'radial-gradient(ellipse 80% 60% at 50% 35%, #000 40%, transparent 100%)',
-                  WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 35%, #000 40%, transparent 100%)',
-                }}
               />
             </div>
 
-            <div className="relative max-w-[1280px] mx-auto flex gap-14 items-center flex-wrap">
-              {/* Hero copy */}
-              <div style={{ flex: '1 1 440px', minWidth: 320, maxWidth: 560 }}>
+            {/* Photo, pinned to the right edge and masked on its own left
+                edge — sm+ only; on mobile the same width would mask the
+                photo out from under the text entirely, so it moves to its
+                own stacked band below the copy instead (further down). */}
+            <div
+              aria-hidden
+              className="hidden lg:block absolute inset-y-0 right-0 w-[58%] xl:w-[54%]"
+              style={{
+                WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 32%)',
+                maskImage: 'linear-gradient(90deg, transparent 0%, #000 32%)',
+              }}
+            >
+              <img
+                src="/landing/hero-photo.jpg"
+                alt="Gestionnaire comptable au travail, tableau de bord Tâches &amp; Cash affiché sur son écran"
+                className="w-full h-full object-cover"
+                style={{ objectPosition: '58% 40%' }}
+              />
+            </div>
+
+            <div className="relative max-w-[1280px] mx-auto px-6 sm:px-10 pt-[100px] pb-10 sm:pt-[120px] sm:pb-16">
+              <div style={{ maxWidth: 560 }}>
                 <Reveal>
                   <div className="inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full shadow-[0_2px_10px_rgba(13,27,42,0.05)]">
                     <span className="px-2 py-[3px] rounded-full bg-turquoise text-white text-[10px] font-extrabold tracking-[0.04em] uppercase">Nouveau</span>
@@ -434,103 +444,79 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
               </div>
 
-              {/* Hero photo */}
-              <div style={{ flex: '1 1 560px', minWidth: 320 }} className="relative h-[560px] flex items-center justify-center">
-                <div className="absolute w-[460px] h-[460px] rounded-full blur-[10px] top-6 right-0 animate-[landingBreathe_9s_ease-in-out_infinite]" style={{ background: 'radial-gradient(circle,rgba(0,179,166,0.24),rgba(0,179,166,0) 70%)' }} />
-
-                {/* Photo card. A 1.5px gradient "frame" sits behind the
-                    rounded photo (padding on the wrapper reveals it as a
-                    border) rather than a plain border-color — a flat navy
-                    or turquoise rule read as an afterthought against a real
-                    photo; a soft navy→turquoise diagonal reads as designed. */}
-                <div
-                  className="relative w-[600px] max-w-full h-[430px] rounded-[26px] p-[1.5px]"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(13,27,42,0.35), rgba(0,179,166,0.55))',
-                    boxShadow: '0 44px 80px -26px rgba(13,27,42,0.42), 0 14px 30px rgba(13,27,42,0.12)',
-                  }}
-                >
-                  <div className="relative w-full h-full rounded-[24.5px] overflow-hidden bg-navy">
-                    <img
-                      src="/landing/hero-photo.jpg"
-                      alt="Gestionnaire comptable au travail, tableau de bord Tâches &amp; Cash affiché sur son écran"
-                      className="w-full h-full object-cover"
-                      style={{ objectPosition: '68% 42%' }}
-                    />
-                    {/* Soft navy wash on the bottom edge — keeps the brand
-                        badge below legible over whatever the photo happens
-                        to show behind it, on top of the pill's own opacity. */}
-                    <div
-                      className="absolute inset-x-0 bottom-0 h-24 pointer-events-none"
-                      style={{ background: 'linear-gradient(0deg, rgba(13,27,42,0.28) 0%, rgba(13,27,42,0) 100%)' }}
-                    />
-                  </div>
-
-                  {/* Brand badge, anchored on the photo itself — ties a
-                      stock photo back to the product without relabeling
-                      the mockup already visible on the model's monitor.
-                      Bottom-right: the only photo corner none of the five
-                      floating cards below already claims. */}
-                  <div className="absolute right-4 bottom-4 inline-flex items-center gap-2 pl-2 pr-3.5 py-1.5 rounded-full bg-white/95 backdrop-blur-sm shadow-[0_8px_20px_rgba(13,27,42,0.22)]">
-                    <Logo size={18} />
-                    <span className="text-[12px] font-extrabold text-navy tracking-[-0.01em]">Tâches &amp; Cash</span>
+              {/* Floating stat cards, scattered over the photo — sm+ only,
+                  same reason the photo itself is. Positioned in this same
+                  z-10 layer (not inside the masked photo wrapper) so they
+                  stay perfectly sharp regardless of the mask. */}
+              <div className="hidden lg:block pointer-events-none">
+                <div className="absolute right-[26%] lg:right-[30%] top-8 w-[168px] bg-white rounded-2xl p-3.5 animate-[landingFloatA_6s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-[34px] h-[34px] rounded-[10px] bg-[#E3F7F5] flex items-center justify-center shrink-0">
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-turquoise relative">
+                        <div className="absolute w-[5px] h-[1.5px] bg-turquoise top-[6px] left-[7px] rotate-[35deg]" />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[15px] font-extrabold text-navy leading-[1.1]">08h 42m</div>
+                      <div className="text-[10px] text-[#8A93A0] mt-0.5">Temps travaillé</div>
+                    </div>
                   </div>
                 </div>
 
-                {/* Floating cards */}
-                <div className="absolute inset-0 pointer-events-none">
-                  <div className="absolute top-[-6px] left-[-30px] w-[172px] bg-white rounded-2xl p-3.5 animate-[landingFloatA_6s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-[34px] h-[34px] rounded-[10px] bg-[#E3F7F5] flex items-center justify-center shrink-0">
-                        <div className="w-3.5 h-3.5 rounded-full border-2 border-turquoise relative">
-                          <div className="absolute w-[5px] h-[1.5px] bg-turquoise top-[6px] left-[7px] rotate-[35deg]" />
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[15px] font-extrabold text-navy leading-[1.1]">08h 42m</div>
-                        <div className="text-[10px] text-[#8A93A0] mt-0.5">Temps travaillé</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="absolute bottom-9 left-[-56px] w-[180px] bg-white rounded-2xl p-3.5 animate-[landingFloatB_7s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[12px] font-bold text-navy">Audit client</span>
-                      <span className="text-[9px] font-bold text-[#00857C] bg-[#E3F7F5] px-[7px] py-[3px] rounded-full">En cours</span>
-                    </div>
-                    <div className="mt-2.5 h-[5px] rounded-[3px] bg-[#EEF1F4]"><div className="w-[72%] h-[5px] rounded-[3px] bg-[#22C55E]" /></div>
-                    <div className="text-[10px] font-bold text-[#8A93A0] mt-1.5 text-right">72%</div>
-                  </div>
-
-                  <div className="absolute top-16 right-[-46px] w-[150px] bg-white rounded-2xl p-3.5 animate-[landingFloatC_6.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="text-[10px] text-[#8A93A0] uppercase tracking-[0.04em] font-bold">Équipe</div>
-                    <div className="text-[20px] font-extrabold text-navy mt-0.5">84%</div>
-                    <div className="flex items-end gap-1 mt-2 h-6">
-                      <div className="w-2 h-[40%] bg-[#CFEDEA] rounded-[2px]" />
-                      <div className="w-2 h-[70%] bg-[#5FCBC0] rounded-[2px]" />
-                      <div className="w-2 h-[55%] bg-turquoise rounded-[2px]" />
-                      <div className="w-2 h-[90%] bg-navy rounded-[2px]" />
-                    </div>
-                  </div>
-
-                  <div className="absolute bottom-[-16px] right-2 w-[186px] bg-white rounded-2xl p-3.5 animate-[landingFloatD_7.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-[34px] h-[34px] rounded-[10px] bg-[#EAFBF0] flex items-center justify-center shrink-0 text-[#22C55E] text-[16px] font-extrabold">↑</div>
-                      <div>
-                        <div className="text-[15px] font-extrabold text-[#22C55E] leading-[1.1]">+12 450 DT</div>
-                        <div className="text-[10px] text-[#8A93A0] mt-0.5">Flux de trésorerie</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="absolute top-[-24px] right-24 w-[200px] bg-white rounded-2xl px-3.5 py-3 opacity-[0.96] animate-[landingFloatE_8s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.24)' }}>
-                    <div className="flex items-center gap-2">
-                      <span className="w-[7px] h-[7px] rounded-full bg-[#22C55E] shrink-0 animate-[landingPulseDot_2s_ease-in-out_infinite]" />
-                      <span className="text-[11.5px] font-bold text-navy">Nouvelle tâche assignée</span>
-                    </div>
-                    <div className="text-[10.5px] text-[#8A93A0] mt-[3px] ml-[15px]">Audit dossier client</div>
+                <div className="absolute right-3 lg:right-6 top-16 w-[150px] bg-white rounded-2xl p-3.5 animate-[landingFloatC_6.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="text-[10px] text-[#8A93A0] uppercase tracking-[0.04em] font-bold">Équipe</div>
+                  <div className="text-[20px] font-extrabold text-navy mt-0.5">84%</div>
+                  <div className="flex items-end gap-1 mt-2 h-6">
+                    <div className="w-2 h-[40%] bg-[#CFEDEA] rounded-[2px]" />
+                    <div className="w-2 h-[70%] bg-[#5FCBC0] rounded-[2px]" />
+                    <div className="w-2 h-[55%] bg-turquoise rounded-[2px]" />
+                    <div className="w-2 h-[90%] bg-navy rounded-[2px]" />
                   </div>
                 </div>
+
+                <div className="absolute right-[24%] lg:right-[28%] bottom-16 w-[180px] bg-white rounded-2xl p-3.5 animate-[landingFloatB_7s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-bold text-navy">Audit client</span>
+                    <span className="text-[9px] font-bold text-[#00857C] bg-[#E3F7F5] px-[7px] py-[3px] rounded-full">En cours</span>
+                  </div>
+                  <div className="mt-2.5 h-[5px] rounded-[3px] bg-[#EEF1F4]"><div className="w-[72%] h-[5px] rounded-[3px] bg-[#22C55E]" /></div>
+                  <div className="text-[10px] font-bold text-[#8A93A0] mt-1.5 text-right">72%</div>
+                </div>
+
+                <div className="absolute right-4 lg:right-8 bottom-6 w-[186px] bg-white rounded-2xl p-3.5 animate-[landingFloatD_7.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-[34px] h-[34px] rounded-[10px] bg-[#EAFBF0] flex items-center justify-center shrink-0 text-[#22C55E] text-[16px] font-extrabold">↑</div>
+                    <div>
+                      <div className="text-[15px] font-extrabold text-[#22C55E] leading-[1.1]">+12 450 DT</div>
+                      <div className="text-[10px] text-[#8A93A0] mt-0.5">Flux de trésorerie</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="absolute right-[16%] lg:right-[20%] top-1/2 -translate-y-1/2 inline-flex items-center gap-2 pl-2 pr-3.5 py-1.5 rounded-full bg-white/95 backdrop-blur-sm shadow-[0_8px_20px_rgba(13,27,42,0.22)]">
+                  <Logo size={18} />
+                  <span className="text-[12px] font-extrabold text-navy tracking-[-0.01em]">Tâches &amp; Cash</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Mobile: the photo drops below the copy as its own full-width
+                band instead of sitting beside it — still edge to edge, still
+                fading in rather than boxed, just from the top this time. */}
+            <div aria-hidden className="lg:hidden relative w-full h-[240px] sm:h-[320px] mt-4">
+              <div
+                className="absolute inset-0"
+                style={{
+                  WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 22%)',
+                  maskImage: 'linear-gradient(180deg, transparent 0%, #000 22%)',
+                }}
+              >
+                <img
+                  src="/landing/hero-photo.jpg"
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={{ objectPosition: '62% 35%' }}
+                />
               </div>
             </div>
           </section>
