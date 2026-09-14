@@ -24,30 +24,10 @@ interface ClientLogo {
 }
 
 const CLIENT_LOGOS: ClientLogo[] = [
-  { name: 'ETAP',                   src: '/logos/clients/etap.png' },
-  { name: 'OMV',                    src: '/logos/clients/omv.png' },
-  { name: 'DNA Consulting',         src: '/logos/clients/dna-consulting.png' },
-  { name: 'SOPAL',                  src: '/logos/clients/sopal.png' },
-  { name: 'SECIL',                  src: '/logos/clients/secil.png' },
-  { name: 'Ciments de Gabès',       src: '/logos/clients/ciments-de-gabes.png' },
-  { name: 'Société Pavé du Sud',    src: '/logos/clients/sps.png' },
-  { name: 'Zarzis Park',            src: '/logos/clients/zarzis-park.png' },
-  { name: 'OneTech',                src: '/logos/clients/onetech.png' },
-  { name: 'Groupe STUDI',           src: '/logos/clients/groupe-studi.png' },
-  { name: 'PEEUG',                  src: '/logos/clients/peeug.png' },
-  { name: 'SIMG',                   src: '/logos/clients/simg.png' },
-  { name: 'M3E',                    src: '/logos/clients/m3e.png' },
-  { name: 'MEDGYP',                 src: '/logos/clients/medgyp.png' },
-  { name: 'FEEDCOM',                src: '/logos/clients/feedcom.png' },
-  { name: 'Green Fruits',           src: '/logos/clients/green-fruits.png' },
-  { name: 'ACTIA',                  src: '/logos/clients/actia.png' },
-  { name: 'ALKIMIA',                src: '/logos/clients/alkimia.png' },
-  { name: 'Tunisie Carmeuse',       src: '/logos/clients/tunisie-carmeuse.png' },
-  { name: 'GTI',                    src: '/logos/clients/gti.png' },
-  { name: 'Ben Rehouma Industries', src: '/logos/clients/bri.png' },
-  { name: 'APII',                   src: '/logos/clients/apii.png' },
-  { name: 'APIA',                   src: '/logos/clients/apia.png' },
-  { name: 'ACCORD Expertise Comptable', src: '/logos/clients/accord-expertise.png' },
+  { name: 'IQRATIC',                     src: '/logos/clients/iqratic.png' },
+  { name: 'BUSINESS ECO',                src: '/logos/clients/business-eco.png' },
+  { name: 'TechITEasy',                  src: '/logos/clients/techiteasy.png' },
+  { name: 'ACCORD Expertise Comptable',  src: '/logos/clients/accord-expertise.png' },
 ];
 
 const Tile: React.FC<{ logo: ClientLogo }> = ({ logo }) => {
