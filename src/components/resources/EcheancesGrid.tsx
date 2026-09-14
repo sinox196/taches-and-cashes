@@ -84,6 +84,21 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
 
   const [menu, setMenu] = useState<{ clientId: number; columnId: string; x: number; y: number; allowVocabEdit: boolean } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Un statut « payé » (couleur `done` — aujourd'hui « Oui », la seule valeur
+   * semée dans cette couleur) demande un détail de règlement avant de
+   * s'enregistrer : ce petit panneau, plutôt qu'un `prompt()` ou un aller-retour
+   * silencieux. Le test porte sur la **couleur**, jamais sur le libellé « Oui »
+   * en dur — même raison que `COLOR_TOKENS` existe : la valeur est
+   * admin-éditable et peut être renommée sans que ce comportement se détache
+   * d'elle. Ouvrir le panneau ne modifie rien tant que « Enregistrer » n'a pas
+   * été cliqué — Annuler laisse la cellule exactement comme avant.
+   */
+  const [quittanceModal, setQuittanceModal] = useState<{ clientId: number; columnId: string; status: string; x: number; y: number } | null>(null);
+  const [quittanceNumberInput, setQuittanceNumberInput] = useState('');
+  const [montantInput, setMontantInput] = useState('');
+  const quittanceRef = useRef<HTMLDivElement>(null);
   const [addingStatus, setAddingStatus] = useState(false);
   const [newStatusLabel, setNewStatusLabel] = useState('');
   const [newStatusColor, setNewStatusColor] = useState(COLOR_ORDER[0]);
@@ -109,6 +124,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
     setMenu({ clientId, columnId, x: rect.left, y: rect.bottom, allowVocabEdit });
     setAddingStatus(false);
     setEditingStatusId(null);
+    setQuittanceModal(null);
   };
 
   const [editingColumn, setEditingColumn] = useState<Column | null>(null);
@@ -173,6 +189,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
         setEditingStatusId(null);
       }
       if (editRef.current && !editRef.current.contains(e.target as Node)) setEditingColumn(null);
+      if (quittanceRef.current && !quittanceRef.current.contains(e.target as Node)) setQuittanceModal(null);
     };
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
@@ -188,6 +205,22 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
     for (const s of statuses) m.set(`${s.clientId}:${s.columnId}`, s.status);
     return m;
   }, [statuses]);
+
+  /** Same key as `statusByCell`, but the whole row — `quittanceNumber`/`montant` included. */
+  const cellByKey = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const s of statuses) m.set(`${s.clientId}:${s.columnId}`, s);
+    return m;
+  }, [statuses]);
+
+  /** A short second line for a cell that carries a receipt detail, or '' when it doesn't. */
+  const detailLine = (cell: any) => {
+    if (!cell || (!cell.quittanceNumber && cell.montant == null)) return '';
+    const parts = [];
+    if (cell.quittanceNumber) parts.push(`N°${cell.quittanceNumber}`);
+    if (cell.montant != null) parts.push(`${Number(cell.montant).toLocaleString('fr-FR')} DT`);
+    return parts.join(' · ');
+  };
 
   const normalize = (v: string) => v.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const term = normalize(search.trim());
@@ -337,23 +370,59 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
     }
   };
 
-  const setCellStatus = async (clientId: number, columnId: string, status: string | null) => {
+  /**
+   * `quittanceNumber`/`montant` are always sent explicitly (never omitted) —
+   * the server resets them to `null` whenever they're absent from the body,
+   * so a plain status pick (Vide, or any non-"done" value) clearing them is
+   * the same request shape as a done-status save carrying them, not a
+   * special case here.
+   */
+  const setCellStatus = async (clientId: number, columnId: string, status: string | null, quittanceNumber: string | null = null, montant: number | null = null) => {
     const key = `${clientId}:${columnId}`;
     setStatuses(prev => {
       const exists = prev.some(s => s.clientId === clientId && s.columnId === columnId);
-      if (exists) return prev.map(s => (s.clientId === clientId && s.columnId === columnId ? { ...s, status } : s));
-      return [...prev, { id: key, clientId, columnId, status }];
+      if (exists) return prev.map(s => (s.clientId === clientId && s.columnId === columnId ? { ...s, status, quittanceNumber, montant } : s));
+      return [...prev, { id: key, clientId, columnId, status, quittanceNumber, montant }];
     });
     setMenu(null);
+    setQuittanceModal(null);
     try {
       await fetch('/api/echeance-statuses', {
         method: 'PUT', headers: authHeaders,
-        body: JSON.stringify({ clientId, columnId, status }),
+        body: JSON.stringify({ clientId, columnId, status, quittanceNumber, montant }),
       });
     } catch (e) {
       setError(friendlyError(e, 'Mise à jour impossible.'));
       await load();
     }
+  };
+
+  /**
+   * Le clic sur une valeur du menu passe par ici plutôt que d'appeler
+   * `setCellStatus` en direct : une valeur colorée `done` (« Oui »
+   * aujourd'hui) ouvre d'abord le petit panneau Quittance/Montant — la
+   * cellule ne change qu'à l'Enregistrer de ce panneau, pas au clic sur la
+   * valeur elle-même. Le panneau se pré-remplit avec ce que la cellule porte
+   * déjà, pour corriger un montant sans retaper le numéro de quittance.
+   */
+  const pickStatus = (clientId: number, columnId: string, opt: StatusOption, x: number, y: number) => {
+    if ((opt.color || DEFAULT_COLOR) === 'done') {
+      const existing = cellByKey.get(`${clientId}:${columnId}`);
+      setQuittanceNumberInput(existing?.quittanceNumber || '');
+      setMontantInput(existing?.montant != null ? String(existing.montant) : '');
+      setQuittanceModal({ clientId, columnId, status: opt.label, x, y });
+      setMenu(null);
+      return;
+    }
+    setCellStatus(clientId, columnId, opt.label);
+  };
+
+  const saveQuittance = () => {
+    if (!quittanceModal) return;
+    const trimmedMontant = montantInput.trim();
+    const montant = trimmedMontant === '' ? null : Number(trimmedMontant);
+    if (montant != null && !Number.isFinite(montant)) return;
+    setCellStatus(quittanceModal.clientId, quittanceModal.columnId, quittanceModal.status, quittanceNumberInput.trim() || null, montant);
   };
 
   // Group year columns by month for the two-row header (colSpan per month) and for the calendar cards.
@@ -377,13 +446,13 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex rounded-lg border border-gray-200 overflow-hidden shrink-0">
             <button
-              onClick={() => { setView('grid'); setEditingColumn(null); setMenu(null); }}
+              onClick={() => { setView('grid'); setEditingColumn(null); setMenu(null); setQuittanceModal(null); }}
               className={`px-3 py-2 text-[12.5px] font-medium flex items-center gap-1.5 ${view === 'grid' ? 'bg-navy text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
             >
               <Table2 className="w-3.5 h-3.5" /> Tableau
             </button>
             <button
-              onClick={() => { setView('calendar'); setEditingColumn(null); setMenu(null); }}
+              onClick={() => { setView('calendar'); setEditingColumn(null); setMenu(null); setQuittanceModal(null); }}
               className={`px-3 py-2 text-[12.5px] font-medium flex items-center gap-1.5 border-l border-gray-200 ${view === 'calendar' ? 'bg-navy text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
             >
               <CalendarDays className="w-3.5 h-3.5" /> Calendrier par client
@@ -577,16 +646,19 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
                     {client.name}
                   </td>
                   {yearColumns.map(col => {
-                    const status = statusByCell.get(`${client.id}:${col.id}`) ?? null;
+                    const cell = cellByKey.get(`${client.id}:${col.id}`);
+                    const status = cell?.status ?? null;
                     const style = styleForStatus(status);
+                    const detail = detailLine(cell);
                     return (
                       <td key={col.id} className="border border-gray-200 p-0.5">
                         <button
                           onClick={e => openMenu(client.id, col.id, (e.target as HTMLElement).getBoundingClientRect(), true)}
-                          title={status || 'Vide'}
-                          className={`w-full h-7 rounded text-[10.5px] font-semibold truncate px-1 ${style.bg} ${style.fg} hover:ring-1 hover:ring-gray-300 transition-shadow`}
+                          title={detail ? `${status} — Quittance N° ${cell?.quittanceNumber || '—'}${cell?.montant != null ? `, ${Number(cell.montant).toLocaleString('fr-FR')} DT` : ''}` : (status || 'Vide')}
+                          className={`w-full min-h-7 rounded text-[10.5px] font-semibold px-1 py-0.5 flex flex-col items-center justify-center leading-tight ${style.bg} ${style.fg} hover:ring-1 hover:ring-gray-300 transition-shadow`}
                         >
-                          {status || '—'}
+                          <span className="truncate max-w-full">{status || '—'}</span>
+                          {detail && <span className="truncate max-w-full text-[9px] font-normal opacity-80">{detail}</span>}
                         </button>
                       </td>
                     );
@@ -649,8 +721,10 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
                   </div>
                   <div>
                     {g.cols.map(col => {
-                      const status = statusByCell.get(`${calendarClient.id}:${col.id}`) ?? null;
+                      const cell = cellByKey.get(`${calendarClient.id}:${col.id}`);
+                      const status = cell?.status ?? null;
                       const style = styleForStatus(status);
+                      const detail = detailLine(cell);
                       return (
                         <button
                           key={col.id}
@@ -658,8 +732,9 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
                           className="w-full flex items-stretch justify-between gap-0 border-t border-gray-200 hover:bg-gray-50 text-left"
                         >
                           <span className="flex-1 min-w-0 truncate text-[12.5px] text-gray-700 px-3.5 py-2 border-r border-gray-200">{col.label}</span>
-                          <span className={`shrink-0 flex items-center px-2.5 text-[10.5px] font-semibold ${style.bg} ${style.fg}`}>
-                            {status || 'Vide'}
+                          <span className={`shrink-0 flex flex-col items-end justify-center px-2.5 py-1 text-[10.5px] font-semibold ${style.bg} ${style.fg}`}>
+                            <span>{status || 'Vide'}</span>
+                            {detail && <span className="text-[9px] font-normal opacity-80">{detail}</span>}
                           </span>
                         </button>
                       );
@@ -721,7 +796,7 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
               ) : (
                 <>
                   <button
-                    onClick={() => setCellStatus(menu.clientId, menu.columnId, opt.label)}
+                    onClick={() => pickStatus(menu.clientId, menu.columnId, opt, menu.x, menu.y)}
                     className="flex-1 min-w-0 text-left px-3 py-1.5 text-[12px] text-gray-700 flex items-center gap-2"
                   >
                     <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${COLOR_TOKENS[opt.color || DEFAULT_COLOR]?.dot ?? COLOR_TOKENS[DEFAULT_COLOR].dot}`} />
@@ -830,6 +905,48 @@ export const EcheancesGrid: React.FC<EcheancesGridProps> = ({ canManage }) => {
                 Enregistrer
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {quittanceModal && (
+        <div
+          ref={quittanceRef}
+          style={{ position: 'fixed', left: quittanceModal.x, top: quittanceModal.y, zIndex: 100 }}
+          className="bg-white border border-gray-200 rounded-lg shadow-xl p-3 w-64 space-y-2.5"
+        >
+          <div className="text-[11.5px] font-semibold text-gray-700 truncate">« {quittanceModal.status} » — détail du règlement</div>
+          <div>
+            <label className="block text-[10.5px] font-semibold text-gray-500 mb-1">N° Quittance</label>
+            <input
+              value={quittanceNumberInput}
+              onChange={e => setQuittanceNumberInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveQuittance(); } if (e.key === 'Escape') setQuittanceModal(null); }}
+              placeholder="Ex: 2026-0451"
+              autoFocus
+              className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[12.5px] focus:outline-none focus:border-gray-400"
+            />
+          </div>
+          <div>
+            <label className="block text-[10.5px] font-semibold text-gray-500 mb-1">Montant (DT)</label>
+            <input
+              type="number"
+              step="0.001"
+              min="0"
+              value={montantInput}
+              onChange={e => setMontantInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveQuittance(); } if (e.key === 'Escape') setQuittanceModal(null); }}
+              placeholder="0.000"
+              className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[12.5px] focus:outline-none focus:border-gray-400"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => setQuittanceModal(null)} className="px-2.5 py-1 border border-gray-300 rounded-md text-[12px] font-medium text-gray-600 hover:bg-gray-50">
+              Annuler
+            </button>
+            <button onClick={saveQuittance} className="px-2.5 py-1 bg-navy text-white rounded-md text-[12px] font-medium">
+              Enregistrer
+            </button>
           </div>
         </div>
       )}

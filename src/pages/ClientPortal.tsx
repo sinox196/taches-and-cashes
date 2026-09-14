@@ -75,7 +75,7 @@ interface Deliverable {
 }
 
 interface EcheanceColumn { id: string; year: number; month: number; label: string; sortOrder: number }
-interface EcheanceStatusCell { columnId: string; status: string | null }
+interface EcheanceStatusCell { columnId: string; status: string | null; quittanceNumber?: string | null; montant?: number | null }
 interface EcheanceStatusOption { id: string; label: string; color?: string }
 interface EcheanceData { columns: EcheanceColumn[]; statuses: EcheanceStatusCell[]; statusOptions: EcheanceStatusOption[] }
 
@@ -625,11 +625,19 @@ const EcheancesView: React.FC<{ data: EcheanceData | null }> = ({ data }) => {
     const g = monthGroups.find(g => g.month === c.month);
     if (g) g.cols.push(c); else monthGroups.push({ month: c.month, cols: [c] });
   }
-  const statusByColumn = new Map<string, string | null>(data.statuses.map(s => [s.columnId, s.status]));
+  const cellByColumn = new Map<string, EcheanceStatusCell>(data.statuses.map(s => [s.columnId, s]));
   const styleFor = (status: string | null) => {
     if (!status) return ECHEANCE_EMPTY_STYLE;
     const opt = data.statusOptions.find(o => o.label === status);
     return ECHEANCE_COLOR_TOKENS[opt?.color || 'gray'] ?? ECHEANCE_COLOR_TOKENS.gray;
+  };
+  /** Same "N°… · … DT" second line as the admin grid — read-only here, the portal never writes échéances. */
+  const detailLine = (cell: EcheanceStatusCell | undefined) => {
+    if (!cell || (!cell.quittanceNumber && cell.montant == null)) return '';
+    const parts: string[] = [];
+    if (cell.quittanceNumber) parts.push(`N°${cell.quittanceNumber}`);
+    if (cell.montant != null) parts.push(`${Number(cell.montant).toLocaleString('fr-FR')} DT`);
+    return parts.join(' · ');
   };
 
   return (
@@ -661,13 +669,16 @@ const EcheancesView: React.FC<{ data: EcheanceData | null }> = ({ data }) => {
               </div>
               <div>
                 {g.cols.map(col => {
-                  const status = statusByColumn.get(col.id) ?? null;
+                  const cell = cellByColumn.get(col.id);
+                  const status = cell?.status ?? null;
                   const style = styleFor(status);
+                  const detail = detailLine(cell);
                   return (
                     <div key={col.id} className="flex items-stretch justify-between gap-0 border-t border-gray-200">
                       <span className="flex-1 min-w-0 truncate text-[12.5px] text-gray-700 px-3.5 py-2 border-r border-gray-200">{col.label}</span>
-                      <span className={`shrink-0 flex items-center px-2.5 text-[10.5px] font-semibold ${style.bg} ${style.fg}`}>
-                        {status || 'Vide'}
+                      <span className={`shrink-0 flex flex-col items-end justify-center px-2.5 py-1 text-[10.5px] font-semibold ${style.bg} ${style.fg}`}>
+                        <span>{status || 'Vide'}</span>
+                        {detail && <span className="text-[9px] font-normal opacity-80">{detail}</span>}
                       </span>
                     </div>
                   );

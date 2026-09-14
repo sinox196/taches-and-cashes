@@ -6818,7 +6818,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         columns: columns.map((c: any) => ({ id: c.id, year: c.year, month: c.month, label: c.label, sortOrder: c.sortOrder })),
         statuses: statuses
           .filter((s: any) => String(s.clientId) === String(client.id))
-          .map((s: any) => ({ columnId: s.columnId, status: s.status })),
+          .map((s: any) => ({ columnId: s.columnId, status: s.status, quittanceNumber: s.quittanceNumber ?? null, montant: s.montant ?? null })),
         statusOptions: statusOptions.map((o: any) => ({ id: o.id, label: o.label, color: o.color })),
       });
     } catch (error) {
@@ -8866,7 +8866,23 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     }
   });
 
-  /** Upserts a single cell — one call per edit, so a 900×30 grid never sends more than one changed cell at a time. */
+  /**
+   * Upserts a single cell — one call per edit, so a 900×30 grid never sends
+   * more than one changed cell at a time.
+   *
+   * `quittanceNumber`/`montant` only ever mean something on a *set* status —
+   * the client (EcheancesGrid.tsx) only ever sends them alongside a
+   * "done"-coloured value (today, "Oui") after prompting for them in a small
+   * popup. This route re-derives both from **this** request rather than
+   * merging over whatever was already stored: picking a different status —
+   * or clearing the cell back to "Vide" — always resets them to `null`. A
+   * partial-merge instead would leave a stale receipt sitting on a cell that
+   * no longer says "Oui", ready to resurface unchanged the day a status
+   * option's color is edited (or another one is recolored "done") — the same
+   * "don't let a stale fact read as current" reasoning presence already
+   * follows when a user goes INACTIVE (its device/idle fields are cleared,
+   * not merely stopped from updating).
+   */
   app.put('/api/echeance-statuses', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
       const { clientId, columnId, status } = req.body;
@@ -8876,17 +8892,30 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         if (!validLabels.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
       }
       const normalizedStatus = status === '' ? null : status;
+
+      let quittanceNumber: string | null = null;
+      if (normalizedStatus !== null && req.body.quittanceNumber != null) {
+        quittanceNumber = String(req.body.quittanceNumber).trim().slice(0, 60) || null;
+      }
+      let montant: number | null = null;
+      if (normalizedStatus !== null && req.body.montant !== undefined && req.body.montant !== null && req.body.montant !== '') {
+        const m = Number(req.body.montant);
+        if (!Number.isFinite(m) || m < 0) return res.status(400).json({ error: 'Montant invalide' });
+        montant = round3(m);
+      }
+      const updates = { status: normalizedStatus, quittanceNumber, montant };
+
       const existing = (await db.getAllEcheanceStatuses(req.user.companyId))
         .find((s: any) => s.clientId === Number(clientId) && s.columnId === columnId);
       if (existing) {
-        const updated = await db.updateEcheanceStatus(req.user.companyId, existing.id, { status: normalizedStatus });
-        await notifyEcheanceChange(req.user.companyId, Number(clientId), columnId, normalizedStatus);
+        const updated = await db.updateEcheanceStatus(req.user.companyId, existing.id, updates);
+        await notifyEcheanceChange(req.user.companyId, Number(clientId), columnId, normalizedStatus, quittanceNumber, montant);
         return res.json(updated);
       }
       const created = await db.createEcheanceStatus(req.user.companyId, {
-        id: genId('ecs'), clientId: Number(clientId), columnId, status: normalizedStatus,
+        id: genId('ecs'), clientId: Number(clientId), columnId, ...updates,
       });
-      await notifyEcheanceChange(req.user.companyId, Number(clientId), columnId, normalizedStatus);
+      await notifyEcheanceChange(req.user.companyId, Number(clientId), columnId, normalizedStatus, quittanceNumber, montant);
       res.status(201).json(created);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -8896,16 +8925,22 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   /**
    * Prévient le client d'un changement réel sur SA ligne — jamais d'un
    * retour à vide, qui n'est pas une information à lui transmettre (un
-   * effacement se lit comme une correction interne, pas un événement).
+   * effacement se lit comme une correction interne, pas un événement). Le
+   * corps du message porte le détail du règlement quand il y en a un
+   * (quittance et/ou montant) — c'est justement ce que le client attend de
+   * voir passer quand le cabinet coche une échéance « payée ».
    */
-  async function notifyEcheanceChange(companyId: string, clientId: number, columnId: string, status: string | null) {
+  async function notifyEcheanceChange(companyId: string, clientId: number, columnId: string, status: string | null, quittanceNumber: string | null, montant: number | null) {
     if (!status) return;
     const portalIds = await portalUserIdsFor(companyId, clientId);
     if (portalIds.length === 0) return;
     const column = (await db.getAllEcheanceColumns(companyId)).find((c: any) => c.id === columnId);
+    const detail = (quittanceNumber || montant != null)
+      ? ` (Quittance N° ${quittanceNumber || '—'}${montant != null ? `, ${formatCostTND(montant)}` : ''})`
+      : '';
     for (const uid of portalIds) {
       await notify(companyId, uid, 'PORTAL_ECHEANCE', 'Échéance mise à jour',
-        `« ${column?.label || 'Une échéance'} » est maintenant « ${status} ».`);
+        `« ${column?.label || 'Une échéance'} » est maintenant « ${status} »${detail}.`);
     }
   }
 
