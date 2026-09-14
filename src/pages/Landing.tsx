@@ -434,85 +434,46 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
               </div>
 
-              {/* Hero dashboard mockup */}
+              {/* Hero photo */}
               <div style={{ flex: '1 1 560px', minWidth: 320 }} className="relative h-[560px] flex items-center justify-center">
-                <div className="absolute w-[420px] h-[420px] rounded-full blur-[10px] top-10 right-5 animate-[landingBreathe_9s_ease-in-out_infinite]" style={{ background: 'radial-gradient(circle,rgba(0,179,166,0.22),rgba(0,179,166,0) 70%)' }} />
+                <div className="absolute w-[460px] h-[460px] rounded-full blur-[10px] top-6 right-0 animate-[landingBreathe_9s_ease-in-out_infinite]" style={{ background: 'radial-gradient(circle,rgba(0,179,166,0.24),rgba(0,179,166,0) 70%)' }} />
 
-                {/* Main dashboard card */}
+                {/* Photo card. A 1.5px gradient "frame" sits behind the
+                    rounded photo (padding on the wrapper reveals it as a
+                    border) rather than a plain border-color — a flat navy
+                    or turquoise rule read as an afterthought against a real
+                    photo; a soft navy→turquoise diagonal reads as designed. */}
                 <div
-                  className="relative w-[560px] max-w-full h-[460px] bg-white rounded-[24px] overflow-hidden border border-white/60"
+                  className="relative w-[600px] max-w-full h-[430px] rounded-[26px] p-[1.5px]"
                   style={{
-                    boxShadow: '0 40px 70px -24px rgba(13,27,42,0.38), 0 12px 28px rgba(13,27,42,0.10)',
-                    transform: 'perspective(1600px) rotateY(-7deg) rotateX(2deg)',
+                    background: 'linear-gradient(135deg, rgba(13,27,42,0.35), rgba(0,179,166,0.55))',
+                    boxShadow: '0 44px 80px -26px rgba(13,27,42,0.42), 0 14px 30px rgba(13,27,42,0.12)',
                   }}
                 >
-                  <div className="flex h-full">
-                    <div className="w-[42px] shrink-0 bg-navy flex flex-col items-center pt-2.5 gap-[11px]">
-                      <div className="w-[18px] h-[18px] rounded-full bg-white flex items-center justify-center text-navy text-[9px] font-extrabold mb-0.5">✓</div>
-                      <div className="w-6 h-5 rounded-[6px] bg-[#1D2939] flex items-center justify-center"><div className="w-[9px] h-[9px] bg-white rounded-[2px]" /></div>
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-full border-2 border-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
-                    </div>
-                    <div className="flex-1 min-w-0 flex flex-col">
-                      <div className="h-9 shrink-0 bg-white border-b border-[#E6E9EE] flex items-center justify-between px-3.5">
-                        <span className="text-[11px] font-bold text-navy">Tableau de bord</span>
-                        <div className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444]" />
-                          <div className="w-[18px] h-[18px] rounded-full bg-navy text-white text-[8px] font-extrabold flex items-center justify-center">AD</div>
-                        </div>
-                      </div>
-                      <div className="flex-1 p-3 bg-[#FAFBFC] overflow-hidden">
-                        <div className="grid grid-cols-5 gap-1.5">
-                          {[
-                            { color: '#FFEDD5', label: 'Coût empl.', value: '18 240 DT' },
-                            { color: '#DBEAFE', label: 'Effectif', value: '24' },
-                            { color: '#EDE9FE', label: 'Tâches', value: '186' },
-                            { color: '#D1FAE5', label: 'Clients', value: '32' },
-                            { color: '#FCE7F3', label: 'RH en cours', value: '5' },
-                          ].map(tile => (
-                            <div key={tile.label} className="bg-white border border-[#E6E9EE] rounded-[9px] px-[7px] py-1.5">
-                              <div className="w-[15px] h-[15px] rounded-full mb-1" style={{ background: tile.color }} />
-                              <div className="text-[6.5px] font-bold text-[#8A93A0] uppercase tracking-[0.03em]">{tile.label}</div>
-                              <div className="text-[11px] font-extrabold text-navy mt-0.5">{tile.value}</div>
-                            </div>
-                          ))}
-                        </div>
+                  <div className="relative w-full h-full rounded-[24.5px] overflow-hidden bg-navy">
+                    <img
+                      src="/landing/hero-photo.jpg"
+                      alt="Gestionnaire comptable au travail, tableau de bord Tâches &amp; Cash affiché sur son écran"
+                      className="w-full h-full object-cover"
+                      style={{ objectPosition: '68% 42%' }}
+                    />
+                    {/* Soft navy wash on the bottom edge — keeps the brand
+                        badge below legible over whatever the photo happens
+                        to show behind it, on top of the pill's own opacity. */}
+                    <div
+                      className="absolute inset-x-0 bottom-0 h-24 pointer-events-none"
+                      style={{ background: 'linear-gradient(0deg, rgba(13,27,42,0.28) 0%, rgba(13,27,42,0) 100%)' }}
+                    />
+                  </div>
 
-                        <div className="bg-white border border-[#E6E9EE] rounded-xl p-[11px] mt-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9.5px] font-bold text-navy">Volume de tâches par collaborateur</span>
-                            <div className="flex gap-2">
-                              <span className="text-[7px] text-[#8A93A0]"><span className="inline-block w-[5px] h-[5px] rounded-full bg-[#F97316] mr-[3px]" />Terminées</span>
-                              <span className="text-[7px] text-[#8A93A0]"><span className="inline-block w-[5px] h-[5px] rounded-full bg-[#3B82F6] mr-[3px]" />Total</span>
-                            </div>
-                          </div>
-                          <div className="flex items-end gap-2 h-14 mt-2">
-                            {[[55, 40], [80, 65], [35, 30], [95, 70], [60, 60]].map(([a, b], i) => (
-                              <div key={i} className="flex-1 flex gap-0.5 items-end h-full">
-                                <div className="flex-1 bg-[#3B82F6] rounded-t-[2px]" style={{ height: `${a}%` }} />
-                                <div className="flex-1 bg-[#F97316] rounded-t-[2px]" style={{ height: `${b}%` }} />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="bg-white border border-[#E6E9EE] rounded-xl p-[11px] mt-2">
-                          <div className="text-[9.5px] font-bold text-navy mb-[7px]">Activité par client</div>
-                          <div className="grid grid-cols-[1.3fr_0.8fr_0.9fr_1fr] text-[6.5px] font-bold text-[#8A93A0] uppercase tracking-[0.03em] pb-1 border-b border-[#EEF1F4]">
-                            <span>Client</span><span>Tâches</span><span>Durée</span><span>Coût</span>
-                          </div>
-                          <div className="grid grid-cols-[1.3fr_0.8fr_0.9fr_1fr] text-[9px] text-[#3D4655] font-semibold py-1.5 border-b border-[#EEF1F4]">
-                            <span>Client A</span><span>10</span><span>3h20</span><span className="text-[#22C55E] font-bold">1 240 DT</span>
-                          </div>
-                          <div className="grid grid-cols-[1.3fr_0.8fr_0.9fr_1fr] text-[9px] text-[#3D4655] font-semibold py-1.5">
-                            <span>Client B</span><span>6</span><span>1h05</span><span className="text-[#22C55E] font-bold">640 DT</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                  {/* Brand badge, anchored on the photo itself — ties a
+                      stock photo back to the product without relabeling
+                      the mockup already visible on the model's monitor.
+                      Bottom-right: the only photo corner none of the five
+                      floating cards below already claims. */}
+                  <div className="absolute right-4 bottom-4 inline-flex items-center gap-2 pl-2 pr-3.5 py-1.5 rounded-full bg-white/95 backdrop-blur-sm shadow-[0_8px_20px_rgba(13,27,42,0.22)]">
+                    <Logo size={18} />
+                    <span className="text-[12px] font-extrabold text-navy tracking-[-0.01em]">Tâches &amp; Cash</span>
                   </div>
                 </div>
 
