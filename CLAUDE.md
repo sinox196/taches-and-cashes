@@ -531,6 +531,8 @@ payé hors app — aucun paiement en ligne n'existe dans cette application ;
 `FREELANCER_UPGRADE_PRICE_DT = 15` est purement informatif, affiché sur la
 page de tarifs et dans le message de verrouillage).
 
+**La carte Freelancer de la page de tarifs annonçait « Nombre illimité de factures et de documents » — faux pour cette offre-là, exactement ce que le serveur verrouille dès le 11ᵉ document du mois.** `features` sur les deux fiches vendues (`FREELANCER`, `COMPLET`) pointait vers le même `CORE_FEATURES` : correct pour Complet, réellement illimité, mais un chiffre faux et crédible pour Freelancer. `FREELANCER_FEATURES` (plans.ts) est `CORE_FEATURES.map()` avec cette seule ligne remplacée par « 10 factures par mois » — un `.map()` plutôt qu'une liste recopiée à la main, pour que les dix autres lignes ne puissent pas diverger de `CORE_FEATURES` si celui-ci change. `COMPLET` garde `features: CORE_FEATURES` sans y toucher.
+
 **Dépasser le quota ne bloque jamais la création — contrairement au plafond
 d'essai — seule la consultation d'un document au-delà se verrouille.**
 `isQuotaLocked(company, inv, allInvoicesSameCompany)` dans server.ts calcule
