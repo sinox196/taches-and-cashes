@@ -505,6 +505,8 @@ là aussi sans revenir à la carte. `POST /api/signup` reçoit ce nombre dans
 `seats` et l'écrit tel quel (borné) comme `seatLimit` de la nouvelle
 entreprise — voir plus haut.
 
+**Le curseur porte les boutons `−`/`N`/`+` avant le libellé « Utilisateurs »**, pas l'inverse — `− 4 + Utilisateurs`, à la demande explicite de l'utilisateur. La pastille était à l'origine `justify-between` (libellé à gauche, boutons à droite, écartés aux deux bouts) ; elle est maintenant un simple `flex items-center gap-3` avec les boutons en premier dans le JSX et le libellé après, donc les deux se lisent comme un seul groupe compact plutôt que comme deux blocs plaqués aux bords de la pastille. Vérifié à plusieurs largeurs (320px à 1440px) : le groupe reste sur une seule ligne à chaque fois.
+
 **Le pack Freelancer est gratuit pour de bon, pas seulement à l'essai.** Un
 siège, ADMIN, `priceDT: 0`, et les mêmes vues que le pack Complet (`modules`
 absent) — un indépendant y trouve tout le cabinet, juste sans personne

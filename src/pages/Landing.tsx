@@ -956,8 +956,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                       clic. N'apparaît que sur une offre dynamique ; Freelancer
                       n'a ni curseur ni second siège à afficher. */}
                   {plan.dynamic && (
-                    <div className={`mt-4 flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 ${tone.rule}`}>
-                      <span className={`text-[12.5px] font-semibold ${tone.title}`}>Utilisateurs</span>
+                    <div className={`mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 ${tone.rule}`}>
                       <div className="flex items-center gap-2.5">
                         <button
                           type="button"
@@ -979,6 +978,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                           +
                         </button>
                       </div>
+                      <span className={`text-[12.5px] font-semibold ${tone.title}`}>Utilisateurs</span>
                     </div>
                   )}
 
