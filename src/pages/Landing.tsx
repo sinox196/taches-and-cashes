@@ -397,7 +397,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 src="/landing/hero-photo.jpg"
                 alt="Gestionnaire comptable au travail, tableau de bord Tâches &amp; Cash affiché sur son écran"
                 className="w-full h-full object-cover"
-                style={{ objectPosition: '58% 40%' }}
+                style={{ objectPosition: '86% 38%' }}
               />
             </div>
 
