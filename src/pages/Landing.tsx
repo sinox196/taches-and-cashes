@@ -492,11 +492,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                     </div>
                   </div>
                 </div>
-
-                <div className="absolute right-[16%] lg:right-[20%] top-1/2 -translate-y-1/2 inline-flex items-center gap-2 pl-2 pr-3.5 py-1.5 rounded-full bg-white/95 backdrop-blur-sm shadow-[0_8px_20px_rgba(13,27,42,0.22)]">
-                  <Logo size={18} />
-                  <span className="text-[12px] font-extrabold text-navy tracking-[-0.01em]">Tâches &amp; Cash</span>
-                </div>
               </div>
             </div>
 
