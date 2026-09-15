@@ -45,7 +45,19 @@ const LANDSCAPE_W = 297;
 const LANDSCAPE_H = 210;
 const LANDSCAPE_BOTTOM = 195;
 
-const nf = (n: number, d = 0) => (n ?? 0).toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
+/**
+ * fr-FR groupe les milliers avec une espace fine insécable (U+202F) que les
+ * polices standard de jsPDF n'ont pas — non normalisée, un nombre comme
+ * « 975 000 » s'imprimait « 9 7 5 / 0 0 0 », chaque caractère écarté par un
+ * glyphe de remplacement, ce qui se lisait comme des valeurs qui se
+ * chevauchent. Même correctif que `money()` dans `clientReportPdf.ts`/
+ * `invoicePdf.ts`, appliqué ici une fois pour toutes dans le formateur de
+ * base plutôt que dans chaque appelant.
+ */
+const nf = (n: number, d = 0) =>
+  (n ?? 0)
+    .toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d })
+    .replace(/[  ]/g, ' ');
 
 /** Même arrondi que `ExecutiveBar`/`ClientProfitability` à l'écran : entier, sauf s'il s'arrondirait à zéro sans l'être. */
 const money = (n: number | null | undefined) => {
@@ -148,18 +160,37 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
     return measured;
   };
 
-  /** Une rangée de 2 à 4 mini-cartes chiffre + libellé, pour les métriques de synthèse. */
-  const statRow = (items: [string, string][]) => {
-    ensureSpace(18);
+  /**
+   * Une rangée de 2 à 4 mini-cartes chiffre + libellé, pour les métriques de
+   * synthèse — value en gras, foot optionnel en dessous en plus petit
+   * (même charpente que la `Card` d'`ExecutiveBar.tsx` à l'écran : libellé,
+   * puis la valeur, puis un pied plus discret). **Jamais une seule chaîne
+   * value+détail concaténée** : « 92 % (capacité 176h00) » sur une seule
+   * ligne déborde d'une colonne à quatre cartes bien avant qu'un chiffre
+   * réel (pas les zéros d'un compte tout juste seedé) ne la remplisse — le
+   * chevauchement remonté n'apparaissait qu'avec de vraies données. `foot`
+   * porte le détail, sur sa propre ligne. Une garde de largeur mesurée
+   * (`doc.getTextWidth`, comme `fitColumns`) reste en place sur les deux
+   * lignes : un nombre malgré tout trop large pour tenir est tronqué à la
+   * première ligne de `wrap()` plutôt que de déborder sur la carte voisine.
+   */
+  const statRow = (items: { label: string; value: string; foot?: string }[]) => {
+    const hasFoot = items.some(it => it.foot);
+    ensureSpace(hasFoot ? 21 : 16);
     const colW = (right - M) / items.length;
+    const textW = colW - 4;
     for (let i = 0; i < items.length; i++) {
       const x = M + i * colW;
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); setInk(MUTED);
-      text(items[i][0].toUpperCase(), x, y);
+      text(wrap(items[i].label.toUpperCase(), textW)[0] || '', x, y);
       doc.setFont('helvetica', 'bold'); doc.setFontSize(12); setInk(INK);
-      text(items[i][1], x, y + 6.5);
+      text(wrap(items[i].value, textW)[0] || '', x, y + 6.5);
+      if (items[i].foot) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); setInk(MUTED);
+        text(wrap(items[i].foot as string, textW)[0] || '', x, y + 11.5);
+      }
     }
-    y += 14;
+    y += hasFoot ? 17 : 12;
   };
 
   const drawTableHeader = (cols: { label: string; w: number; a?: 'left' | 'right' }[], fontSize = 7) => {
@@ -236,16 +267,16 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
     sectionTitle('Vue d’ensemble');
     if (showMoney) {
       statRow([
-        ['Honoraires', money(e.honoraires)],
-        ['Marge sur temps', `${pct(e.tauxMarge)} (${money(e.marge)})`],
-        ["Reste à encaisser", money(e.resteAEncaisser)],
+        { label: 'Honoraires', value: money(e.honoraires) },
+        { label: 'Marge sur temps', value: pct(e.tauxMarge), foot: money(e.marge) },
+        { label: "Reste à encaisser", value: money(e.resteAEncaisser) },
       ]);
     }
     statRow([
-      ['Heures produites', hours(e.heures)],
-      ["Taux d'occupation", `${pct(e.occupation)} (capacité ${hours(e.capaciteNette)})`],
-      ...(showMoney ? [['Honoraires / heure', e.honorairesParHeure == null ? '—' : `${nf(e.honorairesParHeure, 1)} TND`] as [string, string]] : []),
-      ['Clients en alerte', String(e.clientsEnAlerte ?? 0)],
+      { label: 'Heures produites', value: hours(e.heures) },
+      { label: "Taux d'occupation", value: pct(e.occupation), foot: `capacité ${hours(e.capaciteNette)}` },
+      ...(showMoney ? [{ label: 'Honoraires / heure', value: e.honorairesParHeure == null ? '—' : `${nf(e.honorairesParHeure, 1)} TND` }] : []),
+      { label: 'Clients en alerte', value: String(e.clientsEnAlerte ?? 0) },
     ]);
     if (e.tachesSansTaux > 0) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setInk(LATE);
@@ -259,14 +290,17 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
   if (stats?.globalStats) {
     const g = stats.globalStats;
     sectionTitle('Indicateurs globaux');
-    const items: [string, string][] = [];
+    const items: { label: string; value: string; foot?: string }[] = [];
     if (g.totalCostFormatted !== undefined) {
-      items.push(['Coût employeur', g.pricedTasks === 0 && g.tasksWithoutRate > 0 ? 'Non configuré' : g.totalCostFormatted]);
+      items.push({
+        label: 'Coût employeur',
+        value: g.pricedTasks === 0 && g.tasksWithoutRate > 0 ? 'Non configuré' : g.totalCostFormatted,
+      });
     }
-    items.push(['Effectif', String(g.totalHeadcount ?? '—')]);
-    items.push(['Tâches (total)', `${g.totalTasks} (${g.completedTasks} terminées)`]);
-    items.push(['Clients traités', String(g.clientsHandled)]);
-    items.push(['RH en cours', String((g.activeLeaves ?? 0) + (g.activeAuthorizations ?? 0))]);
+    items.push({ label: 'Effectif', value: String(g.totalHeadcount ?? '—') });
+    items.push({ label: 'Tâches (total)', value: String(g.totalTasks), foot: `${g.completedTasks} terminées` });
+    items.push({ label: 'Clients traités', value: String(g.clientsHandled) });
+    items.push({ label: 'RH en cours', value: String((g.activeLeaves ?? 0) + (g.activeAuthorizations ?? 0)) });
     // Deux lignes de trois, pas cinq colonnes serrées — plus lisible sur A4.
     while (items.length) statRow(items.splice(0, 3));
     y += 2;
