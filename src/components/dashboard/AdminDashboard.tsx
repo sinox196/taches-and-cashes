@@ -160,8 +160,46 @@ export const AdminDashboard: React.FC = () => {
     return parts.length ? `Filtres : ${parts.join(', ')}` : undefined;
   }, [selectedUsers, selectedClients]);
 
-  const handleExportPdf = () => {
-    downloadDashboardPdf({ periodLabel, generatedAt: new Date(), exec, stats, filterLabel });
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      // « Activité par client » imprime aussi les tâches de chaque client —
+      // exactement le tiroir « Tâches réalisées » que ClientBreakdown.tsx
+      // n'ouvre normalement qu'au clic, une fiche à la fois. Le PDF n'a pas
+      // ce clic : on récupère donc ici, en une salve, tout ce que chaque
+      // client a réellement produit (`/api/kpi/client-tasks`, la même route
+      // et les mêmes filtres que la vue), plutôt que de tenir une seconde
+      // copie de cette agrégation. Les clients sans tâche sur la période
+      // n'ont rien à demander.
+      const clientsWithTasks = (stats?.clientStats || []).filter((c: any) => c.taskCount > 0);
+      const filtersBody = {
+        startDate,
+        endDate,
+        filterUserIds: selectedUsers.map(u => u.id),
+        filterClientIds: selectedClients.map(c => c.id),
+      };
+      const results = await Promise.all(clientsWithTasks.map(async (c: any) => {
+        const key = String(c.key ?? c.id);
+        try {
+          const res = await fetch('/api/kpi/client-tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ ...filtersBody, key }),
+          });
+          const body = await res.json();
+          return [key, { tasks: body.tasks ?? [], truncated: body.truncated ?? 0 }] as const;
+        } catch {
+          return [key, { tasks: [], truncated: 0 }] as const;
+        }
+      }));
+      const clientTasksByKey = Object.fromEntries(results);
+
+      downloadDashboardPdf({ periodLabel, generatedAt: new Date(), exec, stats, filterLabel, clientTasksByKey });
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
@@ -335,12 +373,12 @@ export const AdminDashboard: React.FC = () => {
             <button
               type="button"
               onClick={handleExportPdf}
-              disabled={!stats && !exec}
+              disabled={(!stats && !exec) || exportingPdf}
               title="Exporter le tableau de bord en PDF pour la période sélectionnée"
               className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors w-full sm:w-auto flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Download className="w-3.5 h-3.5" />
-              Exporter PDF
+              {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              {exportingPdf ? 'Export en cours…' : 'Exporter PDF'}
             </button>
           </div>
         </div>

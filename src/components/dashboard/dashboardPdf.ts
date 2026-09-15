@@ -30,6 +30,15 @@ export interface DashboardPdfInput {
   stats: any;
   /** Filtres additionnels affichés en sous-titre, s'ils sont actifs. */
   filterLabel?: string;
+  /**
+   * Le détail « Tâches réalisées » de chaque client, par `key` (le même que
+   * `stats.clientStats[].key`) — `exec`/`stats` ne le portent pas, c'est un
+   * tiroir qu'`ClientBreakdown.tsx` n'ouvre normalement qu'au clic
+   * (`GET /api/kpi/client-tasks`). L'appelant le récupère pour chaque client
+   * avant d'appeler ce renderer, plutôt que ce fichier ne fasse ses propres
+   * appels réseau.
+   */
+  clientTasksByKey?: Record<string, { tasks: any[]; truncated: number }>;
 }
 
 const INK: [number, number, number] = [13, 27, 42]; // #0D1B2A
@@ -82,7 +91,7 @@ export function dashboardPdfName(periodLabel: string): string {
 }
 
 export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
-  const { exec, stats, periodLabel, generatedAt, filterLabel } = input;
+  const { exec, stats, periodLabel, generatedAt, filterLabel, clientTasksByKey } = input;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let y = M;
   // Géométrie de la page courante — mutable, parce que la table Performance
@@ -205,6 +214,32 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
     y += 6.5;
   };
 
+  /**
+   * Dessine une seule ligne sur les colonnes données, avec un décalage
+   * optionnel — c'est ce qui indente une sous-ligne (un type de tâche sous
+   * sa mission, une tâche sous son client) sans lui donner un jeu de
+   * colonnes séparé : elle occupe les mêmes positions x que la ligne mère,
+   * simplement décalées de `indent` mm et vides sur les colonnes qu'elle ne
+   * renseigne pas.
+   */
+  const drawRow = (
+    cols: { k: string; w: number; a?: 'left' | 'right' }[],
+    row: Record<string, string>,
+    opts: { bold?: boolean; ink?: [number, number, number]; indent?: number; fontSize: number } = { fontSize: 7.5 },
+  ) => {
+    doc.setFont('helvetica', opts.bold ? 'bold' : 'normal'); doc.setFontSize(opts.fontSize);
+    setInk(opts.ink ?? INK);
+    let x = M + 2 + (opts.indent ?? 0);
+    for (const c of cols) {
+      const w = c.w - (cols[0] === c ? (opts.indent ?? 0) : 0);
+      const lines = wrap(row[c.k] ?? '', Math.max(w - 3, 4));
+      text(lines[0] || '', c.a === 'right' ? x + w - 3 : x, y + 4, c.a === 'right' ? { align: 'right' } : undefined);
+      x += w;
+    }
+    y += 5.5;
+    rule(y);
+  };
+
   const drawTable = (
     cols: { k: string; label: string; w: number; a?: 'left' | 'right' }[],
     rows: Record<string, string>[],
@@ -218,21 +253,11 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
       return;
     }
     drawTableHeader(cols, fontSize - 0.5);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(fontSize);
     for (const row of rows) {
       if (y + 6 > bottom) {
         newPage(); drawTableHeader(cols, fontSize - 0.5);
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(fontSize);
       }
-      setInk(INK);
-      let x = M + 2;
-      for (const c of cols) {
-        const lines = wrap(row[c.k] ?? '—', c.w - 3);
-        text(lines[0] || '', c.a === 'right' ? x + c.w - 3 : x, y + 4, c.a === 'right' ? { align: 'right' } : undefined);
-        x += c.w;
-      }
-      y += 5.5;
-      rule(y);
+      drawRow(cols, row, { fontSize });
     }
   };
 
@@ -383,22 +408,24 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
   // Mêmes colonnes que TaskIntelligence.tsx : Mission, Heures, Coût (si
   // showMoney — reproduit exactement la garde `missions.some(m => m.cout
   // !== undefined)` que ce composant applique déjà), Tâches, Durée moy.,
-  // Collab., Clients.
+  // Collab., Clients. Chaque mission déplie aussi ses types de tâche — le
+  // détail que la carte à l'écran révèle au clic (`taskTypes`) — en
+  // sous-lignes indentées sur les mêmes colonnes MISSION/HEURES/TÂCHES/COÛT ;
+  // DURÉE MOY./COLLAB./CLIENTS n'existent qu'au niveau mission et restent
+  // vides sur ces lignes-là.
   if (exec?.missions && exec.missions.length > 0) {
     sectionTitle('Missions & types de tâche (top 15)');
     const showMissionMoney = exec.missions.some((m: any) => m.cout !== undefined);
-    const rows = [...exec.missions]
-      .sort((a: any, b: any) => (b.heures || 0) - (a.heures || 0))
-      .slice(0, 15)
-      .map((m: any) => ({
-        pole: m.pole,
-        heures: hours(m.heures),
-        cout: money(m.cout),
-        taches: String(m.taches),
-        dureeMoyenneH: hours(m.dureeMoyenneH),
-        collaborateurs: String(m.collaborateurs),
-        clients: String(m.clients),
-      }));
+    const missions = [...exec.missions].sort((a: any, b: any) => (b.heures || 0) - (a.heures || 0)).slice(0, 15);
+    const rows = missions.map((m: any) => ({
+      pole: m.pole,
+      heures: hours(m.heures),
+      cout: money(m.cout),
+      taches: String(m.taches),
+      dureeMoyenneH: hours(m.dureeMoyenneH),
+      collaborateurs: String(m.collaborateurs),
+      clients: String(m.clients),
+    }));
     const missionCols = fitColumns(
       [
         { k: 'pole', label: 'MISSION', minW: 30 },
@@ -411,7 +438,134 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
       ],
       rows, 6.5, 7,
     );
-    drawTable(missionCols, rows, 'Aucune activité sur cette période.', 7);
+    if (rows.length === 0) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); setInk(MUTED);
+      text('Aucune activité sur cette période.', M, y);
+      y += 8;
+    } else {
+      drawTableHeader(missionCols, 6.5);
+      for (let i = 0; i < missions.length; i++) {
+        if (y + 6 > bottom) { newPage(); drawTableHeader(missionCols, 6.5); }
+        drawRow(missionCols, rows[i], { bold: true, fontSize: 7 });
+        const types: any[] = missions[i].taskTypes || [];
+        for (const t of types) {
+          if (y + 5.5 > bottom) { newPage(); drawTableHeader(missionCols, 6.5); }
+          drawRow(missionCols, {
+            pole: t.name,
+            heures: hours(t.heures),
+            cout: money(t.cout),
+            taches: String(t.taches),
+          }, { indent: 5, ink: MUTED, fontSize: 6.5 });
+        }
+      }
+    }
+    y += 2;
+  }
+
+  // ---- Activité par client --------------------------------------------------
+  // Mêmes colonnes qu'ClientBreakdown.tsx à l'écran (Client, Tâches,
+  // Intervenants, Durée, Coût employeur ADMIN, puis le grand-livre —
+  // Solde antérieur/Montant de facture/Encaissements/Reste à payer — quand
+  // ces champs existent, c-à-d. quand l'appelant tient `VIEW_CLIENT_FINANCIALS`),
+  // et sous chaque client son propre tiroir « Tâches réalisées »
+  // (`clientTasksByKey`, fourni par l'appelant — voir `DashboardPdfInput`)
+  // exactement comme le clic sur une ligne l'ouvre à l'écran.
+  const clientStats: any[] = stats?.clientStats || [];
+  if (clientStats.length > 0) {
+    // Jusqu'à 9 colonnes une fois le grand-livre ajouté (Solde antérieur,
+    // Montant de facture, Encaissements, Reste à payer, en plus des cinq de
+    // base) — la même raison que la table Performance des collaborateurs
+    // bascule déjà en paysage : mesuré serré, `fitColumns()` réduisait
+    // TÂCHES/INTERVENANTS jusqu'à tronquer leur propre valeur (« 3 (3 » au
+    // lieu de « 3 (3 term.) »).
+    goLandscape();
+    sectionTitle('Activité par client');
+    const showClientCost = clientStats.some((c: any) => c.totalCostFormatted !== undefined);
+    const showLedger = clientStats.some((c: any) => c.soldeAnterieur !== undefined);
+    const clients = [...clientStats].sort((a, b) => (b.durationSeconds || 0) - (a.durationSeconds || 0));
+    const rows = clients.map((c: any) => ({
+      name: c.name,
+      taches: `${c.taskCount} (${c.completedTasks} term.)`,
+      intervenants: String(c.contributors?.length ?? 0),
+      duree: c.durationFormatted || '—',
+      cout: c.totalCostFormatted !== undefined ? (c.totalCostFormatted || '—') : '',
+      soldeAnterieur: money(c.soldeAnterieur),
+      montantFacture: money(c.montantFacture),
+      encaissements: money(c.encaissements),
+      resteAPayer: money(c.resteAPayer),
+    }));
+    const clientCols = fitColumns(
+      [
+        { k: 'name', label: 'CLIENT', minW: 30 },
+        { k: 'taches', label: 'TÂCHES', a: 'right' },
+        { k: 'intervenants', label: 'INTERVENANTS', a: 'right' },
+        { k: 'duree', label: 'DURÉE', a: 'right' },
+        ...(showClientCost ? [{ k: 'cout', label: 'COÛT EMPLOYEUR', a: 'right' as const }] : []),
+        ...(showLedger ? [
+          { k: 'soldeAnterieur', label: 'SOLDE ANTÉRIEUR', a: 'right' as const },
+          { k: 'montantFacture', label: 'MONTANT FACTURE', a: 'right' as const },
+          { k: 'encaissements', label: 'ENCAISSEMENTS', a: 'right' as const },
+          { k: 'resteAPayer', label: 'RESTE À PAYER', a: 'right' as const },
+        ] : []),
+      ],
+      rows, 6.5, 7,
+    );
+
+    // Colonnes fixes pour le détail « Tâches réalisées », indenté sous
+    // chaque client — un jeu de colonnes différent de la table client
+    // (Date/Collaborateur/Mission/Type de tâche/Durée/Coût/Statut), donc
+    // pas question de le faire tenir dans les colonnes ci-dessus.
+    const statusLabel = (s: string) => (s === 'COMPLETED' ? 'Terminée' : s === 'RUNNING' ? 'En cours' : s === 'PAUSED' ? 'En pause' : s);
+    const showTaskCost = Object.values(clientTasksByKey || {}).some(v => v.tasks.some((t: any) => t.cost !== undefined));
+    const taskCols: { k: string; label: string; w: number; a?: 'left' | 'right' }[] = [
+      { k: 'date', label: 'DATE', w: 18 },
+      { k: 'userName', label: 'COLLABORATEUR', w: 28 },
+      { k: 'mission', label: 'MISSION', w: 30 },
+      { k: 'taskType', label: 'TYPE DE TÂCHE', w: 30 },
+      { k: 'dureeFormatted', label: 'DURÉE', w: 16, a: 'right' },
+      ...(showTaskCost ? [{ k: 'cost', label: 'COÛT', w: 18, a: 'right' as const }] : []),
+      { k: 'statut', label: 'STATUT', w: 14, a: 'right' as const },
+    ];
+
+    if (rows.length === 0) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); setInk(MUTED);
+      text('Aucune activité client sur cette période.', M, y);
+      y += 8;
+    } else {
+      drawTableHeader(clientCols, 6.5);
+      for (let i = 0; i < clients.length; i++) {
+        if (y + 6 > bottom) { newPage(); drawTableHeader(clientCols, 6.5); }
+        drawRow(clientCols, rows[i], { bold: true, fontSize: 7 });
+
+        const key = String(clients[i].key ?? clients[i].id);
+        const detail = clientTasksByKey?.[key];
+        if (detail && detail.tasks.length > 0) {
+          ensureSpace(9);
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); setInk(MUTED);
+          text('TÂCHES RÉALISÉES', M + 2 + 5, y + 3.5);
+          y += 6;
+          for (const t of detail.tasks) {
+            if (y + 5 > bottom) { newPage(); drawTableHeader(clientCols, 6.5); }
+            drawRow(taskCols, {
+              date: t.date,
+              userName: t.userName || '—',
+              mission: t.mission || '—',
+              taskType: t.taskType || '—',
+              dureeFormatted: t.dureeFormatted,
+              cost: money(t.cost),
+              statut: statusLabel(t.statut),
+            }, { indent: 5, ink: MUTED, fontSize: 6.5 });
+          }
+          if (detail.truncated > 0) {
+            ensureSpace(5);
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); setInk(MUTED);
+            text(`… et ${detail.truncated} tâche(s) supplémentaire(s) non affichée(s).`, M + 7, y + 3);
+            y += 5;
+          }
+          y += 1;
+        }
+      }
+    }
     y += 2;
   }
 
