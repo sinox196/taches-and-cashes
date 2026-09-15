@@ -255,6 +255,14 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Un compteur de visites, pas des analytics — aucune donnée de session ni
+  // de cookie, juste un total incrémenté à chaque chargement de la page,
+  // affiché ensuite dans la console plateforme. Fire-and-forget : un échec
+  // réseau ne doit rien changer à l'affichage de la page.
+  useEffect(() => {
+    fetch('/api/landing/visit', { method: 'POST' }).catch(() => {});
+  }, []);
+
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
   const [modalPlan, setModalPlan] = useState<string | null>(null);
   // Le nombre de sièges choisi sur la carte cliquée — porté jusqu'à la

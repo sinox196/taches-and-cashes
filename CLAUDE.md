@@ -1287,6 +1287,10 @@ Sized for **hundreds of clients and dozens of users**. The rules that keep it th
 
 ### Console plateforme
 
+**Un compteur « Visites du site », pas des analytics.** L'en-tête de la console affiche le nombre total de fois où la page publique (`Landing.tsx`) a été chargée depuis la mise en service — `POST /api/landing/visit`, appelée une fois au montage, sans auth ni cookie, incrémente un compteur global et rien de plus : pas de visiteur unique, pas de source de trafic, pas de détail par page. C'est le compteur que l'utilisateur a explicitement demandé après avoir décliné une vraie solution d'analytics (Plausible/Google Analytics) et un tracking plus détaillé.
+
+Le compteur vit dans sa **propre table singleton** (`landing_stats` sous Postgres, `db.landingVisitCount` sous JSON) plutôt que comme un champ de plus sur `platformSettings` : le formulaire RIB de cette même console fait un `PUT` qui remplace tout l'objet `data` de `platform_settings`, et un compteur logé là se serait fait écraser par la prochaine sauvegarde des coordonnées bancaires. `incrementLandingVisitCount()` sous Postgres est un `UPDATE ... SET visits = visits + 1 RETURNING visits` — un seul énoncé atomique, même raisonnement que `nextInvoiceNumber()` : deux visites simultanées ne doivent jamais lire puis réécrire la même valeur. `GET /api/platform/landing-visits`, gardée `requirePlatformAdmin` comme le reste de cette console, sert le total à `PlatformAdmin.tsx`.
+
 La ligne d'une entreprise porte **Modifier** et **Supprimer** — le bouton « Utilisateurs » qui s'y trouvait a bougé *dans* la fiche de modification, il n'a pas disparu.
 
 La ligne porte aussi la **date d'inscription** (`createdAt`) et l'**échéance** :

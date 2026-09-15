@@ -259,6 +259,15 @@ export interface Database {
   getAllOrders(): Promise<any[]>;
   createOrder(order: any): Promise<any>;
 
+  /**
+   * A bare visit counter for the public landing page — global, one number,
+   * no per-visitor detail. Not analytics: no session/cookie dedup, no source
+   * or page breakdown, just "how many times was the page loaded". Shown to
+   * the platform super-admin alongside the companies list.
+   */
+  getLandingVisitCount(): Promise<number>;
+  incrementLandingVisitCount(): Promise<number>;
+
 
   getSettings(companyId: string): Promise<any>;
   updateSettings(companyId: string, updates: any): Promise<any>;
@@ -361,6 +370,8 @@ export const emptyDb = () => ({
   orders: [],
   settingsByCompany: [],
   platformSettings: defaultPlatformSettings(),
+  // Page publique — un simple compteur de visites, pas d'analytics.
+  landingVisitCount: 0,
 });
 
 /**

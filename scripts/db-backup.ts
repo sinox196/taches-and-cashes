@@ -72,6 +72,7 @@ try {
     orders: await db.getAllOrders(),
     settingsByCompany: await Promise.all(companyIds.map(async (cid: string) => ({ id: cid, ...(await db.getSettings(cid)) }))),
     platformSettings: await db.getPlatformSettings(),
+    landingVisitCount: await db.getLandingVisitCount(),
   };
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);

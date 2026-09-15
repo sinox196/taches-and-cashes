@@ -9070,6 +9070,22 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   });
 
   /**
+   * A bare visit counter for the landing page — no auth, no session/cookie,
+   * one atomic increment. Not analytics: it answers "how many times was the
+   * page loaded", nothing about who, from where, or which page. Landing.tsx
+   * fires this once on mount; the total is shown to the platform super-admin
+   * in the console (`GET /api/platform/landing-visits` below).
+   */
+  app.post('/api/landing/visit', async (req: any, res: any) => {
+    try {
+      await db.incrementLandingVisitCount();
+      res.status(204).end();
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * Real self-serve signup for the three standard packs: creates an isolated
    * company immediately (status TRIAL, full feature access, `TRIAL_DAYS`
    * free) and its first ADMIN user, then logs them straight in — the same
@@ -9785,6 +9801,14 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         instructions: text(req.body?.instructions, 1000),
       });
       res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/platform/landing-visits', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      res.json({ visits: await db.getLandingVisitCount() });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

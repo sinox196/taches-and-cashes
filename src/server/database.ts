@@ -103,6 +103,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.orders) db.orders = [];
     if (!db.messageGroups) db.messageGroups = [];
     if (!db.platformSettings) db.platformSettings = defaultPlatformSettings();
+    if (typeof db.landingVisitCount !== 'number') db.landingVisitCount = 0;
 
     // Legacy single-row settings -> one row per company, keyed like every
     // other collection. Wrap it as company-1's row rather than discard it.
@@ -944,6 +945,13 @@ async function initJsonDb(): Promise<Database> {
       db.platformSettings = { ...db.platformSettings, ...updates };
       await saveDb();
       return db.platformSettings;
+    },
+
+    getLandingVisitCount: async () => db.landingVisitCount,
+    incrementLandingVisitCount: async () => {
+      db.landingVisitCount += 1;
+      await saveDb();
+      return db.landingVisitCount;
     },
   };
 
