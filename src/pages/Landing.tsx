@@ -444,55 +444,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
               </div>
 
-              {/* Floating stat cards, scattered over the photo — sm+ only,
-                  same reason the photo itself is. Positioned in this same
-                  z-10 layer (not inside the masked photo wrapper) so they
-                  stay perfectly sharp regardless of the mask. */}
-              <div className="hidden lg:block pointer-events-none">
-                <div className="absolute right-[26%] lg:right-[30%] top-8 w-[168px] bg-white rounded-2xl p-3.5 animate-[landingFloatA_6s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-[34px] h-[34px] rounded-[10px] bg-[#E3F7F5] flex items-center justify-center shrink-0">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-turquoise relative">
-                        <div className="absolute w-[5px] h-[1.5px] bg-turquoise top-[6px] left-[7px] rotate-[35deg]" />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[15px] font-extrabold text-navy leading-[1.1]">08h 42m</div>
-                      <div className="text-[10px] text-[#8A93A0] mt-0.5">Temps travaillé</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="absolute right-3 lg:right-6 top-16 w-[150px] bg-white rounded-2xl p-3.5 animate-[landingFloatC_6.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                  <div className="text-[10px] text-[#8A93A0] uppercase tracking-[0.04em] font-bold">Équipe</div>
-                  <div className="text-[20px] font-extrabold text-navy mt-0.5">84%</div>
-                  <div className="flex items-end gap-1 mt-2 h-6">
-                    <div className="w-2 h-[40%] bg-[#CFEDEA] rounded-[2px]" />
-                    <div className="w-2 h-[70%] bg-[#5FCBC0] rounded-[2px]" />
-                    <div className="w-2 h-[55%] bg-turquoise rounded-[2px]" />
-                    <div className="w-2 h-[90%] bg-navy rounded-[2px]" />
-                  </div>
-                </div>
-
-                <div className="absolute right-[24%] lg:right-[28%] bottom-16 w-[180px] bg-white rounded-2xl p-3.5 animate-[landingFloatB_7s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[12px] font-bold text-navy">Audit client</span>
-                    <span className="text-[9px] font-bold text-[#00857C] bg-[#E3F7F5] px-[7px] py-[3px] rounded-full">En cours</span>
-                  </div>
-                  <div className="mt-2.5 h-[5px] rounded-[3px] bg-[#EEF1F4]"><div className="w-[72%] h-[5px] rounded-[3px] bg-[#22C55E]" /></div>
-                  <div className="text-[10px] font-bold text-[#8A93A0] mt-1.5 text-right">72%</div>
-                </div>
-
-                <div className="absolute right-4 lg:right-8 bottom-6 w-[186px] bg-white rounded-2xl p-3.5 animate-[landingFloatD_7.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-[34px] h-[34px] rounded-[10px] bg-[#EAFBF0] flex items-center justify-center shrink-0 text-[#22C55E] text-[16px] font-extrabold">↑</div>
-                    <div>
-                      <div className="text-[15px] font-extrabold text-[#22C55E] leading-[1.1]">+12 450 DT</div>
-                      <div className="text-[10px] text-[#8A93A0] mt-0.5">Flux de trésorerie</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* Mobile: the photo drops below the copy as its own full-width
