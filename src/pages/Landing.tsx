@@ -411,7 +411,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
                 <Reveal delay={80}>
                   <h1 className="mt-[22px] text-[34px] sm:text-[46px] leading-[1.14] font-extrabold text-navy tracking-[-0.02em]">
-                    Le premier <span style={{ color: '#08A4A1' }}>logiciel</span> tunisien conçu <span style={{ color: '#08A4A1' }}>exclusivement</span> pour les professionnels des <span style={{ color: '#08A4A1' }}>services</span>.
+                    Le <span style={{ color: '#08A4A1' }}>premier logiciel</span> tunisien conçu exclusivement pour les <span style={{ color: '#08A4A1' }}>professionnels des services.</span>
                   </h1>
                 </Reveal>
                 <Reveal delay={150}>
