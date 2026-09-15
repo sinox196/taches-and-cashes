@@ -361,38 +361,48 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
       {view === 'home' ? (
         <>
-          {/* HERO */}
+          {/* HERO — full-bleed photo blending straight into the page's own
+              light background via a mask (no boxed card, no dark scrim),
+              at the user's explicit request to match a reference layout:
+              the photo is pinned to the right edge and fades to transparent
+              on its own left edge, so the copy sits on the ordinary light
+              gradient rather than needing white text over a photo. */}
           <section
-            className="relative pt-[76px] px-6 sm:px-10 pb-10 overflow-hidden"
+            className="relative overflow-hidden"
             style={{ background: 'linear-gradient(180deg,#FBFCFD 0%, #F2F4F7 100%)' }}
           >
-            {/* Décor : deux nappes turquoise qui dérivent, plus une trame de
-                lignes très pâle. `pointer-events-none` — rien ici ne doit
-                intercepter un clic destiné au bouton d'essai. */}
+            {/* Décor : une seule nappe turquoise côté texte — les autres
+                nappes/la trame de la version précédente tombaient sous la
+                photo et ne se voyaient plus. */}
             <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
               <div
-                className="absolute -top-[18%] right-[-10%] w-[760px] h-[760px] animate-[landingAurora_18s_ease-in-out_infinite]"
-                style={{ background: 'radial-gradient(circle, rgba(0,179,166,0.16), rgba(0,179,166,0) 68%)' }}
-              />
-              <div
-                className="absolute top-[24%] left-[-14%] w-[620px] h-[620px] animate-[landingAuroraAlt_22s_ease-in-out_infinite]"
+                className="absolute top-[8%] left-[-16%] w-[560px] h-[560px] animate-[landingAuroraAlt_22s_ease-in-out_infinite]"
                 style={{ background: 'radial-gradient(circle, rgba(59,82,196,0.10), rgba(59,82,196,0) 68%)' }}
-              />
-              <div
-                className="absolute inset-0 opacity-[0.35]"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(rgba(13,27,42,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(13,27,42,0.045) 1px, transparent 1px)',
-                  backgroundSize: '58px 58px',
-                  maskImage: 'radial-gradient(ellipse 80% 60% at 50% 35%, #000 40%, transparent 100%)',
-                  WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 35%, #000 40%, transparent 100%)',
-                }}
               />
             </div>
 
-            <div className="relative max-w-[1280px] mx-auto flex gap-14 items-center flex-wrap">
-              {/* Hero copy */}
-              <div style={{ flex: '1 1 440px', minWidth: 320, maxWidth: 560 }}>
+            {/* Photo, pinned to the right edge and masked on its own left
+                edge — sm+ only; on mobile the same width would mask the
+                photo out from under the text entirely, so it moves to its
+                own stacked band below the copy instead (further down). */}
+            <div
+              aria-hidden
+              className="hidden lg:block absolute inset-y-0 right-0 w-[58%] xl:w-[54%]"
+              style={{
+                WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 32%)',
+                maskImage: 'linear-gradient(90deg, transparent 0%, #000 32%)',
+              }}
+            >
+              <img
+                src="/landing/hero-photo.jpg"
+                alt="Gestionnaire comptable au travail, tableau de bord Tâches &amp; Cash affiché sur son écran"
+                className="w-full h-full object-cover"
+                style={{ objectPosition: '86% 38%' }}
+              />
+            </div>
+
+            <div className="relative max-w-[1280px] mx-auto px-6 sm:px-10 pt-[100px] pb-10 sm:pt-[120px] sm:pb-16">
+              <div style={{ maxWidth: 560 }}>
                 <Reveal>
                   <div className="inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full shadow-[0_2px_10px_rgba(13,27,42,0.05)]">
                     <span className="px-2 py-[3px] rounded-full bg-turquoise text-white text-[10px] font-extrabold tracking-[0.04em] uppercase">Nouveau</span>
@@ -401,17 +411,17 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
                 <Reveal delay={80}>
                   <h1 className="mt-[22px] text-[34px] sm:text-[46px] leading-[1.14] font-extrabold text-navy tracking-[-0.02em]">
-                    Logiciel de gestion pour tous les professionnels des services.
+                    Le <span style={{ color: '#08A4A1' }}>premier logiciel</span> tunisien conçu exclusivement pour les <span style={{ color: '#08A4A1' }}>professionnels des services.</span>
                   </h1>
                 </Reveal>
                 <Reveal delay={150}>
                   <p className="mt-[22px] text-[19px] sm:text-[21px] leading-[1.35] font-bold text-navy">
                     Gérez mieux, facturez plus, gagnez en rentabilité
                   </p>
-                  <p className="mt-2 text-[14.5px] leading-[1.5] font-semibold text-[#3D4655]">
+                  <p className="mt-2 text-[14.5px] leading-[1.5] font-light text-[#3D4655]">
                     Pour les comptables, auditeurs, fiscalistes, avocats, consultants, architectes, ingénieurs-conseils et autres professionnels des services.
                   </p>
-                  <p className="mt-3 text-[17px] leading-[1.65] text-[#5B6472]">
+                  <p className="mt-3 text-[17px] leading-[1.65] font-light text-[#5B6472]">
                     Centralisez vos missions, pilotez vos équipes, suivez le temps consacré à chaque client et transformez votre travail en valeur, en facturation et en rentabilité.
                   </p>
                 </Reveal>
@@ -434,134 +444,74 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </Reveal>
               </div>
 
-              {/* Hero dashboard mockup */}
-              <div style={{ flex: '1 1 560px', minWidth: 320 }} className="relative h-[560px] flex items-center justify-center">
-                <div className="absolute w-[420px] h-[420px] rounded-full blur-[10px] top-10 right-5 animate-[landingBreathe_9s_ease-in-out_infinite]" style={{ background: 'radial-gradient(circle,rgba(0,179,166,0.22),rgba(0,179,166,0) 70%)' }} />
-
-                {/* Main dashboard card */}
-                <div
-                  className="relative w-[560px] max-w-full h-[460px] bg-white rounded-[24px] overflow-hidden border border-white/60"
-                  style={{
-                    boxShadow: '0 40px 70px -24px rgba(13,27,42,0.38), 0 12px 28px rgba(13,27,42,0.10)',
-                    transform: 'perspective(1600px) rotateY(-7deg) rotateX(2deg)',
-                  }}
-                >
-                  <div className="flex h-full">
-                    <div className="w-[42px] shrink-0 bg-navy flex flex-col items-center pt-2.5 gap-[11px]">
-                      <div className="w-[18px] h-[18px] rounded-full bg-white flex items-center justify-center text-navy text-[9px] font-extrabold mb-0.5">✓</div>
-                      <div className="w-6 h-5 rounded-[6px] bg-[#1D2939] flex items-center justify-center"><div className="w-[9px] h-[9px] bg-white rounded-[2px]" /></div>
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-full border-2 border-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
-                      <div className="w-3 h-3 rounded-[3px] bg-[#3D4655]" />
+              {/* Floating stat cards, scattered over the photo — sm+ only,
+                  same reason the photo itself is. Positioned in this same
+                  z-10 layer (not inside the masked photo wrapper) so they
+                  stay perfectly sharp regardless of the mask. */}
+              <div className="hidden lg:block pointer-events-none">
+                <div className="absolute right-[26%] lg:right-[30%] top-8 w-[168px] bg-white rounded-2xl p-3.5 animate-[landingFloatA_6s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-[34px] h-[34px] rounded-[10px] bg-[#E3F7F5] flex items-center justify-center shrink-0">
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-turquoise relative">
+                        <div className="absolute w-[5px] h-[1.5px] bg-turquoise top-[6px] left-[7px] rotate-[35deg]" />
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0 flex flex-col">
-                      <div className="h-9 shrink-0 bg-white border-b border-[#E6E9EE] flex items-center justify-between px-3.5">
-                        <span className="text-[11px] font-bold text-navy">Tableau de bord</span>
-                        <div className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444]" />
-                          <div className="w-[18px] h-[18px] rounded-full bg-navy text-white text-[8px] font-extrabold flex items-center justify-center">AD</div>
-                        </div>
-                      </div>
-                      <div className="flex-1 p-3 bg-[#FAFBFC] overflow-hidden">
-                        <div className="grid grid-cols-5 gap-1.5">
-                          {[
-                            { color: '#FFEDD5', label: 'Coût empl.', value: '18 240 DT' },
-                            { color: '#DBEAFE', label: 'Effectif', value: '24' },
-                            { color: '#EDE9FE', label: 'Tâches', value: '186' },
-                            { color: '#D1FAE5', label: 'Clients', value: '32' },
-                            { color: '#FCE7F3', label: 'RH en cours', value: '5' },
-                          ].map(tile => (
-                            <div key={tile.label} className="bg-white border border-[#E6E9EE] rounded-[9px] px-[7px] py-1.5">
-                              <div className="w-[15px] h-[15px] rounded-full mb-1" style={{ background: tile.color }} />
-                              <div className="text-[6.5px] font-bold text-[#8A93A0] uppercase tracking-[0.03em]">{tile.label}</div>
-                              <div className="text-[11px] font-extrabold text-navy mt-0.5">{tile.value}</div>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="bg-white border border-[#E6E9EE] rounded-xl p-[11px] mt-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9.5px] font-bold text-navy">Volume de tâches par collaborateur</span>
-                            <div className="flex gap-2">
-                              <span className="text-[7px] text-[#8A93A0]"><span className="inline-block w-[5px] h-[5px] rounded-full bg-[#F97316] mr-[3px]" />Terminées</span>
-                              <span className="text-[7px] text-[#8A93A0]"><span className="inline-block w-[5px] h-[5px] rounded-full bg-[#3B82F6] mr-[3px]" />Total</span>
-                            </div>
-                          </div>
-                          <div className="flex items-end gap-2 h-14 mt-2">
-                            {[[55, 40], [80, 65], [35, 30], [95, 70], [60, 60]].map(([a, b], i) => (
-                              <div key={i} className="flex-1 flex gap-0.5 items-end h-full">
-                                <div className="flex-1 bg-[#3B82F6] rounded-t-[2px]" style={{ height: `${a}%` }} />
-                                <div className="flex-1 bg-[#F97316] rounded-t-[2px]" style={{ height: `${b}%` }} />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="bg-white border border-[#E6E9EE] rounded-xl p-[11px] mt-2">
-                          <div className="text-[9.5px] font-bold text-navy mb-[7px]">Activité par client</div>
-                          <div className="grid grid-cols-[1.3fr_0.8fr_0.9fr_1fr] text-[6.5px] font-bold text-[#8A93A0] uppercase tracking-[0.03em] pb-1 border-b border-[#EEF1F4]">
-                            <span>Client</span><span>Tâches</span><span>Durée</span><span>Coût</span>
-                          </div>
-                          <div className="grid grid-cols-[1.3fr_0.8fr_0.9fr_1fr] text-[9px] text-[#3D4655] font-semibold py-1.5 border-b border-[#EEF1F4]">
-                            <span>Client A</span><span>10</span><span>3h20</span><span className="text-[#22C55E] font-bold">1 240 DT</span>
-                          </div>
-                          <div className="grid grid-cols-[1.3fr_0.8fr_0.9fr_1fr] text-[9px] text-[#3D4655] font-semibold py-1.5">
-                            <span>Client B</span><span>6</span><span>1h05</span><span className="text-[#22C55E] font-bold">640 DT</span>
-                          </div>
-                        </div>
-                      </div>
+                    <div>
+                      <div className="text-[15px] font-extrabold text-navy leading-[1.1]">08h 42m</div>
+                      <div className="text-[10px] text-[#8A93A0] mt-0.5">Temps travaillé</div>
                     </div>
                   </div>
                 </div>
 
-                {/* Floating cards */}
-                <div className="absolute inset-0 pointer-events-none">
-                  <div className="absolute top-[-6px] left-[-30px] w-[172px] bg-white rounded-2xl p-3.5 animate-[landingFloatA_6s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-[34px] h-[34px] rounded-[10px] bg-[#E3F7F5] flex items-center justify-center shrink-0">
-                        <div className="w-3.5 h-3.5 rounded-full border-2 border-turquoise relative">
-                          <div className="absolute w-[5px] h-[1.5px] bg-turquoise top-[6px] left-[7px] rotate-[35deg]" />
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[15px] font-extrabold text-navy leading-[1.1]">08h 42m</div>
-                        <div className="text-[10px] text-[#8A93A0] mt-0.5">Temps travaillé</div>
-                      </div>
-                    </div>
+                <div className="absolute right-3 lg:right-6 top-16 w-[150px] bg-white rounded-2xl p-3.5 animate-[landingFloatC_6.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="text-[10px] text-[#8A93A0] uppercase tracking-[0.04em] font-bold">Équipe</div>
+                  <div className="text-[20px] font-extrabold text-navy mt-0.5">84%</div>
+                  <div className="flex items-end gap-1 mt-2 h-6">
+                    <div className="w-2 h-[40%] bg-[#CFEDEA] rounded-[2px]" />
+                    <div className="w-2 h-[70%] bg-[#5FCBC0] rounded-[2px]" />
+                    <div className="w-2 h-[55%] bg-turquoise rounded-[2px]" />
+                    <div className="w-2 h-[90%] bg-navy rounded-[2px]" />
                   </div>
+                </div>
 
-                  <div className="absolute bottom-9 left-[-56px] w-[180px] bg-white rounded-2xl p-3.5 animate-[landingFloatB_7s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[12px] font-bold text-navy">Audit client</span>
-                      <span className="text-[9px] font-bold text-[#00857C] bg-[#E3F7F5] px-[7px] py-[3px] rounded-full">En cours</span>
-                    </div>
-                    <div className="mt-2.5 h-[5px] rounded-[3px] bg-[#EEF1F4]"><div className="w-[72%] h-[5px] rounded-[3px] bg-[#22C55E]" /></div>
-                    <div className="text-[10px] font-bold text-[#8A93A0] mt-1.5 text-right">72%</div>
+                <div className="absolute right-[24%] lg:right-[28%] bottom-16 w-[180px] bg-white rounded-2xl p-3.5 animate-[landingFloatB_7s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-bold text-navy">Audit client</span>
+                    <span className="text-[9px] font-bold text-[#00857C] bg-[#E3F7F5] px-[7px] py-[3px] rounded-full">En cours</span>
                   </div>
+                  <div className="mt-2.5 h-[5px] rounded-[3px] bg-[#EEF1F4]"><div className="w-[72%] h-[5px] rounded-[3px] bg-[#22C55E]" /></div>
+                  <div className="text-[10px] font-bold text-[#8A93A0] mt-1.5 text-right">72%</div>
+                </div>
 
-                  <div className="absolute top-16 right-[-46px] w-[150px] bg-white rounded-2xl p-3.5 animate-[landingFloatC_6.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="text-[10px] text-[#8A93A0] uppercase tracking-[0.04em] font-bold">Équipe</div>
-                    <div className="text-[20px] font-extrabold text-navy mt-0.5">84%</div>
-                    <div className="flex items-end gap-1 mt-2 h-6">
-                      <div className="w-2 h-[40%] bg-[#CFEDEA] rounded-[2px]" />
-                      <div className="w-2 h-[70%] bg-[#5FCBC0] rounded-[2px]" />
-                      <div className="w-2 h-[55%] bg-turquoise rounded-[2px]" />
-                      <div className="w-2 h-[90%] bg-navy rounded-[2px]" />
-                    </div>
-                  </div>
-
-                  <div className="absolute bottom-[-16px] right-2 w-[186px] bg-white rounded-2xl p-3.5 animate-[landingFloatD_7.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-[34px] h-[34px] rounded-[10px] bg-[#EAFBF0] flex items-center justify-center shrink-0 text-[#22C55E] text-[16px] font-extrabold">↑</div>
-                      <div>
-                        <div className="text-[15px] font-extrabold text-[#22C55E] leading-[1.1]">+12 450 DT</div>
-                        <div className="text-[10px] text-[#8A93A0] mt-0.5">Flux de trésorerie</div>
-                      </div>
+                <div className="absolute right-4 lg:right-8 bottom-6 w-[186px] bg-white rounded-2xl p-3.5 animate-[landingFloatD_7.5s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.28)' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-[34px] h-[34px] rounded-[10px] bg-[#EAFBF0] flex items-center justify-center shrink-0 text-[#22C55E] text-[16px] font-extrabold">↑</div>
+                    <div>
+                      <div className="text-[15px] font-extrabold text-[#22C55E] leading-[1.1]">+12 450 DT</div>
+                      <div className="text-[10px] text-[#8A93A0] mt-0.5">Flux de trésorerie</div>
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Mobile: the photo drops below the copy as its own full-width
+                band instead of sitting beside it — still edge to edge, still
+                fading in rather than boxed, just from the top this time. */}
+            <div aria-hidden className="lg:hidden relative w-full h-[240px] sm:h-[320px] mt-4">
+              <div
+                className="absolute inset-0"
+                style={{
+                  WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 22%)',
+                  maskImage: 'linear-gradient(180deg, transparent 0%, #000 22%)',
+                }}
+              >
+                <img
+                  src="/landing/hero-photo.jpg"
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={{ objectPosition: '62% 35%' }}
+                />
               </div>
             </div>
           </section>
