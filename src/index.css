@@ -80,7 +80,6 @@ a:hover { color: oklch(48% 0.14 250); }
 @keyframes landingFloatB { 0%, 100% { transform: rotate(4deg) translateY(0); } 50% { transform: rotate(4deg) translateY(10px); } }
 @keyframes landingFloatC { 0%, 100% { transform: rotate(5deg) translateY(0); } 50% { transform: rotate(5deg) translateY(-9px); } }
 @keyframes landingFloatD { 0%, 100% { transform: rotate(-4deg) translateY(0); } 50% { transform: rotate(-4deg) translateY(11px); } }
-@keyframes landingFloatE { 0%, 100% { transform: rotate(2deg) translateY(0); } 50% { transform: rotate(2deg) translateY(-8px); } }
 @keyframes landingPulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* L'aurore du hero : deux nappes radiales qui dérivent lentement l'une par

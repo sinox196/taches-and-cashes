@@ -561,14 +561,6 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                       </div>
                     </div>
                   </div>
-
-                  <div className="absolute top-[-24px] right-24 w-[200px] bg-white rounded-2xl px-3.5 py-3 opacity-[0.96] animate-[landingFloatE_8s_ease-in-out_infinite]" style={{ boxShadow: '0 18px 34px -12px rgba(13,27,42,0.24)' }}>
-                    <div className="flex items-center gap-2">
-                      <span className="w-[7px] h-[7px] rounded-full bg-[#22C55E] shrink-0 animate-[landingPulseDot_2s_ease-in-out_infinite]" />
-                      <span className="text-[11.5px] font-bold text-navy">Nouvelle tâche assignée</span>
-                    </div>
-                    <div className="text-[10.5px] text-[#8A93A0] mt-[3px] ml-[15px]">Audit dossier client</div>
-                  </div>
                 </div>
               </div>
             </div>
