@@ -9623,7 +9623,17 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         const referrerUser = await db.getUserById(c.referredByCompanyId, c.referredByUserId);
         return referrerUser ? { ...c, referredByUserName: referrerUser.username } : c;
       }));
-      res.json(withReferrer);
+      // `clientsCount` — un compte inscrit n'a pas forcément commencé à s'en
+      // servir : un essai créé puis jamais rouvert n'a aucune fiche client.
+      // C'est la mesure la plus simple de « cette entreprise a-t-elle une
+      // entrée réelle dans la base », pas un chiffre d'affaires ni un volume
+      // d'activité — juste le fichier clients, qui est le premier geste
+      // qu'un cabinet fait en s'installant.
+      const withClientsCount = await Promise.all(withReferrer.map(async (c: any) => {
+        const clients = await db.getAllClients(c.id);
+        return { ...c, clientsCount: clients.length };
+      }));
+      res.json(withClientsCount);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

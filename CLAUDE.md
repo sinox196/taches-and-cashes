@@ -1291,6 +1291,8 @@ Sized for **hundreds of clients and dozens of users**. The rules that keep it th
 
 Le compteur vit dans sa **propre table singleton** (`landing_stats` sous Postgres, `db.landingVisitCount` sous JSON) plutôt que comme un champ de plus sur `platformSettings` : le formulaire RIB de cette même console fait un `PUT` qui remplace tout l'objet `data` de `platform_settings`, et un compteur logé là se serait fait écraser par la prochaine sauvegarde des coordonnées bancaires. `incrementLandingVisitCount()` sous Postgres est un `UPDATE ... SET visits = visits + 1 RETURNING visits` — un seul énoncé atomique, même raisonnement que `nextInvoiceNumber()` : deux visites simultanées ne doivent jamais lire puis réécrire la même valeur. `GET /api/platform/landing-visits`, gardée `requirePlatformAdmin` comme le reste de cette console, sert le total à `PlatformAdmin.tsx`.
 
+**La colonne « Fichier clients » dit si un compte inscrit a réellement commencé à s'en servir, pas seulement s'il existe.** Une entreprise peut s'inscrire et ne jamais rouvrir l'app — `clientsCount` (`GET /api/platform/companies`, `db.getAllClients(c.id).length` par entreprise) répond à « a-t-elle une seule entrée réelle dans la base ». « Aucune donnée » (gris, atténué) en dessous de 1, « N client(s) » sinon — c'est délibérément le fichier clients et rien d'autre : c'est le premier geste qu'un cabinet fait en s'installant, pas un chiffre d'affaires ni un volume d'activité qu'il faudrait recalculer à part.
+
 La ligne d'une entreprise porte **Modifier** et **Supprimer** — le bouton « Utilisateurs » qui s'y trouvait a bougé *dans* la fiche de modification, il n'a pas disparu.
 
 La ligne porte aussi la **date d'inscription** (`createdAt`) et l'**échéance** :

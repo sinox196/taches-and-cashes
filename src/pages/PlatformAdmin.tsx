@@ -17,6 +17,8 @@ interface Company {
   seatLimit: number;
   portalSeatLimit?: number;
   createdAt: string;
+  /** Nombre de fiches clients de l'entreprise — dit si le compte a réellement commencé à s'en servir, pas seulement s'il existe. */
+  clientsCount?: number;
   trialEndsAt: string | null;
   /** Mois offerts gagnés par parrainage et pas encore appliqués à une échéance. */
   referralCreditMonths?: number;
@@ -368,6 +370,12 @@ export const PlatformAdmin: React.FC = () => {
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Entreprise</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Contact</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Statut</th>
+                <th
+                  className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider"
+                  title="Nombre de fiches clients créées — dit si le compte a réellement commencé à s'en servir, pas seulement s'il existe."
+                >
+                  Fichier clients
+                </th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Inscription</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Échéance</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Offre</th>
@@ -418,6 +426,20 @@ export const PlatformAdmin: React.FC = () => {
                       <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${STATUS_STYLE[c.status] || 'bg-gray-100 text-gray-500'}`}>
                         {STATUS_LABELS[c.status] || c.status}
                       </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {!c.clientsCount ? (
+                        <span
+                          className="text-[11px] font-medium text-gray-400"
+                          title="Aucune fiche client créée — le compte existe mais n'a pas encore été utilisé."
+                        >
+                          Aucune donnée
+                        </span>
+                      ) : (
+                        <span className="text-[12.5px] font-semibold text-gray-700">
+                          {c.clientsCount} client{c.clientsCount > 1 ? 's' : ''}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-gray-700" title="Date de création du compte">
                       {fdate(c.createdAt)}
@@ -558,7 +580,7 @@ export const PlatformAdmin: React.FC = () => {
               })}
               {pager.pageRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-[13px] text-gray-500">
+                  <td colSpan={8} className="px-4 py-10 text-center text-[13px] text-gray-500">
                     Aucune entreprise ne correspond à ces filtres.
                   </td>
                 </tr>
