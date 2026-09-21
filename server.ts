@@ -2472,28 +2472,27 @@ async function startServer() {
           return acc;
         }, { soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {} as Record<string, number>, encaissements: 0, resteAPayer: 0 });
 
-        // A custom column sums into Total Général on its own, the moment every
-        // non-empty value it holds (across the whole filtered set, not just
-        // the page) parses as a number. One non-numeric value anywhere in the
-        // column turns the sum off rather than coercing it to 0.
-        // parseFlexibleNumber (not a bare Number()) so a real-world value —
-        // "10 000", "50000 DT", "25 000,500" — still counts as numeric; a
-        // plain Number() rejects every one of those and silently turned the
-        // sum off for exactly the columns people actually use for amounts.
-        const customFieldKeys = new Set<string>();
-        enrichedAll.forEach((c: any) => { if (c.customFields) Object.keys(c.customFields).forEach((k: string) => customFieldKeys.add(k)); });
+        // A custom column sums into Total Général only once the admin has
+        // explicitly flagged it — via the Σ toggle next to Renommer/Supprimer
+        // in the Colonnes picker (PUT /api/clients/fields/totals), stored on
+        // company settings as `customFieldTotalKeys`. It used to auto-detect
+        // "every value in the column parses as a number", which sounded
+        // convenient but silently turned itself off the moment a single
+        // client's value didn't parse — invisible to the admin, who had no
+        // way to tell "not numeric" apart from "not shown yet". An explicit
+        // per-column choice replaces that guess.
         const customTotals: Record<string, number> = {};
-        for (const key of customFieldKeys) {
-          let sum = 0;
-          let numeric = true;
-          for (const c of enrichedAll) {
-            const raw = c.customFields?.[key];
-            if (raw === undefined || raw === null || raw === '') continue;
-            const n = parseFlexibleNumber(raw);
-            if (n === null) { numeric = false; break; }
-            sum = round3(sum + n);
+        if (seesLedger) {
+          const settings = await db.getSettings(req.user.companyId);
+          const flaggedKeys: string[] = Array.isArray(settings?.customFieldTotalKeys) ? settings.customFieldTotalKeys : [];
+          for (const key of flaggedKeys) {
+            let sum = 0;
+            for (const c of enrichedAll) {
+              const n = parseFlexibleNumber(c.customFields?.[key]);
+              if (n !== null) sum = round3(sum + n);
+            }
+            customTotals[key] = sum;
           }
-          if (numeric) customTotals[key] = sum;
         }
 
         res.json({ data: page_, total: clients.length, page, limit, ...(seesLedger ? { totals: { ...totals, customTotals } } : {}) });
@@ -2555,6 +2554,18 @@ async function startServer() {
     return keys;
   };
 
+  /**
+   * Which custom columns the admin flagged to sum into Total Général —
+   * `PUT /api/clients/fields/totals` is the only writer. Kept on company
+   * settings (a small `customFieldTotalKeys: string[]`), not derived, since
+   * unlike the column list itself this is a choice, not something read off
+   * the clients' own data.
+   */
+  const getCustomFieldTotalKeys = async (companyId: string): Promise<string[]> => {
+    const settings = await db.getSettings(companyId);
+    return Array.isArray(settings?.customFieldTotalKeys) ? settings.customFieldTotalKeys : [];
+  };
+
   // PUT /api/clients/fields  { from, to }
   app.put('/api/clients/fields', authenticate, requirePermission('MANAGE_CLIENT_FIELDS'), async (req: any, res: any) => {
     try {
@@ -2579,6 +2590,15 @@ async function startServer() {
       }
 
       const updated = await db.renameClientCustomField(req.user.companyId, from, to);
+
+      // A column flagged for the total keeps being flagged under its new
+      // name — the flag designates the column, not the spelling it happened
+      // to carry at the moment it was checked.
+      const flagged = await getCustomFieldTotalKeys(req.user.companyId);
+      if (flagged.includes(from)) {
+        await db.updateSettings(req.user.companyId, { customFieldTotalKeys: flagged.map(k => (k === from ? to : k)) });
+      }
+
       res.json({ from, to, updated });
     } catch (error) {
       console.error(error);
@@ -2598,7 +2618,48 @@ async function startServer() {
       if (!keys.has(name)) return res.status(404).json({ error: 'Cette colonne n\'existe pas.' });
 
       const updated = await db.deleteClientCustomField(req.user.companyId, name);
+
+      // A deleted column has nothing left to sum — leaving its name flagged
+      // would resurface, still flagged, the moment a client typed the exact
+      // same header again.
+      const flagged = await getCustomFieldTotalKeys(req.user.companyId);
+      if (flagged.includes(name)) {
+        await db.updateSettings(req.user.companyId, { customFieldTotalKeys: flagged.filter(k => k !== name) });
+      }
+
       res.json({ name, updated });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/clients/fields/totals — which custom columns sum into Total
+  // Général, per the admin's own Σ toggle in the Colonnes picker.
+  app.get('/api/clients/fields/totals', authenticate, requirePermission('VIEW_CLIENTS'), async (req: any, res: any) => {
+    try {
+      res.json(await getCustomFieldTotalKeys(req.user.companyId));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // PUT /api/clients/fields/totals  { name, included }
+  app.put('/api/clients/fields/totals', authenticate, requirePermission('MANAGE_CLIENT_FIELDS'), async (req: any, res: any) => {
+    try {
+      const name = String(req.body?.name ?? '');
+      const included = !!req.body?.included;
+      if (!name) return res.status(400).json({ error: 'Nom de colonne requis.' });
+
+      const keys = await clientCustomFieldKeys(req.user.companyId);
+      if (!keys.has(name)) return res.status(404).json({ error: 'Cette colonne n\'existe pas.' });
+
+      const current = await getCustomFieldTotalKeys(req.user.companyId);
+      const next = included
+        ? (current.includes(name) ? current : [...current, name])
+        : current.filter(k => k !== name);
+      await db.updateSettings(req.user.companyId, { customFieldTotalKeys: next });
+      res.json({ name, included, keys: next });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });

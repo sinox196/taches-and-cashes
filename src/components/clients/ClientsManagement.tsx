@@ -3,7 +3,7 @@ import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { ExportButton } from '../ExportButton';
 import { csvNumber } from '../../utils/exportCsv';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet, LogIn } from 'lucide-react';
+import { Plus, Search, Filter, Columns, Check, MoreVertical, Pencil, Trash2, Building2, User as UserIcon, Loader2, X, ChevronRight, Mail, Phone, MapPin, Briefcase, FileSpreadsheet, LogIn, Sigma } from 'lucide-react';
 import { ImportClientsModal } from './ImportClientsModal';
 import { MultiSelectAutocomplete } from '../dashboard/MultiSelectAutocomplete';
 import { formatCostTND } from '../../utils/formatters';
@@ -300,6 +300,32 @@ export const ClientsManagement: React.FC = () => {
       setFieldError({ key: name, message: 'Suppression impossible.' });
     } finally {
       setFieldBusy(false);
+    }
+  };
+
+  /**
+   * Which columns sum into Total Général is now the admin's own choice, not
+   * a guess from the column's values — the Σ toggle next to Renommer/
+   * Supprimer. `totals.customTotals` already only carries flagged keys (see
+   * GET /api/clients), so checked state reads straight off it; toggling
+   * just needs a refetch to pick up the server's new flag.
+   */
+  const [fieldTotalBusy, setFieldTotalBusy] = useState<string | null>(null);
+  const handleToggleFieldTotal = async (name: string, included: boolean) => {
+    setFieldTotalBusy(name); setFieldError(null);
+    try {
+      const res = await fetch('/api/clients/fields/totals', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ name, included }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setFieldError({ key: name, message: data.error || 'Modification impossible.' }); return; }
+      await fetchClients();
+    } catch {
+      setFieldError({ key: name, message: 'Modification impossible.' });
+    } finally {
+      setFieldTotalBusy(null);
     }
   };
 
@@ -906,6 +932,22 @@ export const ClientsManagement: React.FC = () => {
                                elle est inatteignable, et une action qu'on ne
                                voit pas n'existe pas. */
                             <div className="shrink-0 flex items-center gap-0.5">
+                              {hasPermission('VIEW_CLIENT_FINANCIALS') && (() => {
+                                const includedInTotal = totals.customTotals?.[col.key] !== undefined;
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={fieldBusy || fieldTotalBusy === col.key}
+                                    onClick={() => handleToggleFieldTotal(col.key, !includedInTotal)}
+                                    className={`p-1 rounded transition-colors disabled:opacity-50 ${
+                                      includedInTotal ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50' : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'
+                                    }`}
+                                    title={includedInTotal ? 'Retirer du Total Général' : 'Inclure dans le Total Général'}
+                                  >
+                                    {fieldTotalBusy === col.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sigma className="w-3.5 h-3.5" />}
+                                  </button>
+                                );
+                              })()}
                               <button
                                 type="button"
                                 disabled={fieldBusy}
@@ -935,6 +977,9 @@ export const ClientsManagement: React.FC = () => {
                   {hasPermission('MANAGE_CLIENT_FIELDS') && availableFields.length > 0 && (
                     <p className="mt-3 pt-3 border-t border-gray-100 text-[11.5px] text-gray-500 leading-snug">
                       Renommer ou supprimer une colonne personnalisée s'applique à <strong>tous les clients</strong>.
+                      {hasPermission('VIEW_CLIENT_FINANCIALS') && (
+                        <> Le bouton <Sigma className="inline w-3 h-3 -mt-0.5" /> l'ajoute ou la retire du <strong>Total Général</strong>.</>
+                      )}
                     </p>
                   )}
                 </div>
