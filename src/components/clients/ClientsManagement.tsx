@@ -113,7 +113,7 @@ export const ClientsManagement: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'Active' | 'Inactive'>('ALL');
   /** Several specific clients at once, alongside (not instead of) free-text search. */
   const [selectedClients, setSelectedClients] = useState<{ id: number; name: string }[]>([]);
-  const [totals, setTotals] = useState<{ soldeAnterieur: number; montantFacture: number; montantFactureDevises: Record<string, number>; encaissements: number; resteAPayer: number }>({ soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {}, encaissements: 0, resteAPayer: 0 });
+  const [totals, setTotals] = useState<{ soldeAnterieur: number; montantFacture: number; montantFactureDevises: Record<string, number>; encaissements: number; resteAPayer: number; customTotals?: Record<string, number> }>({ soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {}, encaissements: 0, resteAPayer: 0, customTotals: {} });
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -367,7 +367,7 @@ export const ClientsManagement: React.FC = () => {
         if (data && data.data) {
           setClients(data.data);
           setTotalCount(data.total);
-          setTotals(data.totals || { soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {}, encaissements: 0, resteAPayer: 0 });
+          setTotals(data.totals || { soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {}, encaissements: 0, resteAPayer: 0, customTotals: {} });
         } else if (Array.isArray(data)) {
           setClients(data);
           setTotalCount(data.length);
@@ -980,7 +980,9 @@ export const ClientsManagement: React.FC = () => {
                     the running totals ever get lost off the top of the view. */}
                 <thead>
                   <tr className="bg-[#F9FAFB] border-b border-gray-200">
-                    {allTableColumns.filter(c => visibleColumns.includes(c.key)).map(col => (
+                    {allTableColumns.filter(c => visibleColumns.includes(c.key)).map(col => {
+                      const isNumericCustom = (col as any).isCustom && totals.customTotals?.[col.key] !== undefined;
+                      return (
                       <th
                         key={col.key}
                         onClick={() => handleSort(col.key)}
@@ -990,9 +992,9 @@ export const ClientsManagement: React.FC = () => {
                         // right-pinned Actions cell it can slide under.
                         className={`h-11 sticky top-0 bg-[#F9FAFB] px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors group select-none ${
                           col.key === 'name' ? 'left-0 z-40 shadow-[1px_0_0_0_theme(colors.gray.200)]' : 'z-20'
-                        } ${FINANCIAL_KEYS.includes(col.key) ? 'bg-emerald-50/60' : ''}`}
+                        } ${FINANCIAL_KEYS.includes(col.key) || isNumericCustom ? 'bg-emerald-50/60' : ''}`}
                       >
-                        <div className={`flex items-center gap-1 ${FINANCIAL_KEYS.includes(col.key) ? 'justify-end' : ''}`}>
+                        <div className={`flex items-center gap-1 ${FINANCIAL_KEYS.includes(col.key) || isNumericCustom ? 'justify-end' : ''}`}>
                           {col.label}
                           <div className={`flex flex-col opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity ${sortField === col.key ? '!opacity-100' : ''}`}>
                             <ChevronRight className={`w-3 h-3 -rotate-90 -mb-1.5 ${sortField === col.key && sortDir === 'asc' ? 'text-gray-900' : 'text-gray-400'}`} />
@@ -1000,7 +1002,8 @@ export const ClientsManagement: React.FC = () => {
                           </div>
                         </div>
                       </th>
-                    ))}
+                      );
+                    })}
                     <th className="h-11 px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right sticky top-0 right-0 bg-[#F9FAFB] z-30">
                       Actions
                     </th>
@@ -1032,6 +1035,15 @@ export const ClientsManagement: React.FC = () => {
                             ) : isFinancial ? (
                               <span className="block text-right font-mono font-bold text-gray-900">
                                 {formatCostTND((totals as any)[col.key] || 0)}
+                              </span>
+                            ) : col.isCustom && totals.customTotals?.[col.key] !== undefined ? (
+                              // A custom column sums here on its own, server-side,
+                              // the moment every value it holds is numeric — see
+                              // GET /api/clients. A column that isn't (or isn't
+                              // yet, on a page with no data for it) shows nothing,
+                              // same as before.
+                              <span className="block text-right font-mono font-bold text-gray-900">
+                                {Math.round(totals.customTotals[col.key]).toLocaleString('fr-FR')}
                               </span>
                             ) : null}
                           </td>
@@ -1171,7 +1183,20 @@ export const ClientsManagement: React.FC = () => {
                         if (col.isCustom) {
                           val = client.customFields?.[col.key];
                         }
-                        
+
+                        // A numeric custom column (recognised by the server —
+                        // it's the one summed into Total Général) reads like
+                        // the built-in financial columns beside it, not like
+                        // free text.
+                        const isNumericCustom = col.isCustom && totals.customTotals?.[col.key] !== undefined;
+                        if (isNumericCustom) {
+                          return (
+                            <td key={col.key} className="px-5 py-4 text-right font-mono text-gray-700 bg-emerald-50/25">
+                              {val ? Math.round(Number(val)).toLocaleString('fr-FR') : <span className="text-gray-400 italic text-[11px]">-</span>}
+                            </td>
+                          );
+                        }
+
                         return (
                           <td key={col.key} className="px-5 py-4 text-gray-600">
                             {val ? val.toString() : <span className="text-gray-400 italic text-[11px]">-</span>}

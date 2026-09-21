@@ -2448,7 +2448,28 @@ async function startServer() {
           acc.resteAPayer = round3(acc.resteAPayer + num(Number(c.resteAPayer), 0));
           return acc;
         }, { soldeAnterieur: 0, montantFacture: 0, montantFactureDevises: {} as Record<string, number>, encaissements: 0, resteAPayer: 0 });
-        res.json({ data: page_, total: clients.length, page, limit, ...(seesLedger ? { totals } : {}) });
+
+        // A custom column sums into Total Général on its own, the moment every
+        // non-empty value it holds (across the whole filtered set, not just
+        // the page) parses as a number. One non-numeric value anywhere in the
+        // column turns the sum off rather than coercing it to 0.
+        const customFieldKeys = new Set<string>();
+        enrichedAll.forEach((c: any) => { if (c.customFields) Object.keys(c.customFields).forEach((k: string) => customFieldKeys.add(k)); });
+        const customTotals: Record<string, number> = {};
+        for (const key of customFieldKeys) {
+          let sum = 0;
+          let numeric = true;
+          for (const c of enrichedAll) {
+            const raw = c.customFields?.[key];
+            if (raw === undefined || raw === null || raw === '') continue;
+            const n = Number(raw);
+            if (!Number.isFinite(n)) { numeric = false; break; }
+            sum = round3(sum + n);
+          }
+          if (numeric) customTotals[key] = sum;
+        }
+
+        res.json({ data: page_, total: clients.length, page, limit, ...(seesLedger ? { totals: { ...totals, customTotals } } : {}) });
       } else {
         res.json(page_);
       }
