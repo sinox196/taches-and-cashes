@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Loader2, Filter, Calendar } from 'lucide-react';
+import { Loader2, Filter, Calendar, Download } from 'lucide-react';
 import { KPICards } from './KPICards';
 import { EmployeeTable } from './EmployeeTable';
 import { EmployeeDetailsModal } from './EmployeeDetailsModal';
@@ -13,6 +13,7 @@ import { ClientProfitability } from './ClientProfitability';
 import { ConcentrationCard } from './ConcentrationCard';
 import { TaskIntelligence } from './TaskIntelligence';
 import { AIDashboardSummary } from './AIDashboardSummary';
+import { downloadDashboardPdf } from './dashboardPdf';
 
 /**
  * Un cran au-dessus des en-têtes de carte (« RENTABILITÉ DU PORTEFEUILLE »,
@@ -132,6 +133,73 @@ export const AdminDashboard: React.FC = () => {
     setMonthFilter('');
     setStartDate(toLocalDateString(first));
     setEndDate(toLocalDateString(end));
+  };
+
+  // Le libellé de période du PDF suit exactement ce que le filtre affiche à
+  // l'écran — mois/année choisis, « Aujourd'hui », un jour précis, ou une
+  // plage Du/Au libre — plutôt que de recalculer une règle différente : le
+  // PDF est un instantané de ce que ce filtre montre, pas d'un filtre à lui.
+  const toFrDate = (iso: string) => iso.split('-').reverse().join('/');
+  const periodLabel = React.useMemo(() => {
+    if (monthFilter) {
+      const opt = monthOptions.find(o => o.value === monthFilter);
+      if (opt) return opt.label;
+    }
+    if (yearFilter) return yearFilter;
+    if (startDate === endDate) {
+      const today = toLocalDateString(new Date());
+      return startDate === today ? `Aujourd'hui (${toFrDate(startDate)})` : toFrDate(startDate);
+    }
+    return `Du ${toFrDate(startDate)} au ${toFrDate(endDate)}`;
+  }, [monthFilter, yearFilter, startDate, endDate, monthOptions]);
+
+  const filterLabel = React.useMemo(() => {
+    const parts: string[] = [];
+    if (selectedUsers.length) parts.push(`${selectedUsers.length} collaborateur(s)`);
+    if (selectedClients.length) parts.push(`${selectedClients.length} client(s)`);
+    return parts.length ? `Filtres : ${parts.join(', ')}` : undefined;
+  }, [selectedUsers, selectedClients]);
+
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      // « Activité par client » imprime aussi les tâches de chaque client —
+      // exactement le tiroir « Tâches réalisées » que ClientBreakdown.tsx
+      // n'ouvre normalement qu'au clic, une fiche à la fois. Le PDF n'a pas
+      // ce clic : on récupère donc ici, en une salve, tout ce que chaque
+      // client a réellement produit (`/api/kpi/client-tasks`, la même route
+      // et les mêmes filtres que la vue), plutôt que de tenir une seconde
+      // copie de cette agrégation. Les clients sans tâche sur la période
+      // n'ont rien à demander.
+      const clientsWithTasks = (stats?.clientStats || []).filter((c: any) => c.taskCount > 0);
+      const filtersBody = {
+        startDate,
+        endDate,
+        filterUserIds: selectedUsers.map(u => u.id),
+        filterClientIds: selectedClients.map(c => c.id),
+      };
+      const results = await Promise.all(clientsWithTasks.map(async (c: any) => {
+        const key = String(c.key ?? c.id);
+        try {
+          const res = await fetch('/api/kpi/client-tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ ...filtersBody, key }),
+          });
+          const body = await res.json();
+          return [key, { tasks: body.tasks ?? [], truncated: body.truncated ?? 0 }] as const;
+        } catch {
+          return [key, { tasks: [], truncated: 0 }] as const;
+        }
+      }));
+      const clientTasksByKey = Object.fromEntries(results);
+
+      downloadDashboardPdf({ periodLabel, generatedAt: new Date(), exec, stats, filterLabel, clientTasksByKey });
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
@@ -295,12 +363,23 @@ export const AdminDashboard: React.FC = () => {
               onChange={setSelectedUsers}
             />
 
-            <MultiSelectAutocomplete 
+            <MultiSelectAutocomplete
               placeholder="Rechercher client..."
               endpoint="/api/kpi/clients/search"
               selectedItems={selectedClients}
               onChange={setSelectedClients}
             />
+
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              disabled={(!stats && !exec) || exportingPdf}
+              title="Exporter le tableau de bord en PDF pour la période sélectionnée"
+              className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors w-full sm:w-auto flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              {exportingPdf ? 'Export en cours…' : 'Exporter PDF'}
+            </button>
           </div>
         </div>
 

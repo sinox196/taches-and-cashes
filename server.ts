@@ -9091,6 +9091,22 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   });
 
   /**
+   * A bare visit counter for the landing page — no auth, no session/cookie,
+   * one atomic increment. Not analytics: it answers "how many times was the
+   * page loaded", nothing about who, from where, or which page. Landing.tsx
+   * fires this once on mount; the total is shown to the platform super-admin
+   * in the console (`GET /api/platform/landing-visits` below).
+   */
+  app.post('/api/landing/visit', async (req: any, res: any) => {
+    try {
+      await db.incrementLandingVisitCount();
+      res.status(204).end();
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * Real self-serve signup for the three standard packs: creates an isolated
    * company immediately (status TRIAL, full feature access, `TRIAL_DAYS`
    * free) and its first ADMIN user, then logs them straight in — the same
@@ -9628,7 +9644,17 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         const referrerUser = await db.getUserById(c.referredByCompanyId, c.referredByUserId);
         return referrerUser ? { ...c, referredByUserName: referrerUser.username } : c;
       }));
-      res.json(withReferrer);
+      // `clientsCount` — un compte inscrit n'a pas forcément commencé à s'en
+      // servir : un essai créé puis jamais rouvert n'a aucune fiche client.
+      // C'est la mesure la plus simple de « cette entreprise a-t-elle une
+      // entrée réelle dans la base », pas un chiffre d'affaires ni un volume
+      // d'activité — juste le fichier clients, qui est le premier geste
+      // qu'un cabinet fait en s'installant.
+      const withClientsCount = await Promise.all(withReferrer.map(async (c: any) => {
+        const clients = await db.getAllClients(c.id);
+        return { ...c, clientsCount: clients.length };
+      }));
+      res.json(withClientsCount);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -9806,6 +9832,14 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         instructions: text(req.body?.instructions, 1000),
       });
       res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/platform/landing-visits', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      res.json({ visits: await db.getLandingVisitCount() });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }

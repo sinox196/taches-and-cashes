@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Pencil, Trash2, Search } from 'lucide-react';
+import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Pencil, Trash2, Search, Eye } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 import { PlatformUsersModal } from '../components/platform/PlatformUsersModal';
@@ -17,6 +17,8 @@ interface Company {
   seatLimit: number;
   portalSeatLimit?: number;
   createdAt: string;
+  /** Nombre de fiches clients de l'entreprise — dit si le compte a réellement commencé à s'en servir, pas seulement s'il existe. */
+  clientsCount?: number;
   trialEndsAt: string | null;
   /** Mois offerts gagnés par parrainage et pas encore appliqués à une échéance. */
   referralCreditMonths?: number;
@@ -118,14 +120,19 @@ export const PlatformAdmin: React.FC = () => {
   const [bankSaved, setBankSaved] = useState(false);
   const [showBank, setShowBank] = useState(false);
 
+  /** Compteur brut de visites de la page publique — pas de détail par visiteur, voir CLAUDE.md « Console plateforme ». */
+  const [landingVisits, setLandingVisits] = useState<number | null>(null);
+
   const load = async () => {
     try {
-      const [companiesRes, bankRes] = await Promise.all([
+      const [companiesRes, bankRes, visitsRes] = await Promise.all([
         fetch('/api/platform/companies', { headers: authHeaders }).then(r => r.json()),
         fetch('/api/platform/settings', { headers: authHeaders }).then(r => r.json()),
+        fetch('/api/platform/landing-visits', { headers: authHeaders }).then(r => r.json()),
       ]);
       if (Array.isArray(companiesRes)) setCompanies(companiesRes);
       if (bankRes && typeof bankRes === 'object') setBank({ bankName: '', iban: '', rib: '', swift: '', instructions: '', ...bankRes });
+      if (visitsRes && typeof visitsRes.visits === 'number') setLandingVisits(visitsRes.visits);
     } catch (e) {
       setError(friendlyError(e, 'Impossible de charger les entreprises.'));
     } finally {
@@ -232,11 +239,25 @@ export const PlatformAdmin: React.FC = () => {
 
   return (
     <main className="p-4 sm:p-6 lg:p-8 flex-1 flex flex-col space-y-4 sm:space-y-6 max-w-[1400px] w-full mx-auto">
-      <div>
-        <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">Plateforme — entreprises clientes</h1>
-        <p className="text-[11.5px] text-gray-500 mt-0.5">
-          Essais gratuits, envoi des coordonnées bancaires, confirmation manuelle des paiements.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-[19px] font-extrabold text-gray-800 tracking-tight">Plateforme — entreprises clientes</h1>
+          <p className="text-[11.5px] text-gray-500 mt-0.5">
+            Essais gratuits, envoi des coordonnées bancaires, confirmation manuelle des paiements.
+          </p>
+        </div>
+        {landingVisits !== null && (
+          <div
+            className="flex items-center gap-2.5 bg-white border border-gray-200 rounded-xl px-4 py-2.5 shadow-sm"
+            title="Nombre de fois où la page d'accueil publique a été chargée — un simple compteur, pas des analytics détaillées (pas de source, pas de pages, pas de visiteurs uniques)."
+          >
+            <Eye className="w-4 h-4 text-gray-400" />
+            <div>
+              <div className="text-[16px] font-extrabold text-gray-800 leading-none">{landingVisits.toLocaleString('fr-FR')}</div>
+              <div className="text-[10.5px] text-gray-500 mt-0.5">Visites du site</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -349,6 +370,12 @@ export const PlatformAdmin: React.FC = () => {
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Entreprise</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Contact</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Statut</th>
+                <th
+                  className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider"
+                  title="Nombre de fiches clients créées — dit si le compte a réellement commencé à s'en servir, pas seulement s'il existe."
+                >
+                  Fichier clients
+                </th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Inscription</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Échéance</th>
                 <th className="text-left px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Offre</th>
@@ -399,6 +426,20 @@ export const PlatformAdmin: React.FC = () => {
                       <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${STATUS_STYLE[c.status] || 'bg-gray-100 text-gray-500'}`}>
                         {STATUS_LABELS[c.status] || c.status}
                       </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {!c.clientsCount ? (
+                        <span
+                          className="text-[11px] font-medium text-gray-400"
+                          title="Aucune fiche client créée — le compte existe mais n'a pas encore été utilisé."
+                        >
+                          Aucune donnée
+                        </span>
+                      ) : (
+                        <span className="text-[12.5px] font-semibold text-gray-700">
+                          {c.clientsCount} client{c.clientsCount > 1 ? 's' : ''}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-gray-700" title="Date de création du compte">
                       {fdate(c.createdAt)}
@@ -539,7 +580,7 @@ export const PlatformAdmin: React.FC = () => {
               })}
               {pager.pageRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-[13px] text-gray-500">
+                  <td colSpan={8} className="px-4 py-10 text-center text-[13px] text-gray-500">
                     Aucune entreprise ne correspond à ces filtres.
                   </td>
                 </tr>

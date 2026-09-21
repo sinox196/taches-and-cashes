@@ -144,6 +144,21 @@ export const CORE_FEATURES: string[] = [
 ];
 
 /**
+ * Freelancer partage `CORE_FEATURES` avec Complet sauf sur un point : son
+ * quota de documents n'est pas illimité (`monthlyDocumentQuota: 10` sur la
+ * fiche FREELANCER ci-dessous — voir « Le quota mensuel de Freelance » dans
+ * CLAUDE.md). Annoncer « Nombre illimité de factures et de documents » sur
+ * cette carte aurait promis ce que le serveur verrouille dès le 11ᵉ document
+ * du mois — un chiffre faux et crédible, exactement ce que cette app évite
+ * ailleurs. Une seule ligne diffère, donc un `.map()` sur `CORE_FEATURES`
+ * plutôt qu'une liste recopiée à la main qui pourrait diverger des dix
+ * autres lignes.
+ */
+export const FREELANCER_FEATURES: string[] = CORE_FEATURES.map(f =>
+  f === 'Nombre illimité de factures et de documents' ? '10 factures par mois' : f
+);
+
+/**
  * Le pack RH & Paie n'ouvre que trois vues (Équipe, RH, Gestion des paies) —
  * sa propre liste, pas `CORE_FEATURES`, qui promet des vues qu'il ne vend pas
  * (Cash, Pointage, Ressources métier…).
@@ -203,7 +218,7 @@ export const PLANS: PlanMeta[] = [
     seatLimit: 1,
     portalSeatLimit: 0,
     monthlyDocumentQuota: 10,
-    features: CORE_FEATURES,
+    features: FREELANCER_FEATURES,
   },
   /**
    * Le cabinet au complet — `modules` absent, donc toutes les vues. C'est

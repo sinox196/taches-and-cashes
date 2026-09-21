@@ -234,6 +234,16 @@ async function ensureSchema(pool: pg.Pool) {
   await q(`INSERT INTO platform_settings (only_row, data) VALUES (TRUE, $1)
            ON CONFLICT (only_row) DO NOTHING`, [JSON.stringify(defaultPlatformSettings())]);
 
+  // A bare visit counter for the public landing page — its own singleton
+  // table rather than a field on platform_settings, so the admin's bank-RIB
+  // form (which PUTs the whole `data` object back) can never clobber it.
+  await q(`CREATE TABLE IF NOT EXISTS landing_stats (
+    only_row BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (only_row),
+    visits   BIGINT  NOT NULL DEFAULT 0
+  )`);
+  await q(`INSERT INTO landing_stats (only_row, visits) VALUES (TRUE, 0)
+           ON CONFLICT (only_row) DO NOTHING`);
+
   // The legacy cabinet's own company row.
   await q(
     `INSERT INTO companies (id, data) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
@@ -829,6 +839,16 @@ export async function initPostgres(connectionString: string): Promise<Database> 
       return rows[0].data;
     },
 
+    getLandingVisitCount: async () => {
+      const rows = await q('SELECT visits FROM landing_stats WHERE only_row');
+      return Number(rows[0]?.visits ?? 0);
+    },
+    /** A single atomic increment — same reasoning as `nextInvoiceNumber()`. */
+    incrementLandingVisitCount: async () => {
+      const rows = await q(`UPDATE landing_stats SET visits = visits + 1 WHERE only_row RETURNING visits`);
+      return Number(rows[0].visits);
+    },
+
     close: async () => { await pool.end(); },
   };
 
@@ -906,6 +926,9 @@ export async function importSnapshot(connectionString: string, snapshot: any) {
           `UPDATE platform_settings SET data = $1::jsonb WHERE only_row`,
           [JSON.stringify(snapshot.platformSettings)],
         );
+      }
+      if (typeof snapshot.landingVisitCount === 'number') {
+        await client.query(`UPDATE landing_stats SET visits = $1 WHERE only_row`, [snapshot.landingVisitCount]);
       }
       await client.query('COMMIT');
     } catch (e) {
