@@ -168,13 +168,31 @@ const round3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 
 /**
  * Parses a number the way it is actually typed in this app's fr-TN
- * locale — a plain `Number()` rejects every one of these. Strips a
- * trailing currency unit ("DT"/"TND"/"Dinars"), thousand-separator
- * whitespace (plain space, NBSP, narrow NBSP), and reads a comma as
- * the decimal point (falling back to a literal dot if there's no
- * comma, so "1500.5" still works). Returns null — never 0 — for
- * anything that still doesn't parse, so a genuinely non-numeric value
- * still disqualifies a custom column from being summed.
+ * locale — a plain `Number()` rejects every one of these, and worse,
+ * silently mis-parses some ("100.000" — how a company's capital social
+ * is routinely written by hand, dot-grouped thousands, no fraction —
+ * reads as the literal decimal 100 to a bare `Number()`, undercounting
+ * a sum by three orders of magnitude with no error to catch it).
+ *
+ * Strips a trailing currency unit ("DT"/"TND"/"Dinars") and
+ * thousand-separator whitespace (space, NBSP, narrow NBSP) first, then
+ * resolves the remaining `,`/`.` the way any fr/European-locale number
+ * parser has to when the writer's exact convention isn't known up
+ * front:
+ *   - both present → whichever comes LAST is the decimal point, the
+ *     other is thousands grouping ("1.234,56" and "1,234.56" both
+ *     resolve correctly this way regardless of which locale wrote them);
+ *   - only a comma → always the decimal point, never grouping — this
+ *     app's own money formatting (`toLocaleString('fr-FR')`) never
+ *     emits a comma any other way;
+ *   - only a dot, and it's either not the last "." (i.e. several dots)
+ *     or followed by exactly three digits and nothing else → thousands
+ *     grouping ("100.000", "1.234.567"), since a genuine decimal here
+ *     would almost never carry exactly three digits after the point;
+ *     any other single dot ("10.5") is a plain decimal point.
+ * Returns null — never 0 — for anything that still doesn't parse, so a
+ * genuinely non-numeric value still disqualifies a custom column from
+ * being summed.
  */
 const parseFlexibleNumber = (raw: any): number | null => {
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
@@ -183,7 +201,20 @@ const parseFlexibleNumber = (raw: any): number | null => {
   if (!s) return null;
   s = s.replace(/\s*(dt|tnd|dinars?)\s*$/i, '');
   s = s.replace(/[\s  ]/g, '');
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (hasComma) {
+    s = s.replace(',', '.');
+  } else if (hasDot) {
+    const parts = s.split('.');
+    const groupedThousands = parts.length > 2 || parts[1].length === 3;
+    if (groupedThousands) s = parts.join('');
+  }
+
   if (!s) return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;

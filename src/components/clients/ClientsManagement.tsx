@@ -75,8 +75,12 @@ const FINANCIAL_KEYS = ['soldeAnterieur', 'montantFacture', 'encaissements', 're
  * locally rather than imported across the client/server boundary, the same
  * idiom `fold()` already follows in this app. Only used to render a numeric
  * custom column's own cells the way `Number(val)` alone can't: "10 000",
- * "50000 DT" and "25 000,500" all read correctly here, matching what the
- * server already recognised as numeric to sum it into Total Général.
+ * "50000 DT", "25 000,500" and dot-grouped thousands like "100.000" (how a
+ * capital social is routinely written by hand — a bare `Number()` reads
+ * that as the literal decimal 100, undercounting by three orders of
+ * magnitude with no error to catch it) all read correctly here, matching
+ * what the server already recognised as numeric to sum it into Total
+ * Général.
  */
 const parseFlexibleNumber = (raw: any): number | null => {
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
@@ -85,7 +89,20 @@ const parseFlexibleNumber = (raw: any): number | null => {
   if (!s) return null;
   s = s.replace(/\s*(dt|tnd|dinars?)\s*$/i, '');
   s = s.replace(/[\s  ]/g, '');
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (hasComma) {
+    s = s.replace(',', '.');
+  } else if (hasDot) {
+    const parts = s.split('.');
+    const groupedThousands = parts.length > 2 || parts[1].length === 3;
+    if (groupedThousands) s = parts.join('');
+  }
+
   if (!s) return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
