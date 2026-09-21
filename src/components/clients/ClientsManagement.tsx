@@ -70,6 +70,27 @@ export interface Client {
 /** The ledger columns — right-aligned, tinted, and summed in the totals row. */
 const FINANCIAL_KEYS = ['soldeAnterieur', 'montantFacture', 'encaissements', 'resteAPayer'];
 
+/**
+ * Same parsing rules as server.ts's own `parseFlexibleNumber` — duplicated
+ * locally rather than imported across the client/server boundary, the same
+ * idiom `fold()` already follows in this app. Only used to render a numeric
+ * custom column's own cells the way `Number(val)` alone can't: "10 000",
+ * "50000 DT" and "25 000,500" all read correctly here, matching what the
+ * server already recognised as numeric to sum it into Total Général.
+ */
+const parseFlexibleNumber = (raw: any): number | null => {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  if (!s) return null;
+  s = s.replace(/\s*(dt|tnd|dinars?)\s*$/i, '');
+  s = s.replace(/[\s  ]/g, '');
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+
 const sumEncaissements = (entries: EncaissementEntry[] | number | undefined): number =>
   Array.isArray(entries) ? entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) : (Number(entries) || 0);
 
@@ -1190,9 +1211,10 @@ export const ClientsManagement: React.FC = () => {
                         // free text.
                         const isNumericCustom = col.isCustom && totals.customTotals?.[col.key] !== undefined;
                         if (isNumericCustom) {
+                          const parsed = val ? parseFlexibleNumber(val as any) : null;
                           return (
                             <td key={col.key} className="px-5 py-4 text-right font-mono text-gray-700 bg-emerald-50/25">
-                              {val ? Math.round(Number(val)).toLocaleString('fr-FR') : <span className="text-gray-400 italic text-[11px]">-</span>}
+                              {parsed !== null ? Math.round(parsed).toLocaleString('fr-FR') : <span className="text-gray-400 italic text-[11px]">-</span>}
                             </td>
                           );
                         }

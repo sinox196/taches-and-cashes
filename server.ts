@@ -166,6 +166,29 @@ const formatCostTND = (cost: number): string => {
 /** Money is carried to the millime (3 decimals) at every step. */
 const round3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 
+/**
+ * Parses a number the way it is actually typed in this app's fr-TN
+ * locale — a plain `Number()` rejects every one of these. Strips a
+ * trailing currency unit ("DT"/"TND"/"Dinars"), thousand-separator
+ * whitespace (plain space, NBSP, narrow NBSP), and reads a comma as
+ * the decimal point (falling back to a literal dot if there's no
+ * comma, so "1500.5" still works). Returns null — never 0 — for
+ * anything that still doesn't parse, so a genuinely non-numeric value
+ * still disqualifies a custom column from being summed.
+ */
+const parseFlexibleNumber = (raw: any): number | null => {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  if (!s) return null;
+  s = s.replace(/\s*(dt|tnd|dinars?)\s*$/i, '');
+  s = s.replace(/[\s  ]/g, '');
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+
 /** Attaches the admin-set annual leave allowance and its consumption to a user payload. */
 const withLeaveBalance = (user: any, balances: any[]) => {
   const b = balances.find((x: any) => x.userId === user.id);
@@ -2453,6 +2476,10 @@ async function startServer() {
         // non-empty value it holds (across the whole filtered set, not just
         // the page) parses as a number. One non-numeric value anywhere in the
         // column turns the sum off rather than coercing it to 0.
+        // parseFlexibleNumber (not a bare Number()) so a real-world value —
+        // "10 000", "50000 DT", "25 000,500" — still counts as numeric; a
+        // plain Number() rejects every one of those and silently turned the
+        // sum off for exactly the columns people actually use for amounts.
         const customFieldKeys = new Set<string>();
         enrichedAll.forEach((c: any) => { if (c.customFields) Object.keys(c.customFields).forEach((k: string) => customFieldKeys.add(k)); });
         const customTotals: Record<string, number> = {};
@@ -2462,8 +2489,8 @@ async function startServer() {
           for (const c of enrichedAll) {
             const raw = c.customFields?.[key];
             if (raw === undefined || raw === null || raw === '') continue;
-            const n = Number(raw);
-            if (!Number.isFinite(n)) { numeric = false; break; }
+            const n = parseFlexibleNumber(raw);
+            if (n === null) { numeric = false; break; }
             sum = round3(sum + n);
           }
           if (numeric) customTotals[key] = sum;
