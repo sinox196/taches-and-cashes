@@ -150,6 +150,23 @@ a:hover { color: oklch(48% 0.14 250); }
 /* Les barres du graphique de démonstration, qui poussent depuis le bas. */
 @keyframes landingBarGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 
+/* Le casque de la conseillère émet deux ondes lentes — la seule animation
+   ambiante de la page Support, et elle dit quelque chose : quelqu'un écoute.
+   Les autres mouvements de cette page répondent à un geste (ouvrir, filtrer,
+   trouver) plutôt que de tourner en boucle. */
+@keyframes landingSignal {
+  from { transform: scale(0.55); opacity: .5; }
+  to   { transform: scale(1.7);  opacity: 0; }
+}
+
+/* Le halo qui signale la réponse qu'on vient d'atteindre depuis la recherche :
+   sans lui, on est déposé au milieu d'une liste sans savoir sur quelle ligne. */
+@keyframes landingFound {
+  0%   { box-shadow: 0 0 0 0 rgba(0,179,166,0.45); }
+  70%  { box-shadow: 0 0 0 10px rgba(0,179,166,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,179,166,0); }
+}
+
 /* Une piste de défilement s'arrête au survol : on lit ce qu'on vise. */
 .landing-marquee:hover .landing-marquee-track { animation-play-state: paused; }
 
