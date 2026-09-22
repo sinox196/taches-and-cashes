@@ -3,7 +3,7 @@ import {
   Search, HelpCircle, Headphones, MessageCircle, Sparkles, Video, Download,
   ChevronDown, BookOpen, Mail, Clock, Users, LayoutDashboard, Building2, Timer,
   ListChecks, Wallet, CalendarCheck, FolderKanban, MessageSquare, Gift, Globe,
-  FileText, ArrowRight, CornerDownLeft, X,
+  FileText, ArrowRight, CornerDownLeft, X, Maximize2,
 } from 'lucide-react';
 import { Reveal } from './Reveal';
 
@@ -58,10 +58,15 @@ type GroupId = typeof GROUPS[number]['id'];
  * rien ici ne promet une fonction que l'application n'a pas.
  */
 const GUIDE_CHAPTERS: {
-  id: string; title: string; summary: string; group: GroupId; icon: React.ReactNode;
+  id: string; title: string; summary: string; group: GroupId;
+  icon: React.ReactNode;
+  /** Capture réelle de l'écran concerné (public/support). Optionnelle : un
+   *  chapitre sans capture s'affiche simplement sans. */
+  shot?: string;
 }[] = [
   {
     id: 'compte',
+    shot: '/support/compte.webp',
     title: 'Créer un compte & se connecter',
     group: 'demarrer',
     summary: "Choisissez une offre (Freelancer, gratuite, ou Complet) depuis la page Tarifs, avec ou sans code de parrainage, puis validez le formulaire. L'essai est gratuit et sans carte bancaire — Freelancer, elle, est active immédiatement. La connexion se fait ensuite avec votre identifiant et votre mot de passe.",
@@ -69,6 +74,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'dashboard',
+    shot: '/support/dashboard.webp',
     title: 'Tableau de bord',
     group: 'piloter',
     summary: "Le bandeau exécutif affiche vos indicateurs clés — marge sur temps, honoraires, coût employeur — filtrables par période, collaborateur ou client. Vous y retrouvez aussi les alertes qui demandent une décision, la rentabilité par client et un résumé rédigé par IA à la demande.",
@@ -76,6 +82,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'clients',
+    shot: '/support/clients.webp',
     title: 'Clients',
     group: 'piloter',
     summary: "La fiche client centralise coordonnées, facturation, échéances et encaissements. Ajoutez des colonnes personnalisées, importez votre fichier clients en masse depuis un tableur, ou ouvrez l'espace d'un client sans jamais avoir besoin de son mot de passe.",
@@ -83,6 +90,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'portail',
+    shot: '/support/portail.webp',
     title: 'Portail client',
     group: 'piloter',
     summary: "Vos clients consultent leur avancement, leurs échéances, leurs factures et un rapport mensuel — jamais le détail du temps passé ni le coût employeur, qui restent internes au cabinet.",
@@ -90,6 +98,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'pointage',
+    shot: '/support/pointage.webp',
     title: 'Gestion des tâches (Pointage)',
     group: 'produire',
     summary: "Choisissez un client puis une mission pour démarrer un chronomètre — le type de tâche s'affiche automatiquement. Un seul chronomètre tourne à la fois par personne ; une tâche se planifie pour plus tard ou se délègue à un collègue.",
@@ -97,6 +106,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'missions',
+    shot: '/support/missions.webp',
     title: 'Missions et types de tâches',
     group: 'produire',
     summary: "Une mission (ex. Comptabilité) regroupe des types de tâches (ex. Saisie, Déclaration). Ce catalogue alimente le formulaire de pointage et permet de voir, mission par mission, où va le temps de l'équipe.",
@@ -104,6 +114,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'outils',
+    shot: '/support/outils.webp',
     title: 'Outils de travail',
     group: 'produire',
     summary: "Affectez des modèles de documents (procédures, checklists) à vos clients et suivez leur avancement point par point. Retrouvez vos liens utiles et la grille annuelle des échéances fiscales et sociales.",
@@ -111,6 +122,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'messagerie',
+    shot: '/support/messagerie.webp',
     title: 'Messagerie',
     group: 'produire',
     summary: "Échangez des messages directs ou en groupe avec vos collègues. Un compte client du portail n'a jamais accès aux conversations internes du cabinet — la confidentialité est garantie par construction.",
@@ -118,6 +130,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'cash',
+    shot: '/support/cash.webp',
     title: 'Facturation & Trésorerie (Cash)',
     group: 'encaisser',
     summary: "Créez vos factures avec calcul automatique de la TVA, de la retenue à la source et du timbre fiscal. Suivez les règlements de vos clients et tenez votre brouillard de caisse au jour le jour, solde recalculé à chaque mouvement.",
@@ -125,6 +138,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'grh',
+    shot: '/support/grh.webp',
     title: 'GRH & Paie',
     group: 'administrer',
     summary: "Pointez les présences, traitez les demandes de congés et d'autorisations d'absence, suivez les prêts et avances au personnel, et générez les bulletins de paie mensuels avec IRPP, CNSS et retenues calculés automatiquement.",
@@ -132,6 +146,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'equipe',
+    shot: '/support/equipe.webp',
     title: 'Équipe & utilisateurs',
     group: 'administrer',
     summary: "Créez des comptes pour vos collaborateurs, attribuez-leur un rôle (Administrateur, Superviseur, Collaborateur, Stagiaire) et affinez leurs permissions une par une, selon ce qu'ils doivent pouvoir voir ou modifier.",
@@ -139,6 +154,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'parrainage',
+    shot: '/support/parrainage.webp',
     title: 'Parrainage',
     group: 'administrer',
     summary: "Partagez votre code personnel : dès qu'un filleul souscrit, il profite de 10 % de remise sur son premier abonnement et vous recevez, vous, un mois offert sur le vôtre.",
@@ -146,6 +162,7 @@ const GUIDE_CHAPTERS: {
   },
   {
     id: 'export',
+    shot: '/support/export.webp',
     title: 'Export & notifications',
     group: 'administrer',
     summary: "Chaque tableau important — Clients, Pointage, RH, Cash… — s'exporte en un clic vers un fichier compatible Excel. La cloche en haut de l'écran centralise vos notifications : tâches assignées, décisions RH, nouveaux messages.",
@@ -260,6 +277,9 @@ export const SupportView: React.FC<SupportViewProps> = ({
   const [found, setFound] = useState<string | null>(null);
   const [helpful, setHelpful] = useState<Record<string, 'oui' | 'non'>>({});
   const [parallax, setParallax] = useState({ x: 0, y: 0 });
+  /** La capture ouverte en grand. Une capture d'écran d'application se lit mal
+   *  à 500px de large : la vignette sert à situer, l'agrandissement à lire. */
+  const [zoom, setZoom] = useState<{ src: string; title: string } | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
@@ -326,6 +346,21 @@ export const SupportView: React.FC<SupportViewProps> = ({
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [panelOpen]);
+
+  // Échap ferme l'agrandissement, et le défilement de la page est bloqué tant
+  // qu'il est ouvert : défiler derrière une image plein écran ne mène nulle
+  // part et fait perdre sa place.
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setZoom(null); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [zoom]);
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
@@ -644,9 +679,41 @@ export const SupportView: React.FC<SupportViewProps> = ({
                       où un `max-height` deviné saccade. */}
                   <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                     <div className="overflow-hidden">
-                      <p className="px-5 sm:px-6 pb-5 pl-[62px] sm:pl-[66px] text-[13.5px] leading-[1.65] text-[#5B6472] max-w-[720px]">
-                        {chapter.summary}
-                      </p>
+                      <div className="px-5 sm:px-6 pb-6 pl-[62px] sm:pl-[66px] flex flex-col md:flex-row md:items-start gap-5">
+                        <p className="md:flex-1 text-[13.5px] leading-[1.65] text-[#5B6472] max-w-[420px]">
+                          {chapter.summary}
+                        </p>
+                        {/* La capture de l'écran dont parle le chapitre.
+                            `loading="lazy"` + dimensions explicites : les
+                            treize vivent dans le DOM en permanence (repliées),
+                            donc rien ne doit être téléchargé avant d'être
+                            regardé, ni faire sauter la page en arrivant. */}
+                        {chapter.shot && (
+                          <button
+                            onClick={() => setZoom({ src: chapter.shot!, title: chapter.title })}
+                            className="group/shot md:w-[52%] shrink-0 relative block rounded-xl overflow-hidden border border-[#E6E9EE] bg-[#F7F9FA] hover:border-turquoise/50 transition-colors"
+                            aria-label={`Agrandir la capture : ${chapter.title}`}
+                          >
+                            <img
+                              src={chapter.shot}
+                              alt={`L'écran ${chapter.title} dans Tâches & Cash`}
+                              width={1400}
+                              height={875}
+                              loading="lazy"
+                              decoding="async"
+                              className="block w-full h-auto"
+                            />
+                            <span className="absolute inset-0 bg-navy/0 group-hover/shot:bg-navy/[0.06] transition-colors" />
+                            {/* Visible au repos, pas seulement au survol : sur
+                                un écran tactile le survol n'existe pas, et une
+                                vignette qu'on ne sait pas cliquable ne se
+                                clique pas. */}
+                            <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/90 text-[10.5px] font-bold text-navy opacity-80 group-hover/shot:opacity-100 group-hover/shot:bg-white transition-all">
+                              <Maximize2 className="w-3 h-3" /> Agrandir
+                            </span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -780,6 +847,37 @@ export const SupportView: React.FC<SupportViewProps> = ({
           </div>
         </div>
       </section>
+
+      {/* L'agrandissement d'une capture. Le fond ferme au clic, Échap aussi,
+          et l'image elle-même ne ferme pas — on clique volontiers dessus pour
+          regarder un détail. */}
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={zoom.title}
+          className="fixed inset-0 z-[100] bg-navy/80 backdrop-blur-[2px] flex items-center justify-center p-4 sm:p-8 animate-[landingPanelIn_160ms_ease-out]"
+        >
+          <div className="w-full max-w-[1200px]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <p className="text-[14px] font-bold text-white">{zoom.title}</p>
+              <button
+                onClick={() => setZoom(null)}
+                aria-label="Fermer l'agrandissement"
+                className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <img
+              src={zoom.src}
+              alt={`L'écran ${zoom.title} dans Tâches & Cash`}
+              className="w-full h-auto max-h-[80vh] object-contain rounded-xl bg-white"
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 };
