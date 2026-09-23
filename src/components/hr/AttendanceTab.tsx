@@ -60,8 +60,18 @@ const presenceMinutes = (r: AttendanceRecord): number | null => {
 const time = (iso: string | null) => formatTimeTN(iso);
 
 /**
- * Within tolerance -> "à l'heure"; beyond it -> flagged, direction-aware for
- * checkout.
+ * Within tolerance -> "à l'heure"; beyond it -> flagged, direction-aware on
+ * both ends.
+ *
+ * `checkinLateMinutes` est un **écart signé** : négatif, on est arrivé *avant*
+ * l'horaire. Le libellé d'arrivée disait « Retard de » quel que soit le signe,
+ * donc pointer à 06h00 pour un shift à 08h00 s'affichait « Retard de −120 min »
+ * — en rouge, avec un triangle d'alerte, pour quelqu'un arrivé deux heures en
+ * avance. Arriver tôt n'est pas une faute : c'est « En avance », en gris et
+ * avec une horloge, pas l'alerte rouge que porte un vrai retard. Le côté
+ * départ faisait déjà cette distinction (anticipé / tardif), l'arrivée non.
+ * Le serveur, lui, comptait déjà juste (`onTimeCheckins` compare l'écart à la
+ * tolérance sans valeur absolue, donc une avance y passe pour ponctuelle).
  *
  * `compact` sert aux cartes du téléphone : « Retard de 45 min » repassait à la
  * ligne dans les ~180 px qui restent à droite de l'heure, et la carte se
@@ -79,15 +89,16 @@ const punctualityBadge = (
   if (Math.abs(minutes) <= tolerance) {
     return <span className="inline-flex items-center gap-1 text-emerald-700 whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> À l'heure</span>;
   }
+  const early = minutes < 0;
   const long = kind === 'checkin'
-    ? `Retard de ${minutes} min`
-    : minutes < 0
-      ? `Départ anticipé (${Math.abs(minutes)} min)`
-      : `Départ tardif (${minutes} min)`;
-  const tone = kind === 'checkin' ? 'text-red-700' : 'text-amber-700';
+    ? (early ? `En avance de ${Math.abs(minutes)} min` : `Retard de ${minutes} min`)
+    : (early ? `Départ anticipé (${Math.abs(minutes)} min)` : `Départ tardif (${minutes} min)`);
+  const earlyArrival = early && kind === 'checkin';
+  const tone = earlyArrival ? 'text-gray-600' : kind === 'checkin' ? 'text-red-700' : 'text-amber-700';
+  const Icon = earlyArrival ? Clock : AlertTriangle;
   return (
     <span className={`inline-flex items-center gap-1 whitespace-nowrap ${tone}`} title={compact ? long : undefined}>
-      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+      <Icon className="w-3.5 h-3.5 shrink-0" />
       {compact ? `${minutes > 0 ? '+' : '−'}${Math.abs(minutes)} min` : long}
     </span>
   );
