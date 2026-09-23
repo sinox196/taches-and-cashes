@@ -1,14 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Mail, LayoutDashboard, Timer, ListChecks, Building2, FileText, Wallet,
-  CalendarCheck, FolderKanban, Users, MessageSquare, Globe, Gift, ArrowRight,
-  Compass, Clock, AlertTriangle, ArrowDown,
-} from 'lucide-react';
+import { Mail, LayoutDashboard, ListChecks, FileText, MessageSquare, Globe, ArrowRight, Compass, Clock, AlertTriangle, ArrowDown } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
 import { Reveal, CountUp } from '../components/landing/Reveal';
-import { ModuleExplorer } from '../components/landing/ModuleExplorer';
-import { ClientLogos } from '../components/landing/ClientLogos';
+import { HomeView } from '../components/landing/HomeView';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
 import { LandingNav, type PublicView } from '../components/landing/LandingNav';
 import { ContactView } from '../components/landing/ContactView';
@@ -119,78 +114,6 @@ const PLANS: PricingPlan[] = SELLABLE_PLANS.map(p => ({
 }));
 
 /**
- * Les douze modules de l'application, chacun dans sa carte. La liste couvre
- * ce que le cabinet trouve réellement en se connectant — pas une sélection
- * commerciale : une page qui ne montre que le pointage laisse croire que le
- * reste n'existe pas.
- */
-const HOME_FEATURES: {
-  title: string; description: string; iconBg: string; iconColor: string; icon: React.ReactNode;
-}[] = [
-  {
-    title: 'Tableau de bord Direction',
-    description: "Marge sur temps, rentabilité par client, concentration du portefeuille et créances échues.",
-    iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <LayoutDashboard className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Pointage & chronomètre',
-    description: 'Un chronomètre par collaborateur, accessible depuis toutes les pages, qui survit au rafraîchissement.',
-    iconBg: '#E3F7F5', iconColor: '#00857C', icon: <Timer className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Missions & types de tâches',
-    description: "Un catalogue de 8 missions et 67 tâches livré d'office, adapté au métier du cabinet.",
-    iconBg: '#EAFBF0', iconColor: '#15803D', icon: <ListChecks className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Clients & colonnes sur mesure',
-    description: 'Import du tableur existant, colonnes personnalisées, solde et encaissements par dossier.',
-    iconBg: '#FFF3DE', iconColor: '#C98A1B', icon: <Building2 className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Facturation conforme',
-    description: 'TVA, retenue à la source, timbre fiscal, montant en toutes lettres et numérotation légale.',
-    iconBg: '#FDEBEF', iconColor: '#C2416B', icon: <FileText className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Trésorerie & brouillard de caisse',
-    description: 'Encaissements, décaissements, solde courant et règlements clients par mode de paiement.',
-    iconBg: '#E3F7F5', iconColor: '#00857C', icon: <Wallet className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Suivi des échéances',
-    description: 'DM, IS, IRPP, CNSS, acomptes — les exercices 2025 à 2028 livrés avec les libellés à jour.',
-    iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <CalendarCheck className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Outils de travail',
-    description: 'Listes de pièces par type de dossier, liens utiles, avancement coché client par client.',
-    iconBg: '#FFF3DE', iconColor: '#C98A1B', icon: <FolderKanban className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Ressources humaines',
-    description: 'Congés, autorisations d\'absence, prêts et avances — demande, approbation, solde à jour.',
-    iconBg: '#EAFBF0', iconColor: '#15803D', icon: <Users className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Messagerie & présence',
-    description: 'Fils directs, groupes de travail, accusés de lecture et présence en direct de l\'équipe.',
-    iconBg: '#FDEBEF', iconColor: '#C2416B', icon: <MessageSquare className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Portail client',
-    description: 'Votre client consulte son relevé et l\'avancement de ses dossiers — sans voir vos coûts.',
-    iconBg: '#E3F7F5', iconColor: '#00857C', icon: <Globe className="w-[22px] h-[22px]" />,
-  },
-  {
-    title: 'Parrainage',
-    description: 'Un confrère souscrit avec votre lien : 10 % pour lui, un mois offert pour vous.',
-    iconBg: '#E9ECFE', iconColor: '#3B52C4', icon: <Gift className="w-[22px] h-[22px]" />,
-  },
-];
-
-
-/**
  * Les quatre piliers de la page « À propos » — le contenu réel remis par
  * l'utilisateur, pas un remplissage, même règle que le reste des maquettes de
  * cette page (voir Testimonials/ClientLogos plus bas dans CLAUDE.md).
@@ -218,25 +141,6 @@ const ABOUT_PILLARS: {
     description: "Une meilleure communication interne (messagerie, RH) et externe grâce à un portail client dédié qui réduit les relances inutiles.",
     iconBg: '#FDEBEF', iconColor: '#C2416B', icon: <MessageSquare className="w-[22px] h-[22px]" />,
   },
-];
-
-const FLOW_STEPS: { label: string; color: string; shadow: string; shape: React.ReactNode }[] = [
-  { label: 'Tâches', color: '#0D1B2A', shadow: 'rgba(13,27,42,0.12)', shape: <div className="w-5 h-5 bg-navy rounded" /> },
-  { label: 'Temps', color: '#0D1B2A', shadow: 'rgba(13,27,42,0.12)', shape: <div className="w-5 h-5 rounded-full border-[3px] border-navy" /> },
-  { label: 'Coûts', color: '#00857C', shadow: 'rgba(0,179,166,0.15)', shape: <div className="w-5 h-5 bg-turquoise rotate-45" /> },
-  {
-    label: 'Rentabilité',
-    color: '#00857C',
-    shadow: 'rgba(0,179,166,0.15)',
-    shape: (
-      <div className="flex items-end gap-[2px] h-5">
-        <div className="w-[5px] h-[40%] bg-turquoise rounded-[1px]" />
-        <div className="w-[5px] h-[70%] bg-turquoise rounded-[1px]" />
-        <div className="w-[5px] h-full bg-turquoise rounded-[1px]" />
-      </div>
-    ),
-  },
-  { label: 'Cash', color: '#22C55E', shadow: 'rgba(34,197,94,0.18)', shape: <span className="text-[#22C55E] text-[22px] font-extrabold">↑</span> },
 ];
 
 const CheckRow: React.FC<{ text: string; onDark?: boolean }> = ({ text, onDark }) => (
@@ -363,339 +267,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       }} />
       <main id="public-content" tabIndex={-1}>
       {view === 'home' ? (
-        <>
-          {/* HERO — full-bleed photo blending straight into the page's own
-              light background via a mask (no boxed card, no dark scrim),
-              at the user's explicit request to match a reference layout:
-              the photo is pinned to the right edge and fades to transparent
-              on its own left edge, so the copy sits on the ordinary light
-              gradient rather than needing white text over a photo. */}
-          <section
-            className="landing-hero relative overflow-hidden"
-            style={{ background: 'linear-gradient(180deg,#FBFCFD 0%, #F2F4F7 100%)' }}
-          >
-            {/* Décor : une seule nappe turquoise côté texte — les autres
-                nappes/la trame de la version précédente tombaient sous la
-                photo et ne se voyaient plus. */}
-            <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-              <div
-                className="absolute top-[8%] left-[-16%] w-[560px] h-[560px] animate-[landingAuroraAlt_22s_ease-in-out_infinite]"
-                style={{ background: 'radial-gradient(circle, rgba(59,82,196,0.10), rgba(59,82,196,0) 68%)' }}
-              />
-            </div>
-
-            {/* Photo, pinned to the right edge and masked on its own left
-                edge — sm+ only; on mobile the same width would mask the
-                photo out from under the text entirely, so it moves to its
-                own stacked band below the copy instead (further down). */}
-            <div
-              aria-hidden
-              className="hidden lg:block absolute inset-y-0 right-0 w-[58%] xl:w-[54%]"
-              style={{
-                WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 32%)',
-                maskImage: 'linear-gradient(90deg, transparent 0%, #000 32%)',
-              }}
-            >
-              <img
-                src="/landing/hero-photo.jpg"
-                alt="Gestionnaire comptable au travail, tableau de bord Tâches &amp; Cash affiché sur son écran"
-                className="w-full h-full object-cover"
-                style={{ objectPosition: '86% 38%' }}
-              />
-            </div>
-
-            <div className="relative max-w-[1280px] mx-auto px-6 sm:px-10 pt-16 pb-12 sm:pt-24 sm:pb-24">
-              <div className="hero-copy" style={{ maxWidth: 560 }}>
-                <Reveal>
-                  <div className="inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full shadow-[0_2px_10px_rgba(13,27,42,0.05)]">
-                    <span className="w-2 h-2 ml-1 rounded-full bg-turquoise" />
-                    <span className="text-[10px] sm:text-[11px] tracking-[0.06em] font-semibold text-[#3D4655]">PENSÉ POUR LES PROFESSIONNELS DES SERVICES</span>
-                  </div>
-                </Reveal>
-                <Reveal delay={80}>
-                  <h1 className="mt-[22px] text-[42px] sm:text-[54px] leading-[1.06] font-extrabold text-navy tracking-[-0.02em]">
-                    Votre temps.<br />Votre équipe.<br /><span className="hero-accent">Toute votre valeur.</span>
-                  </h1>
-                </Reveal>
-                <Reveal delay={150}>
-                  <p className="mt-[22px] text-[19px] sm:text-[21px] leading-[1.35] font-bold text-navy">
-                    Gérez mieux. Facturez plus. Voyez plus clair.
-                  </p>
-                  <p className="mt-2 text-[14.5px] leading-[1.5] font-light text-[#3D4655]">
-                    Pour les comptables, auditeurs, fiscalistes, avocats, consultants, architectes, ingénieurs-conseils et autres professionnels des services.
-                  </p>
-                  <p className="mt-3 text-[17px] leading-[1.65] font-light text-[#5B6472]">
-                    Vos missions, vos heures et votre facturation enfin réunies. Pilotez la rentabilité de votre activité avec Tâches & Cash.
-                  </p>
-                </Reveal>
-                <Reveal delay={220}>
-                  <div className="mt-8 flex gap-3.5 flex-wrap">
-                    <button
-                      onClick={goToTarifs}
-                      className="landing-shine group bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] hover:-translate-y-0.5 transition-all inline-flex items-center gap-2"
-                    >
-                      Essayer gratuitement
-                      <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
-                    </button>
-                    <button
-                      onClick={() => { setView('fonctionnalites'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
-                      className="landing-shine bg-white text-navy px-[26px] py-4 rounded-xl text-[15px] font-semibold border-[1.5px] border-[#E6E9EE] hover:border-navy hover:-translate-y-0.5 transition-all"
-                    >
-                      Explorer la plateforme
-                    </button>
-                  </div>
-                  <div className="hero-reassurance"><span>✓ Essai gratuit</span><span>✓ Sans carte bancaire</span></div>
-                </Reveal>
-              </div>
-
-            </div>
-
-            {/* Mobile: the photo drops below the copy as its own full-width
-                band instead of sitting beside it — still edge to edge, still
-                fading in rather than boxed, just from the top this time. */}
-            <div aria-hidden className="lg:hidden relative w-full h-[240px] sm:h-[320px] mt-4">
-              <div
-                className="absolute inset-0"
-                style={{
-                  WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 22%)',
-                  maskImage: 'linear-gradient(180deg, transparent 0%, #000 22%)',
-                }}
-              >
-                <img
-                  src="/landing/hero-photo.jpg"
-                  alt=""
-                  className="w-full h-full object-cover"
-                  style={{ objectPosition: '62% 35%' }}
-                />
-              </div>
-            </div>
-          </section>
-
-          <ClientLogos />
-
-          {/* FLOW SECTION */}
-          <section className="py-24 px-6 sm:px-10 bg-white">
-            <div className="max-w-[980px] mx-auto text-center">
-              <Reveal>
-                <h2 className="text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Une chaîne de valeur, entièrement connectée</h2>
-                <p className="mt-4 max-w-[560px] mx-auto text-[15.5px] leading-[1.6] text-[#5B6472]">De la tâche à la trésorerie, chaque minute travaillée devient une donnée financière exploitable.</p>
-              </Reveal>
-
-              <div className="relative mt-16 flex justify-between items-start">
-                {/* Le liseré est deux fois plus large que son cadre et défile :
-                    le dégradé court le long de la chaîne au lieu de rester posé. */}
-                <div
-                  className="absolute top-[23px] sm:top-[31px] left-8 sm:left-10 right-8 sm:right-10 h-0.5 z-0 animate-[landingTrace_6s_linear_infinite]"
-                  style={{ background: 'linear-gradient(90deg,#0D1B2A,#00B3A6,#22C55E,#00B3A6,#0D1B2A)', backgroundSize: '200% 100%' }}
-                />
-                {FLOW_STEPS.map((step, i) => (
-                  <Reveal key={step.label} direction="scale" delay={i * 110} className="relative z-10 flex-1">
-                    <div className="flex flex-col items-center gap-3.5">
-                      {/* Plus petit sur téléphone : à cinq étapes sur 390 px,
-                          des pastilles de 64 px se touchent et « Rentabilité »
-                          chevauche ses voisines. */}
-                      <div
-                        className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white flex items-center justify-center transition-transform hover:scale-110"
-                        style={{ border: `2px solid ${step.color}`, boxShadow: `0 6px 16px ${step.shadow}` }}
-                      >
-                        {step.shape}
-                      </div>
-                      <span className="text-[11px] sm:text-[14px] font-bold leading-tight text-center px-0.5" style={{ color: step.color }}>{step.label}</span>
-                    </div>
-                  </Reveal>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* FEATURES */}
-          <section id="fonctionnalites" className="py-24 px-6 sm:px-10 bg-[#F2F4F7]">
-            <div className="max-w-[1200px] mx-auto">
-              <Reveal className="text-center max-w-[640px] mx-auto">
-                <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Fonctionnalités</div>
-                <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Douze modules, une seule application</h2>
-                <p className="mt-4 text-[15.5px] leading-[1.6] text-[#5B6472]">
-                  Du pointage au portail client, construisez un quotidien plus simple. Choisissez l’offre qui réunit les modules dont votre équipe a besoin.
-                </p>
-              </Reveal>
-
-              <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[22px]">
-                {HOME_FEATURES.map((f, i) => (
-                  /* Le décalage se répète par rangée plutôt que de croître sur
-                     douze cartes : au-delà de la troisième, une cascade continue
-                     fait attendre le bas de la grille bien après son arrivée. */
-                  <Reveal key={f.title} delay={(i % 3) * 90} className="h-full">
-                    <div className="landing-shine group relative h-full bg-white rounded-[18px] border border-[#E6E9EE] p-7 hover:-translate-y-1.5 hover:border-turquoise/45 hover:shadow-[0_18px_38px_rgba(13,27,42,0.10)] transition-all duration-300">
-                      {/* Le liseré turquoise se déploie depuis la gauche au
-                          survol — l'accusé de réception du pointage. */}
-                      <span
-                        aria-hidden
-                        className="absolute left-7 right-7 bottom-0 h-[3px] rounded-full bg-turquoise origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"
-                      />
-                      <div
-                        className="w-[46px] h-[46px] rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6"
-                        style={{ background: f.iconBg, color: f.iconColor }}
-                      >
-                        {f.icon}
-                      </div>
-                      <div className="text-[16px] font-bold text-navy mt-4 transition-transform duration-300 group-hover:translate-x-1">{f.title}</div>
-                      <p className="text-[14px] leading-[1.55] text-[#5B6472] mt-2">{f.description}</p>
-                    </div>
-                  </Reveal>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* TIME TRACKING SHOWCASE */}
-          <section className="py-24 sm:py-[104px] px-6 sm:px-10 bg-white">
-            <div className="max-w-[1200px] mx-auto flex gap-16 items-center flex-wrap-reverse">
-              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 0 }} className="bg-[#F2F4F7] rounded-[20px] p-[22px]">
-                <div style={{ boxShadow: '0 30px 60px -20px rgba(13,27,42,0.18)' }} className="rounded-[20px]">
-                  <div className="text-[11px] font-bold text-[#8A93A0] uppercase tracking-[0.05em] mb-2.5">Activités en pause</div>
-                  <div className="bg-white border border-[#E6E9EE] rounded-xl overflow-hidden mb-3.5">
-                    {[
-                      { title: 'Mission de conseil', sub: 'Client X · Audit', duration: '0h 24m' },
-                      { title: 'Révision comptable', sub: 'Client Y · Clôture', duration: '1h 05m' },
-                    ].map((row, i) => (
-                      <div key={row.title} className={`flex items-center justify-between px-3.5 py-[11px] ${i === 0 ? 'border-b border-[#F2F4F7]' : ''}`}>
-                        <div>
-                          <div className="text-[11.5px] font-bold text-navy">{row.title}</div>
-                          <div className="text-[9.5px] text-[#8A93A0] mt-0.5">{row.sub}</div>
-                        </div>
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-[10.5px] font-bold text-[#3D4655]">{row.duration}</span>
-                          <div className="w-[22px] h-[22px] rounded-full bg-[#FDBA74] flex items-center justify-center">
-                            <div className="w-0 h-0 border-t-4 border-b-4 border-t-transparent border-b-transparent border-l-[6px] border-l-white ml-0.5" />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="bg-navy rounded-2xl p-4">
-                    <div className="flex items-center gap-[7px]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#F97316] animate-[landingPulseDot_2s_ease-in-out_infinite]" />
-                      <span className="text-[9px] font-bold text-white/60 uppercase tracking-[0.05em]">Chronomètre actif</span>
-                    </div>
-                    <div className="text-[11px] font-bold text-white mt-2">Client Z</div>
-                    <div className="text-[26px] font-extrabold text-white mt-0.5 tabular-nums">00:08:42</div>
-                    <div className="flex gap-2 mt-3">
-                      <div className="flex-1 text-center bg-[#1D2939] text-white py-2 rounded-lg text-[10.5px] font-bold">Pause</div>
-                      <div className="flex-1 text-center bg-[#EF4444] text-white py-2 rounded-lg text-[10.5px] font-bold">Arrêter</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3.5 bg-white border border-[#E6E9EE] rounded-xl overflow-hidden">
-                    <div className="grid grid-cols-[1.3fr_1fr_0.8fr] px-3 py-2 bg-[#F2F4F7] text-[8px] font-bold text-[#8A93A0] uppercase tracking-[0.04em]">
-                      <span>Collaborateur</span><span>Durée</span><span>Statut</span>
-                    </div>
-                    <div className="grid grid-cols-[1.3fr_1fr_0.8fr] items-center px-3 py-2.5 text-[10.5px] text-[#3D4655] font-semibold border-t border-[#F2F4F7]">
-                      <span>Collaborateur 1</span><span>2h 10m</span><span className="text-[#22C55E] font-bold">Terminé</span>
-                    </div>
-                    <div className="grid grid-cols-[1.3fr_1fr_0.8fr] items-center px-3 py-2.5 text-[10.5px] text-[#3D4655] font-semibold border-t border-[#F2F4F7]">
-                      <span>Collaborateur 2</span><span>0h 45m</span><span className="text-[#F97316] font-bold">En pause</span>
-                    </div>
-                  </div>
-                </div>
-              </Reveal>
-
-              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 0 }}>
-                <div className="inline-flex px-3.5 py-1.5 bg-[#E3F7F5] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Suivi du temps</div>
-                <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold tracking-[-0.01em] leading-[1.2] text-navy">Le temps de votre équipe, suivi en direct, jusqu'à la dernière seconde</h2>
-                <p className="mt-[18px] text-[15.5px] leading-[1.65] text-[#5B6472] max-w-[460px]">Un chronomètre par collaborateur, une vue consolidée pour vous : démarrez, mettez en pause ou basculez de mission en un clic.</p>
-                <div className="mt-7 flex flex-col gap-3.5">
-                  <CheckRow text="Chronométrage en un clic, avec reprise instantanée des tâches en pause" />
-                  <CheckRow text="Historique complet par collaborateur, client et mission" />
-                  <CheckRow text="Distinction claire entre temps facturable et non facturable" />
-                  <CheckRow text="Coût calculé automatiquement dès l'arrêt du chronomètre" />
-                </div>
-                <button
-                  onClick={goToTarifs}
-                  className="landing-shine inline-block mt-8 bg-navy text-white px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-turquoise hover:-translate-y-0.5 transition-all"
-                >
-                  Essayer le suivi du temps
-                </button>
-              </Reveal>
-            </div>
-          </section>
-
-          {/* FACTURATION SHOWCASE */}
-          <section id="dashboard" className="py-24 sm:py-[104px] px-6 sm:px-10 bg-navy text-white">
-            <div className="max-w-[1200px] mx-auto flex gap-16 items-center flex-wrap">
-              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 0 }}>
-                <div className="inline-flex px-3.5 py-1.5 bg-white/[0.08] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#5FCBC0]">Facturation</div>
-                <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold tracking-[-0.01em] leading-[1.2]">Votre temps facturable transformé en factures, en quelques clics</h2>
-                <p className="mt-[18px] text-[15.5px] leading-[1.65] text-white/65 max-w-[460px]">Générez des factures conformes directement depuis le temps suivi et les missions clôturées — sans ressaisie.</p>
-                <div className="mt-7 flex flex-col gap-3.5">
-                  <CheckRow onDark text="Facture générée automatiquement depuis le temps facturable" />
-                  <CheckRow onDark text="Calcul automatique de la TVA, la retenue à la source et le timbre fiscal" />
-                  <CheckRow onDark text="Export PDF et suivi des encaissements en un clic" />
-                  <CheckRow onDark text="Chaque facture rattachée à sa mission et son flux de trésorerie" />
-                </div>
-                <button
-                  onClick={goToTarifs}
-                  className="landing-shine inline-block mt-8 bg-turquoise text-navy px-[26px] py-[15px] rounded-xl text-[15px] font-bold hover:bg-white hover:-translate-y-0.5 transition-all"
-                >
-                  Créer une facture
-                </button>
-              </Reveal>
-
-              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 0 }} className="bg-white rounded-2xl p-6 text-navy">
-                <div className="flex items-start justify-between">
-                  <div className="w-11 h-[34px] border-[1.5px] border-dashed border-[#E6E9EE] rounded-md flex items-center justify-center text-[7px] text-[#B7BFC9] text-center leading-tight">Logo</div>
-                  <div className="text-right">
-                    <div className="text-[18px] font-extrabold text-navy">Facture</div>
-                    <div className="text-[10px] text-[#8A93A0] mt-0.5">N° 0007</div>
-                  </div>
-                </div>
-                <div className="flex gap-5 mt-4">
-                  <div className="flex-1">
-                    <div className="text-[8px] font-bold text-[#8A93A0] uppercase tracking-[0.05em]">Détails du client</div>
-                    <div className="mt-1.5 h-[9px] w-[70%] bg-[#EEF1F4] rounded-[3px]" />
-                    <div className="mt-1 h-[9px] w-1/2 bg-[#EEF1F4] rounded-[3px]" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[8px] font-bold text-[#8A93A0] uppercase tracking-[0.05em]">Date de création</div>
-                    <div className="mt-1.5 text-[11px] font-semibold text-[#3D4655]">22/08/2026</div>
-                  </div>
-                </div>
-                <div className="mt-4 border border-[#E6E9EE] rounded-[10px] overflow-hidden">
-                  <div className="grid grid-cols-[2fr_0.7fr_1fr] px-3 py-2 bg-[#F2F4F7] text-[8px] font-bold text-[#8A93A0] uppercase tracking-[0.04em]">
-                    <span>Désignation</span><span>TVA</span><span>Montant HT</span>
-                  </div>
-                  <div className="grid grid-cols-[2fr_0.7fr_1fr] px-3 py-2.5 text-[10.5px] text-[#3D4655] font-semibold border-t border-[#F2F4F7]">
-                    <span>Mission de conseil — Août 2026</span><span>19%</span><span>2 400 DT</span>
-                  </div>
-                </div>
-                <div className="mt-3.5 flex flex-col gap-1.5">
-                  <div className="flex justify-between text-[10.5px] text-[#5B6472]"><span>Total HT</span><span>2 400 DT</span></div>
-                  <div className="flex justify-between text-[10.5px] text-[#5B6472]"><span>Total TVA</span><span>456 DT</span></div>
-                  <div className="flex justify-between text-[10.5px] font-bold text-navy"><span>Total TTC</span><span>2 856 DT</span></div>
-                  <div className="flex justify-between text-[10px] text-[#8A93A0]"><span>Retenue à la source — 1%</span><span>− 24 DT</span></div>
-                  <div className="flex justify-between bg-navy text-white px-3 py-2.5 rounded-lg mt-1.5 text-[11px] font-bold"><span>Net à payer</span><span>2 832 DT</span></div>
-                </div>
-              </Reveal>
-            </div>
-          </section>
-
-          {/* MODULE EXPLORER — les six modules qui n'ont pas leur propre
-              section en grand. */}
-          <section id="modules" className="py-24 sm:py-[104px] px-6 sm:px-10 bg-[#F2F4F7]">
-            <Reveal className="text-center max-w-[640px] mx-auto mb-12">
-              <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Visite guidée</div>
-              <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">
-                Le reste de la plateforme, écran par écran
-              </h2>
-              <p className="mt-4 text-[15.5px] leading-[1.6] text-[#5B6472]">
-                Choisissez un module : voici exactement ce que votre équipe trouve en se connectant.
-              </p>
-            </Reveal>
-            <Reveal delay={100}>
-              <ModuleExplorer onCta={goToTarifs} />
-            </Reveal>
-          </section>
-        </>
+        <HomeView onStart={goToTarifs} onFeatures={() => { setView('fonctionnalites'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onContact={() => { setView('contact'); window.scrollTo({ top: 0, behavior: 'instant' }); }} />
       ) : view === 'fonctionnalites' ? (
         <FeaturesView onStart={goToTarifs} />
       ) : view === 'contact' ? (
@@ -1030,8 +602,8 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
         </>
       )}
 
-      {/* CTA banner */}
-      <section className="py-24 px-6 sm:px-10 bg-white">
+      {/* Other public pages share this CTA; HomeView has its own. */}
+      {view !== 'home' && <section className="py-24 px-6 sm:px-10 bg-white">
         <div className="max-w-[920px] mx-auto bg-navy rounded-[28px] px-8 sm:px-12 py-16 text-center relative overflow-hidden">
           <div className="absolute w-[360px] h-[360px] rounded-full bg-[radial-gradient(circle,rgba(0,179,166,0.28),rgba(0,179,166,0)_70%)] -top-[140px] -right-20" />
           <div className="relative">
@@ -1074,7 +646,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </div>
           </div>
         </div>
-      </section>
+      </section>}
 
       </main>
       {/* Footer */}
