@@ -10,6 +10,9 @@ import { Reveal, CountUp } from '../components/landing/Reveal';
 import { ModuleExplorer } from '../components/landing/ModuleExplorer';
 import { ClientLogos } from '../components/landing/ClientLogos';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
+import { LandingNav, type PublicView } from '../components/landing/LandingNav';
+import { ContactView } from '../components/landing/ContactView';
+import { FeaturesView } from '../components/landing/FeaturesView';
 import { SupportView } from '../components/landing/SupportView';
 import { SELLABLE_PLANS, planMeta, planPriceForSeats, planListPriceForSeats, formatDT, FREELANCER_UPGRADE_PRICE_DT } from '../constants/plans';
 
@@ -248,7 +251,24 @@ interface LandingProps {
 }
 
 export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
-  const [view, setView] = useState<'home' | 'tarifs' | 'apropos' | 'support'>('home');
+  const readView = (): PublicView => {
+    const value = window.location.hash.slice(1);
+    return ['fonctionnalites', 'tarifs', 'apropos', 'support', 'contact'].includes(value) ? value as PublicView : 'home';
+  };
+  const [view, setCurrentView] = useState<PublicView>(readView);
+  const setView = (next: PublicView) => {
+    if (next !== view) window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${next === 'home' ? '' : `#${next}`}`);
+    setCurrentView(next);
+  };
+  useEffect(() => {
+    const restore = () => { setCurrentView(readView()); window.scrollTo({ top: 0, behavior: 'instant' }); };
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
+  useEffect(() => {
+    const titles: Record<PublicView, string> = { home: 'Le temps de votre équipe a de la valeur', fonctionnalites: 'Fonctionnalités', tarifs: 'Tarifs', apropos: 'À propos', support: 'Centre d’assistance', contact: 'Contact' };
+    document.title = `${titles[view]} | Tâches & Cash`;
+  }, [view]);
   /** L'en-tête se resserre dès qu'on quitte le haut de la page : au repos il
    *  respire, une fois qu'on lit il rend de la hauteur au contenu. `passive`
    *  parce qu'un écouteur de défilement qui ne prévient jamais le navigateur
@@ -334,58 +354,14 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-white font-sans antialiased text-gray-900">
-      {/* Header */}
-      <header
-        className={`sticky top-0 z-50 backdrop-blur-[10px] border-b transition-[background-color,border-color,box-shadow] duration-300 ${
-          scrolled
-            ? 'bg-white/[0.96] border-[#E6E9EE] shadow-[0_6px_24px_rgba(13,27,42,0.07)]'
-            : 'bg-white/[0.88] border-transparent'
-        }`}
-      >
-        <div
-          className={`max-w-[1280px] mx-auto px-4 sm:px-10 flex items-center justify-between gap-3 sm:gap-6 transition-[height] duration-300 ${
-            scrolled ? 'h-[62px] sm:h-[70px]' : 'h-[72px] sm:h-[84px]'
-          }`}
-        >
-          <button onClick={goHome} className="group flex items-center gap-2 shrink-0">
-            <AnimatedLogo size={28} variant="color" replayOnHover />
-            {/* The wordmark is dropped on the narrowest phones to buy back the
-                width the auth buttons need — the mark alone still identifies it. */}
-            <span className="hidden min-[400px]:inline text-[15px] font-extrabold tracking-tight text-navy whitespace-nowrap">
-              Tâches <span className="text-turquoise">&amp;</span> Cash
-            </span>
-          </button>
-
-          <nav className="hidden min-[1041px]:flex items-center gap-7 min-w-0">
-            <button onClick={() => goToAnchor('fonctionnalites')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Fonctionnalités</button>
-            <button onClick={() => goToAnchor('modules')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Modules</button>
-            <button onClick={() => goToAnchor('dashboard')} className="landing-navlink text-[14px] font-medium text-[#3D4655] hover:text-navy transition-colors whitespace-nowrap">Facturation</button>
-            <button onClick={goToTarifs} data-active={view === 'tarifs'} className={`landing-navlink text-[14px] whitespace-nowrap ${view === 'tarifs' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Tarifs</button>
-            <button onClick={goToAPropos} data-active={view === 'apropos'} className={`landing-navlink text-[14px] whitespace-nowrap ${view === 'apropos' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>À propos</button>
-            <button onClick={goToSupport} data-active={view === 'support'} className={`landing-navlink text-[14px] whitespace-nowrap ${view === 'support' ? 'font-bold text-navy' : 'font-medium text-[#3D4655] hover:text-navy transition-colors'}`}>Support</button>
-            <a href={`mailto:${CONTACT_EMAIL}`} className="landing-navlink text-[14px]! font-medium text-[#3D4655]! hover:text-navy! transition-colors whitespace-nowrap">Contact</a>
-          </nav>
-
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-            {/* Always visible: an existing user on a phone has no other way in.
-                It used to be hidden below 561px, which locked them out entirely. */}
-            <button
-              onClick={onLogin}
-              className="text-[13px] sm:text-[14px] font-semibold text-navy px-2 whitespace-nowrap"
-            >
-              Se connecter
-            </button>
-            <button
-              onClick={goToTarifs}
-              className="landing-shine px-3 sm:px-[18px] py-2.5 sm:py-[11px] rounded-[10px] text-[13px] sm:text-[14px] font-bold text-white bg-navy hover:bg-turquoise hover:-translate-y-0.5 transition-all whitespace-nowrap"
-            >
-              Commencez gratuitement&nbsp;!
-            </button>
-          </div>
-        </div>
-      </header>
-
+    <div className="public-site min-h-screen bg-white font-sans antialiased text-gray-900">
+      <a href="#public-content" className="public-skip-link" onClick={event => { event.preventDefault(); document.getElementById('public-content')?.focus(); }}>Aller au contenu</a>
+      <LandingNav view={view} scrolled={scrolled} onLogin={onLogin} onNavigate={next => {
+        setView(next);
+        window.scrollTo({ top: 0, behavior: 'instant' });
+        requestAnimationFrame(() => document.getElementById('public-content')?.focus({ preventScroll: true }));
+      }} />
+      <main id="public-content" tabIndex={-1}>
       {view === 'home' ? (
         <>
           {/* HERO — full-bleed photo blending straight into the page's own
@@ -395,7 +371,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               on its own left edge, so the copy sits on the ordinary light
               gradient rather than needing white text over a photo. */}
           <section
-            className="relative overflow-hidden"
+            className="landing-hero relative overflow-hidden"
             style={{ background: 'linear-gradient(180deg,#FBFCFD 0%, #F2F4F7 100%)' }}
           >
             {/* Décor : une seule nappe turquoise côté texte — les autres
@@ -428,28 +404,28 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               />
             </div>
 
-            <div className="relative max-w-[1280px] mx-auto px-6 sm:px-10 pt-[100px] pb-10 sm:pt-[120px] sm:pb-16">
-              <div style={{ maxWidth: 560 }}>
+            <div className="relative max-w-[1280px] mx-auto px-6 sm:px-10 pt-16 pb-12 sm:pt-24 sm:pb-24">
+              <div className="hero-copy" style={{ maxWidth: 560 }}>
                 <Reveal>
                   <div className="inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full shadow-[0_2px_10px_rgba(13,27,42,0.05)]">
-                    <span className="px-2 py-[3px] rounded-full bg-turquoise text-white text-[10px] font-extrabold tracking-[0.04em] uppercase">Nouveau</span>
-                    <span className="text-[12.5px] font-semibold text-[#3D4655]">Portail client &amp; suivi des échéances 2025–2028</span>
+                    <span className="w-2 h-2 ml-1 rounded-full bg-turquoise" />
+                    <span className="text-[10px] sm:text-[11px] tracking-[0.06em] font-semibold text-[#3D4655]">PENSÉ POUR LES PROFESSIONNELS DES SERVICES</span>
                   </div>
                 </Reveal>
                 <Reveal delay={80}>
-                  <h1 className="mt-[22px] text-[34px] sm:text-[46px] leading-[1.14] font-extrabold text-navy tracking-[-0.02em]">
-                    Le <span style={{ color: '#08A4A1' }}>premier logiciel</span> tunisien conçu exclusivement pour les <span style={{ color: '#08A4A1' }}>professionnels des services.</span>
+                  <h1 className="mt-[22px] text-[42px] sm:text-[54px] leading-[1.06] font-extrabold text-navy tracking-[-0.02em]">
+                    Votre temps.<br />Votre équipe.<br /><span className="hero-accent">Toute votre valeur.</span>
                   </h1>
                 </Reveal>
                 <Reveal delay={150}>
                   <p className="mt-[22px] text-[19px] sm:text-[21px] leading-[1.35] font-bold text-navy">
-                    Gérez mieux, facturez plus, gagnez en rentabilité
+                    Gérez mieux. Facturez plus. Voyez plus clair.
                   </p>
                   <p className="mt-2 text-[14.5px] leading-[1.5] font-light text-[#3D4655]">
                     Pour les comptables, auditeurs, fiscalistes, avocats, consultants, architectes, ingénieurs-conseils et autres professionnels des services.
                   </p>
                   <p className="mt-3 text-[17px] leading-[1.65] font-light text-[#5B6472]">
-                    Centralisez vos missions, pilotez vos équipes, suivez le temps consacré à chaque client et transformez votre travail en valeur, en facturation et en rentabilité.
+                    Vos missions, vos heures et votre facturation enfin réunies. Pilotez la rentabilité de votre activité avec Tâches & Cash.
                   </p>
                 </Reveal>
                 <Reveal delay={220}>
@@ -458,16 +434,17 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                       onClick={goToTarifs}
                       className="landing-shine group bg-navy text-white px-7 py-4 rounded-xl text-[15px] font-bold shadow-[0_10px_24px_rgba(13,27,42,0.22)] hover:bg-turquoise hover:shadow-[0_10px_24px_rgba(0,179,166,0.3)] hover:-translate-y-0.5 transition-all inline-flex items-center gap-2"
                     >
-                      Commencez gratuitement&nbsp;!
+                      Essayer gratuitement
                       <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
                     </button>
                     <button
-                      onClick={() => goToAnchor('modules')}
+                      onClick={() => { setView('fonctionnalites'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
                       className="landing-shine bg-white text-navy px-[26px] py-4 rounded-xl text-[15px] font-semibold border-[1.5px] border-[#E6E9EE] hover:border-navy hover:-translate-y-0.5 transition-all"
                     >
-                      Découvrir les modules
+                      Explorer la plateforme
                     </button>
                   </div>
+                  <div className="hero-reassurance"><span>✓ Essai gratuit</span><span>✓ Sans carte bancaire</span></div>
                 </Reveal>
               </div>
 
@@ -538,7 +515,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Fonctionnalités</div>
                 <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Douze modules, une seule application</h2>
                 <p className="mt-4 text-[15.5px] leading-[1.6] text-[#5B6472]">
-                  Pas de briques à acheter séparément : chaque offre donne accès à l'intégralité des vues, du pointage au portail client.
+                  Du pointage au portail client, construisez un quotidien plus simple. Choisissez l’offre qui réunit les modules dont votre équipe a besoin.
                 </p>
               </Reveal>
 
@@ -573,7 +550,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           {/* TIME TRACKING SHOWCASE */}
           <section className="py-24 sm:py-[104px] px-6 sm:px-10 bg-white">
             <div className="max-w-[1200px] mx-auto flex gap-16 items-center flex-wrap-reverse">
-              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 300 }} className="bg-[#F2F4F7] rounded-[20px] p-[22px]">
+              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 0 }} className="bg-[#F2F4F7] rounded-[20px] p-[22px]">
                 <div style={{ boxShadow: '0 30px 60px -20px rgba(13,27,42,0.18)' }} className="rounded-[20px]">
                   <div className="text-[11px] font-bold text-[#8A93A0] uppercase tracking-[0.05em] mb-2.5">Activités en pause</div>
                   <div className="bg-white border border-[#E6E9EE] rounded-xl overflow-hidden mb-3.5">
@@ -623,7 +600,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </div>
               </Reveal>
 
-              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 300 }}>
+              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 0 }}>
                 <div className="inline-flex px-3.5 py-1.5 bg-[#E3F7F5] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Suivi du temps</div>
                 <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold tracking-[-0.01em] leading-[1.2] text-navy">Le temps de votre équipe, suivi en direct, jusqu'à la dernière seconde</h2>
                 <p className="mt-[18px] text-[15.5px] leading-[1.65] text-[#5B6472] max-w-[460px]">Un chronomètre par collaborateur, une vue consolidée pour vous : démarrez, mettez en pause ou basculez de mission en un clic.</p>
@@ -646,7 +623,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           {/* FACTURATION SHOWCASE */}
           <section id="dashboard" className="py-24 sm:py-[104px] px-6 sm:px-10 bg-navy text-white">
             <div className="max-w-[1200px] mx-auto flex gap-16 items-center flex-wrap">
-              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 300 }}>
+              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 0 }}>
                 <div className="inline-flex px-3.5 py-1.5 bg-white/[0.08] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#5FCBC0]">Facturation</div>
                 <h2 className="mt-[18px] text-[26px] sm:text-[32px] font-extrabold tracking-[-0.01em] leading-[1.2]">Votre temps facturable transformé en factures, en quelques clics</h2>
                 <p className="mt-[18px] text-[15.5px] leading-[1.65] text-white/65 max-w-[460px]">Générez des factures conformes directement depuis le temps suivi et les missions clôturées — sans ressaisie.</p>
@@ -664,7 +641,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </button>
               </Reveal>
 
-              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 300 }} className="bg-white rounded-2xl p-6 text-navy">
+              <Reveal direction="right" style={{ flex: '1 1 420px', minWidth: 0 }} className="bg-white rounded-2xl p-6 text-navy">
                 <div className="flex items-start justify-between">
                   <div className="w-11 h-[34px] border-[1.5px] border-dashed border-[#E6E9EE] rounded-md flex items-center justify-center text-[7px] text-[#B7BFC9] text-center leading-tight">Logo</div>
                   <div className="text-right">
@@ -719,10 +696,14 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
             </Reveal>
           </section>
         </>
+      ) : view === 'fonctionnalites' ? (
+        <FeaturesView onStart={goToTarifs} />
+      ) : view === 'contact' ? (
+        <ContactView email={CONTACT_EMAIL} phone={CONTACT_PHONE} whatsappUrl={CONTACT_WHATSAPP_URL} onSupport={goToSupport} />
       ) : view === 'apropos' ? (
         <>
           {/* ABOUT HERO */}
-          <section className="pt-[88px] px-6 sm:px-10 pb-10 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
+          <section className="marketing-page-intro pt-[88px] px-6 sm:px-10 pb-10 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
             <div className="max-w-[760px] mx-auto text-center">
               <Reveal>
                 <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">À propos</div>
@@ -750,7 +731,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                   nouvelle : les trois flottements, le halo qui respire et le
                   point qui pulse sont ceux déjà utilisés pour la maquette du
                   hero et le bandeau CTA. */}
-              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 300 }} className="w-full">
+              <Reveal direction="left" style={{ flex: '1 1 420px', minWidth: 0 }} className="w-full">
                 <div className="relative bg-[#F2F4F7] rounded-[20px] px-6 py-10 sm:px-10 sm:py-12 overflow-hidden">
                   <div
                     aria-hidden
@@ -793,7 +774,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 </div>
               </Reveal>
 
-              <div style={{ flex: '1 1 400px', minWidth: 300 }}>
+              <div style={{ flex: '1 1 400px', minWidth: 0 }}>
                 <Reveal direction="right">
                   <div className="inline-flex px-3.5 py-1.5 bg-[#F2F4F7] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Notre histoire</div>
                   <h2 className="mt-[18px] text-[24px] sm:text-[28px] font-extrabold text-navy tracking-[-0.01em]">Pourquoi nous avons créé Tâches &amp; Cash ?</h2>
@@ -891,7 +872,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       ) : (
         <>
           {/* PRICING HERO */}
-          <section className="pt-[88px] px-6 sm:px-10 pb-10 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
+          <section className="marketing-page-intro pt-[88px] px-6 sm:px-10 pb-10 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
             <div className="max-w-[760px] mx-auto text-center">
               <h1 className="mt-[22px] text-[34px] sm:text-[42px] font-extrabold text-navy tracking-[-0.02em] leading-[1.15]">
                 Un prix simple, qui grandit avec votre équipe
@@ -924,7 +905,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 return (
                 <div
                   key={plan.id}
-                  className={`relative rounded-[20px] px-[30px] py-9 text-left flex flex-col ${tone.card}`}
+                  className={`pricing-card relative rounded-[20px] px-[30px] py-9 text-left flex flex-col ${tone.card}`}
                 >
                   {plan.highlighted && (
                     <span className="absolute -top-[13px] left-1/2 -translate-x-1/2 bg-turquoise text-navy text-[11px] font-extrabold px-[14px] py-[5px] rounded-full tracking-[0.03em] whitespace-nowrap">
@@ -1095,6 +1076,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
         </div>
       </section>
 
+      </main>
       {/* Footer */}
       <footer className="bg-navy px-6 sm:px-10 pt-14 pb-7">
         <div className="max-w-[1280px] mx-auto flex flex-col sm:flex-row justify-between gap-12 flex-wrap">
@@ -1123,9 +1105,9 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
               <p className="text-[12px] font-bold text-white uppercase tracking-[0.05em] mb-3.5">Entreprise</p>
               <div className="flex flex-col gap-2.5">
                 <button onClick={goToAPropos} className="text-left text-[13.5px] text-white/60 hover:text-white transition-colors">À propos</button>
-                <a href={`mailto:${CONTACT_EMAIL}`} className="flex items-center gap-1.5 text-[13.5px] text-white/60! hover:text-white! transition-colors">
+                <button onClick={() => { setView('contact'); window.scrollTo({ top: 0, behavior: 'instant' }); }} className="flex items-center gap-1.5 text-[13.5px] text-white/60 hover:text-white transition-colors">
                   <Mail className="w-3.5 h-3.5" /> Contact
-                </a>
+                </button>
               </div>
             </div>
           </div>

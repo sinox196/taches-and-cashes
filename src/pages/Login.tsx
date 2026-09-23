@@ -71,7 +71,7 @@ export const Login: React.FC<LoginProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-canvas flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans antialiased relative">
+    <div className="auth-page min-h-screen bg-canvas flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans antialiased relative">
       {onBack && (
         <button
           onClick={onBack}

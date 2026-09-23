@@ -30,7 +30,7 @@ import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
 import { ClientPortal } from './pages/ClientPortal';
 import { ResetPassword } from './pages/ResetPassword';
-import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X } from 'lucide-react';
+import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X, Timer } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -851,7 +851,7 @@ export default function App() {
     // dvh rather than vh: on a phone `100vh` is the viewport with the browser
     // chrome *hidden*, so a pinned footer — the chat composer, the Clients
     // pagination bar — sat behind the address bar until you scrolled.
-    <div className="h-dvh bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
+    <div className="app-workspace h-dvh bg-canvas text-gray-900 flex font-sans antialiased selection:bg-slate-800 selection:text-white">
       <Sidebar
         activeItem={activeNav}
         onSelectItem={(item) => setActiveSidebarItem(item)}
@@ -862,6 +862,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         <Header
+          section={({ 'Time Tracking': 'Mes tâches & chrono', Dashboard: 'Tableau de bord', Clients: 'Clients', Missions: 'Missions', Cash: 'Facturation & Trésorerie', HR: 'GRH & Paie', Users: 'Équipe', Ressources: 'Outils de travail', Messages: 'Messages', Parrainage: 'Parrainage', Plateforme: 'Plateforme' } as Record<string, string>)[activeNav]}
           userCode="ABA01"
           userName="Alexandre Dupont"
           onNavigate={setActiveSidebarItem}
@@ -946,6 +947,17 @@ export default function App() {
                 timer when there is one, the start form when there isn't. */}
             <div className="flex flex-col lg:flex-row lg:items-start gap-5">
               <div className="flex-1 min-w-0 flex flex-col gap-5">
+                {hasPermission('VIEW') && myPausedEntries.length === 0 && (
+                  <section className="chrono-empty-state" aria-label="Tâches en pause">
+                    <span className="chrono-empty-icon"><Timer size={28} /></span>
+                    <span className="public-eyebrow">VOTRE ESPACE DE CONCENTRATION</span>
+                    <h2>Aucune tâche en pause.<br />Une chose à la fois.</h2>
+                    <p>{myRunningEntry
+                      ? 'Votre chronomètre est en cours. Les tâches que vous mettez en pause apparaîtront ici, prêtes à être reprises.'
+                      : 'Choisissez un client et une mission dans le formulaire pour commencer. Retrouvez ici vos tâches mises en pause.'}</p>
+                    <div><span>01 · Choisir</span><span>02 · Démarrer</span><span>03 · Suivre</span></div>
+                  </section>
+                )}
                 {/* Paused tasks stay visible while another task runs: they are
                     exactly what you might switch back to. */}
                 {hasPermission('VIEW') && myPausedEntries.length > 0 && (

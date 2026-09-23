@@ -412,9 +412,9 @@ export const SupportView: React.FC<SupportViewProps> = ({
       {/* HERO — une surface de travail, pas une bannière : la barre occupe le
           centre optique et répond sur place. Pas d'`overflow-hidden` ici, le
           panneau de résultats en déborde volontairement. */}
-      <section className="pt-[88px] px-6 sm:px-10 pb-16 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
+      <section className="support-intro pt-[88px] px-6 sm:px-10 pb-16 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
         <div className="max-w-[1200px] mx-auto flex gap-14 items-center flex-wrap">
-          <div style={{ flex: '1 1 480px', minWidth: 300 }} className="relative z-20">
+          <div style={{ flex: '1 1 480px', minWidth: 0 }} className="relative z-20">
             <Reveal>
               <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Centre d'assistance</div>
             </Reveal>

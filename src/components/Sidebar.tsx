@@ -38,10 +38,11 @@ const NavButton: React.FC<{ item: NavItem; isActive: boolean; onSelect: () => vo
   const Icon = item.icon;
   return (
     <button
+      aria-current={isActive ? 'page' : undefined}
       onClick={onSelect}
-      className={`w-full flex items-center justify-between px-3 py-2 rounded-[9px] text-[12.5px] transition-all group ${
+      className={`app-nav-item w-full flex items-center justify-between px-3 py-2 rounded-[9px] text-[12.5px] transition-all group ${
         isActive
-          ? 'bg-white/10 text-white font-bold'
+          ? 'bg-turquoise/15 text-white font-bold shadow-[inset_3px_0_0_#00B3A6]'
           : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
       }`}
     >
@@ -184,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       // button padding. Widened just enough for it to render on one line
       // with `truncate` (unchanged below) still as the safety net for
       // anything longer still.
-      className={`w-[226px] min-w-[226px] bg-navy text-white flex flex-col justify-between h-dvh overflow-y-auto select-none font-sans flex-shrink-0
+      className={`app-sidebar w-[244px] min-w-[244px] bg-navy text-white flex flex-col justify-between h-dvh overflow-y-auto select-none font-sans flex-shrink-0
         fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-out
         ${open ? 'translate-x-0' : '-translate-x-full'}
         lg:sticky lg:top-0 lg:z-30 lg:translate-x-0`}
@@ -223,7 +224,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {navGroups.map((group, i) => (
             <div key={group.header} className={`flex flex-col gap-px ${i === 0 ? 'pt-1' : 'pt-4'}`}>
               {showGroupHeaders && (
-                <div className="flex items-center gap-1.5 px-3 pb-1.5 text-[12px] font-extrabold uppercase tracking-wider text-turquoise">
+                <div className="flex items-center gap-1.5 px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45">
                   <span>•</span> {group.header}
                 </div>
               )}
