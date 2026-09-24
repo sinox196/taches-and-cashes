@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUpRight, Building2, CalendarCheck, Check, ChevronDown, FileText, FolderKanban, Gift, Globe, LayoutDashboard, ListChecks, MessageSquare, Pause, Play, RotateCcw, Timer, Users, Wallet } from 'lucide-react';
 import { Reveal } from './Reveal';
 import '../../styles/home.css';
 
 const previews = [
-  { label: 'Pilotage', icon: LayoutDashboard, shot: 'dashboard', title: 'Une vue claire. Des décisions éclairées.', text: 'Reliez le temps travaillé, les coûts et les revenus. Identifiez les missions qui créent de la valeur pour votre activité.', points: ['Indicateurs par période et collaborateur', 'Rentabilité par client et par mission', 'Suivi des coûts et des créances'] },
-  { label: 'Tâches & temps', icon: Timer, shot: 'pointage', title: 'Chaque minute trouve sa mission.', text: 'Planifiez, déléguez et suivez le travail de votre équipe. Un chronomètre reste à portée de main, où que vous soyez dans la plateforme.', points: ['Démarrage et pause en un clic', 'Historique par client et collaborateur', 'Temps facturable et non facturable'] },
-  { label: 'Facturation', icon: Wallet, shot: 'cash', title: 'Du travail réalisé au cash encaissé.', text: 'Retrouvez vos factures, vos règlements et votre trésorerie dans un seul espace, avec les paramètres de facturation adaptés à votre activité.', points: ['Documents et calcul des taxes', 'Règlements et soldes clients', 'Encaissements et décaissements'] },
-  { label: 'Équipe & RH', icon: Users, shot: 'grh', title: 'Une équipe organisée, un quotidien plus simple.', text: 'Centralisez les demandes de congés, les présences et la paie. Chacun retrouve les informations utiles à son rôle.', points: ['Congés et autorisations d’absence', 'Prêts, avances et bulletins de paie', 'Gestion des droits par collaborateur'] },
+  { label: 'Pilotage', icon: LayoutDashboard, shot: 'pilotage', alt: 'Deux professionnels analysent des graphiques financiers pour piloter leur activité.', title: 'Une vue claire. Des décisions éclairées.', text: 'Reliez le temps travaillé, les coûts et les revenus. Identifiez les missions qui créent de la valeur pour votre activité.', points: ['Indicateurs par période et collaborateur', 'Rentabilité par client et par mission', 'Suivi des coûts et des créances'] },
+  { label: 'Tâches & temps', icon: Timer, shot: 'temps', alt: 'Une consultante organise ses tâches dans un agenda, une horloge posée sur son bureau.', title: 'Chaque minute trouve sa mission.', text: 'Planifiez, déléguez et suivez le travail de votre équipe. Un chronomètre reste à portée de main, où que vous soyez dans la plateforme.', points: ['Démarrage et pause en un clic', 'Historique par client et collaborateur', 'Temps facturable et non facturable'] },
+  { label: 'Facturation', icon: Wallet, shot: 'facturation', alt: 'Une comptable vérifie une facture avec une calculatrice et ses documents financiers.', title: 'Du travail réalisé au cash encaissé.', text: 'Retrouvez vos factures, vos règlements et votre trésorerie dans un seul espace, avec les paramètres de facturation adaptés à votre activité.', points: ['Documents et calcul des taxes', 'Règlements et soldes clients', 'Encaissements et décaissements'] },
+  { label: 'Équipe & RH', icon: Users, shot: 'equipe', alt: 'Une équipe échange autour d’un calendrier pour organiser le travail ensemble.', title: 'Une équipe organisée, un quotidien plus simple.', text: 'Centralisez les demandes de congés, les présences et la paie. Chacun retrouve les informations utiles à son rôle.', points: ['Congés et autorisations d’absence', 'Prêts, avances et bulletins de paie', 'Gestion des droits par collaborateur'] },
 ];
 
 const modules = [
@@ -54,20 +54,41 @@ function TimerDemo() {
 export function HomeView({ onStart, onFeatures, onContact }: { onStart: () => void; onFeatures: () => void; onContact: () => void }) {
   const [active, setActive] = useState(0);
   const selected = previews[active];
+  const hero = useRef<HTMLElement>(null);
+  const [motionPaused, setMotionPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [heroVisible, setHeroVisible] = useState(true);
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReducedMotion(preference.matches);
+    preference.addEventListener('change', update);
+    const observer = new IntersectionObserver(([entry]) => setHeroVisible(entry.isIntersecting));
+    if (hero.current) observer.observe(hero.current);
+    return () => { preference.removeEventListener('change', update); observer.disconnect(); };
+  }, []);
   const explore = () => document.getElementById('home-product')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
 
-  return <div className="home-redesign">
-    <section className="home-hero" aria-labelledby="home-title">
+  return <div className="home-redesign" data-motion={motionPaused || reducedMotion ? 'paused' : 'playing'}>
+    <section ref={hero} className="home-hero" aria-labelledby="home-title" data-visible={heroVisible}>
       <img className="home-cover" src="/landing/team-cover.webp" width="1536" height="1024" fetchPriority="high" alt="Deux professionnels collaborent sur un dossier dans un bureau lumineux." />
       <div className="home-hero-shade" aria-hidden="true" />
+      <div className="home-hero-atmosphere" aria-hidden="true"><i /><i /><span /></div>
+      <button className="home-motion-toggle" onClick={() => setMotionPaused(v => !v)} disabled={reducedMotion} aria-pressed={motionPaused || reducedMotion} aria-label={reducedMotion ? 'Animations désactivées selon vos préférences' : motionPaused ? 'Reprendre les animations' : 'Mettre les animations en pause'}>{motionPaused || reducedMotion ? <Play size={13} /> : <Pause size={13} />}<span>{reducedMotion ? 'Mouvement réduit' : motionPaused ? 'Reprendre' : 'Pause animations'}</span></button>
       <div className="home-container home-hero-content">
         <div className="home-hero-copy">
           <div className="home-kicker"><span />LE LOGICIEL QUI RELIE TEMPS, ÉQUIPE & CASH</div>
-          <h1 id="home-title">Votre talent.<br />Votre temps.<br /><em>Votre valeur.</em></h1>
+          <h1 id="home-title"><span className="home-title-line"><span>Votre talent.</span></span><span className="home-title-line"><span>Votre temps.</span></span><span className="home-title-line"><em>Votre valeur.</em></span></h1>
+          <svg className="home-title-stroke" viewBox="0 0 220 12" fill="none" aria-hidden="true"><path d="M3 9C65 1 143 1 216 6" stroke="currentColor" strokeWidth="3" strokeLinecap="round" pathLength="1" /></svg>
           <p>Faites grandir votre activité, pas vos tableurs.</p>
           <p className="home-hero-description">Missions, chronomètres, équipe et facturation : tout se connecte pour vous donner une vision claire de votre rentabilité.</p>
           <div className="home-actions"><button className="home-btn home-btn-mint" onClick={onStart}>Commencer gratuitement <ArrowUpRight size={19} /></button><button className="home-watch" onClick={explore}><span><Play size={14} fill="currentColor" /></span>Découvrir la plateforme</button></div>
           <div className="home-trial-note"><Check size={14} /> Essai gratuit <span /> Sans carte bancaire</div>
+        </div>
+        <div className="home-value-motion" aria-hidden="true">
+          <svg className="home-value-track" viewBox="0 0 420 80" fill="none"><path d="M45 40H375" stroke="rgba(150,234,210,.25)" strokeWidth="1" /><path className="home-value-current" d="M45 40H375" stroke="#96ead2" strokeWidth="2" strokeLinecap="round" strokeDasharray="35 295" /></svg>
+          <div className="home-value-node"><span><Timer size={21} /><i /></span><small>Votre temps</small></div>
+          <div className="home-value-node"><span><ListChecks size={21} /><i /></span><small>Vos missions</small></div>
+          <div className="home-value-node"><span><Wallet size={21} /><i /></span><small>Votre cash</small></div>
         </div>
         <div className="home-hero-bottom"><span>MOINS DE DISPERSION. PLUS DE VISION.</span><button onClick={explore} aria-label="Explorer la plateforme plus bas"><ArrowDown size={19} /></button><span>CONÇU POUR LES MÉTIERS DE SERVICES</span></div>
       </div>
@@ -78,13 +99,17 @@ export function HomeView({ onStart, onFeatures, onContact }: { onStart: () => vo
     <section id="home-product" className="home-product home-section">
       <div className="home-container">
         <Reveal className="home-section-heading"><span className="home-eyebrow">UNE VUE D’ENSEMBLE. ENFIN.</span><h2>Votre activité prend<br /><span>tout son sens.</span></h2><p>Moins d’allers-retours entre les outils.<br />Plus de temps pour ce que vous faites de mieux.</p></Reveal>
-        <div className="home-tabs" role="tablist" aria-label="Aperçus de la plateforme" onKeyDown={event => {
+        <div className="home-tabs" role="tablist" aria-label="Activités de la plateforme" onKeyDown={event => {
           const next = event.key === 'ArrowRight' ? (active + 1) % previews.length : event.key === 'ArrowLeft' ? (active + previews.length - 1) % previews.length : event.key === 'Home' ? 0 : event.key === 'End' ? previews.length - 1 : null;
           if (next !== null) { event.preventDefault(); setActive(next); document.getElementById(`home-tab-${next}`)?.focus(); }
         }}>{previews.map((item, i) => <button key={item.shot} id={`home-tab-${i}`} role="tab" tabIndex={active === i ? 0 : -1} aria-selected={active === i} aria-controls="home-preview-panel" onClick={() => setActive(i)}><item.icon size={18} />{item.label}</button>)}</div>
         <div className="home-product-panel" role="tabpanel" id="home-preview-panel" aria-labelledby={`home-tab-${active}`} tabIndex={0}>
           <div key={selected.shot} className="home-product-copy"><span className="home-step-number">0{active + 1} / 04</span><h3>{selected.title}</h3><p>{selected.text}</p><ul>{selected.points.map(point => <li key={point}><Check size={16} />{point}</li>)}</ul><button className="home-link" onClick={onFeatures}>Explorer les fonctionnalités <ArrowRight size={17} /></button></div>
-          <figure className="home-browser"><div className="home-browser-bar"><span /><span /><span /><small>taches-and-cash.com / {selected.label}</small><span className="home-preview-badge">APERÇU</span></div><div className="home-screen-wrap"><img key={selected.shot} src={`/support/${selected.shot}.webp`} width="1400" height="875" loading="lazy" alt={`Écran réel du module ${selected.label} de Tâches & Cash, avec données de démonstration`} /></div><figcaption>Votre futur espace de travail · Données de démonstration</figcaption></figure>
+          <figure className="home-activity-photo" key={selected.shot}>
+            <img src={`/landing/activity-${selected.shot}.webp`} width="1536" height="1024" loading="lazy" alt={selected.alt} />
+            <div className="home-activity-scrim" aria-hidden="true" />
+            <figcaption><span className="home-activity-icon"><selected.icon size={23} /></span><div><small>VOTRE QUOTIDIEN, SIMPLIFIÉ</small><strong>{selected.label}</strong></div><span className="home-activity-index">0{active + 1}<i> / 04</i></span></figcaption>
+          </figure>
         </div>
       </div>
     </section>
