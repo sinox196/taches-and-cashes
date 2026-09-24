@@ -412,7 +412,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
       {/* HERO — une surface de travail, pas une bannière : la barre occupe le
           centre optique et répond sur place. Pas d'`overflow-hidden` ici, le
           panneau de résultats en déborde volontairement. */}
-      <section className="support-intro pt-[88px] px-6 sm:px-10 pb-16 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
+      <section className="support-intro support-redesign-intro pt-[88px] px-6 sm:px-10 pb-16 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
         <div className="max-w-[1200px] mx-auto flex gap-14 items-center flex-wrap">
           <div style={{ flex: '1 1 480px', minWidth: 0 }} className="relative z-20">
             <Reveal>
@@ -608,7 +608,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
       </section>
 
       {/* LE GUIDE */}
-      <section id="support-guide" className="py-20 px-6 sm:px-10 bg-white scroll-mt-6">
+      <section id="support-guide" className="support-guide-redesign py-20 px-6 sm:px-10 bg-white scroll-mt-6">
         <div className="max-w-[1000px] mx-auto">
           <Reveal>
             <div className="flex flex-wrap items-end justify-between gap-5">
@@ -653,7 +653,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
             </div>
           </Reveal>
 
-          <div className="mt-6 divide-y divide-[#E6E9EE] border border-[#E6E9EE] rounded-[18px] overflow-hidden bg-white">
+          <div className="support-guide-list mt-6 divide-y divide-[#E6E9EE] border border-[#E6E9EE] rounded-[18px] overflow-hidden bg-white">
             {visibleChapters.map((chapter, i) => {
               const isOpen = openChapters.has(chapter.id);
               return (
@@ -732,7 +732,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
       </section>
 
       {/* QUESTIONS FRÉQUENTES */}
-      <section id="support-faq" className="py-20 px-6 sm:px-10 bg-[#F2F4F7] scroll-mt-6">
+      <section id="support-faq" className="support-faq-redesign py-20 px-6 sm:px-10 bg-[#F2F4F7] scroll-mt-6">
         <div className="max-w-[820px] mx-auto">
           <Reveal>
             <h2 className="text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Questions fréquentes</h2>
@@ -805,7 +805,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
       {/* NOUS JOINDRE — trois canaux, pas trois cartes identiques : WhatsApp
           porte le remplissage navy parce que c'est le plus rapide des trois,
           et une rangée uniforme ne dirait pas lequel choisir. */}
-      <section id="support-contact" className="py-20 px-6 sm:px-10 bg-white scroll-mt-6">
+      <section id="support-contact" className="support-contact-redesign py-20 px-6 sm:px-10 bg-white scroll-mt-6">
         <div className="max-w-[1000px] mx-auto">
           <Reveal className="max-w-[640px]">
             <h2 className="text-[26px] sm:text-[32px] font-extrabold text-navy tracking-[-0.01em]">Vous préférez parler à quelqu'un ?</h2>

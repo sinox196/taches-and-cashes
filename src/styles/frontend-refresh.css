@@ -206,3 +206,32 @@ button:not(:disabled), summary { cursor: pointer; }
   .public-login { font-size: 10px; }
   .public-menu-toggle { width: 38px; height: 40px; flex-shrink: 0; }
 }
+
+/* Support workspace redesign: the search remains the primary interaction, inside a clearer product-support workspace. */
+.support-redesign-intro { position: relative; overflow: clip; background: radial-gradient(circle at 90% 25%, #97ead326 0 7%, transparent 28%), radial-gradient(circle at 5% 100%, #00b3a615, transparent 34%), linear-gradient(135deg, #f8fcfa 0%, #eff6f3 53%, #f8fbfa 100%) !important; }
+.support-redesign-intro::before { content: ''; position: absolute; width: 480px; height: 480px; right: -270px; top: -260px; border: 1px solid #3aa99030; border-radius: 50%; box-shadow: 0 0 0 42px #3aa9900b, 0 0 0 84px #3aa99008; pointer-events: none; }
+.support-redesign-intro::after { content: 'SUPPORT'; position: absolute; right: max(25px, calc((100vw - 1200px) / 2)); bottom: 26px; color: #0d1b2a08; font-size: clamp(55px, 10vw, 150px); font-weight: 800; letter-spacing: -8px; pointer-events: none; }
+.support-redesign-intro > div { position: relative; }
+.support-redesign-intro .inline-flex { background: #102f39; color: #a4ecd5; border-color: #102f39; box-shadow: 0 8px 20px -13px #0d1b2a55; }
+.support-redesign-intro h1 { font-size: clamp(39px, 4.25vw, 60px) !important; line-height: 1.04 !important; max-width: 620px; letter-spacing: -2.8px !important; }
+.support-redesign-intro h1::after { content: ''; display: block; width: 86px; height: 4px; margin-top: 18px; border-radius: 4px; background: linear-gradient(90deg, #00b3a6, #96ead2); }
+.support-redesign-intro input { border-radius: 13px !important; padding-block: 18px !important; font-size: 16px !important; }
+.support-redesign-intro .relative.mx-auto { border: 1px solid #d9e7e0; background: linear-gradient(145deg, #fff, #eff9f5); box-shadow: 0 30px 70px -28px #143b3250 !important; }
+.support-guide-redesign { background: #fff; }
+.support-guide-redesign > div { max-width: 1120px !important; }
+.support-guide-redesign .mt-7 { padding: 8px; border: 1px solid #dfeae4; background: #f5f9f7; border-radius: 16px; gap: 5px !important; }
+.support-guide-redesign .mt-7 > button { border-radius: 10px; padding: 11px 15px; }
+.support-guide-redesign .mt-7 > button:not(.bg-navy) { background: transparent; }
+.support-guide-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 0 !important; border-radius: 18px !important; overflow: visible !important; background: transparent !important; }
+.support-guide-list > div { border: 1px solid #e0ebe5; background: #fff; transition: transform .2s, box-shadow .2s, border-color .2s; }
+.support-guide-list > div:nth-child(odd) { border-radius: 16px 0 0 0; }.support-guide-list > div:nth-child(even) { border-radius: 0 16px 0 0; }.support-guide-list > div:nth-last-child(-n + 2) { border-radius: 0 0 16px 16px; }
+.support-guide-list > div:hover { position: relative; z-index: 2; transform: translateY(-2px); border-color: #8bcbb5; box-shadow: 0 16px 28px -24px #153d354d; }
+.support-guide-list > div > button { min-height: 78px; }
+.support-guide-list > div > button > div { width: 40px; height: 40px; border-radius: 12px; }
+.support-guide-list > div > div > div { padding-left: 24px !important; }
+.support-faq-redesign { background: linear-gradient(125deg, #f2f7f5, #eff5f2) !important; }
+.support-faq-redesign > div { max-width: 1120px !important; }
+.support-faq-redesign .grid { gap: 42px !important; }
+.support-contact-redesign { background: #fff; }
+@media (max-width: 800px) { .support-redesign-intro::after { font-size: 80px; letter-spacing: -5px; bottom: 8px; }.support-guide-list { grid-template-columns: 1fr; }.support-guide-list > div, .support-guide-list > div:nth-child(n) { border-radius: 13px; margin-bottom: 8px; }.support-guide-list > div > div > div { padding-left: 62px !important; }.support-guide-redesign .mt-7 { border-radius: 13px; } }
+@media (max-width: 560px) { .support-redesign-intro h1 { font-size: 38px !important; letter-spacing: -1.7px !important; }.support-redesign-intro::after { display: none; }.support-redesign-intro .relative.mx-auto { margin-top: 12px; }.support-guide-redesign .mt-7 { overflow-x: auto; flex-wrap: nowrap; }.support-guide-redesign .mt-7 > button { white-space: nowrap; font-size: 12px; }.support-guide-list > div > button { padding-inline: 16px; }.support-guide-list > div > div > div { padding-left: 16px !important; } }
