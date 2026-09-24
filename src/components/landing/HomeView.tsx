@@ -77,7 +77,7 @@ export function HomeView({ onStart, onFeatures, onContact }: { onStart: () => vo
       <div className="home-container home-hero-content">
         <div className="home-hero-copy">
           <div className="home-kicker"><span />LE LOGICIEL QUI RELIE TEMPS, ÉQUIPE & CASH</div>
-          <h1 id="home-title"><span className="home-title-line"><span>Votre talent.</span></span><span className="home-title-line"><span>Votre temps.</span></span><span className="home-title-line"><em>Votre valeur.</em></span></h1>
+          <h1 id="home-title"><span className="home-title-line"><span>Le <em>premier logiciel</em></span></span><span className="home-title-line"><span>tunisien conçu</span></span><span className="home-title-line"><span><em>exclusivement</em> pour les</span></span><span className="home-title-line"><span>professionnels des</span></span><span className="home-title-line"><em>services.</em></span></h1>
           <svg className="home-title-stroke" viewBox="0 0 220 12" fill="none" aria-hidden="true"><path d="M3 9C65 1 143 1 216 6" stroke="currentColor" strokeWidth="3" strokeLinecap="round" pathLength="1" /></svg>
           <p>Faites grandir votre activité, pas vos tableurs.</p>
           <p className="home-hero-description">Missions, chronomètres, équipe et facturation : tout se connecte pour vous donner une vision claire de votre rentabilité.</p>
