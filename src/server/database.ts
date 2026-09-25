@@ -333,6 +333,12 @@ async function initJsonDb(): Promise<Database> {
       await saveDb();
       return String(next).padStart(4, '0');
     },
+    setInvoiceCounter: async (companyId: string, counter: number, year: number) => {
+      const settingsRow = ensureCompanySettings(companyId);
+      settingsRow.invoiceCounter = counter;
+      settingsRow.invoiceCounterYear = year;
+      await saveDb();
+    },
 
     getAllLeaveRequests: async (companyId: string) => scoped(db.leaveRequests, companyId),
     getLeaveRequestById: async (companyId: string, id: number) => findScoped(db.leaveRequests, companyId, id),

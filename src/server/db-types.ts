@@ -55,6 +55,16 @@ export interface Database {
   deleteInvoice(companyId: string, id: string): Promise<boolean>;
   /** Next legal-sequence number for this company, zero-padded to 4 digits. Reserved atomically. */
   nextInvoiceNumber(companyId: string): Promise<string>;
+  /**
+   * Rebases the legal sequence — sets both the counter and its year in one
+   * write, atomically. Never go through `updateSettings` for this: under
+   * Postgres it writes `invoiceCounter` into the dedicated column but
+   * `invoiceCounterYear` into the JSONB `data` blob, which `nextInvoiceNumber()`
+   * never reads (it reads the real `invoice_counter_year` column) — the year
+   * would silently fail to move and the very next invoice would reset to 0001
+   * instead of continuing the sequence.
+   */
+  setInvoiceCounter(companyId: string, counter: number, year: number): Promise<void>;
 
   getAllLeaveRequests(companyId: string): Promise<any[]>;
   getLeaveRequestById(companyId: string, id: number): Promise<any | undefined>;

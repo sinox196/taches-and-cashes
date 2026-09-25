@@ -439,6 +439,20 @@ export async function initPostgres(connectionString: string): Promise<Database> 
       );
       return String(rows[0].invoice_counter).padStart(4, '0');
     },
+    /**
+     * Rebases the legal sequence to a specific counter/year in one statement
+     * — both `invoice_counter` and `invoice_counter_year` are real columns,
+     * never `updateSettings()`'s JSONB `data` blob, which `nextInvoiceNumber()`
+     * never reads.
+     */
+    setInvoiceCounter: async (companyId: string, counter: number, year: number) => {
+      await q(
+        `INSERT INTO settings (company_id, data, invoice_counter, invoice_counter_year)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (company_id) DO UPDATE SET invoice_counter = $3, invoice_counter_year = $4`,
+        [companyId, JSON.stringify(defaultSettings()), counter, year],
+      );
+    },
 
     getAllLeaveRequests: leaveRequests.all,
     getLeaveRequestById: leaveRequests.byId,

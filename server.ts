@@ -2621,6 +2621,68 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
     }
   });
 
+  /**
+   * Renumérote la facture légale n° 1 d'une année — et seulement elle. Un
+   * cabinet qui bascule vers l'app en cours d'année a déjà émis des factures
+   * hors du système (papier, ancien logiciel) et doit reprendre la séquence
+   * là où elle s'est arrêtée plutôt que de repartir à 0001 ; c'est le seul
+   * cas où un numéro de facture légale peut changer — `PUT /api/invoices/:id`
+   * ignore délibérément tout numéro envoyé pour ce type de document.
+   *
+   * Restreint à la toute première facture légale de son année, tant qu'elle
+   * est la seule émise : au-delà, renuméroter romprait l'ordre avec les
+   * documents suivants déjà émis, ce que la règle de chronologie interdit
+   * déjà pour toute autre édition.
+   */
+  app.post('/api/invoices/:id/renumber', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+      if (existing.documentKind !== 'FACTURE_LEGALE') {
+        return res.status(400).json({ error: 'Seule une facture légale suit la séquence numérotée.' });
+      }
+      if (existing.number !== '0001') {
+        return res.status(400).json({ error: 'Seule la facture n° 1 de son année peut être renumérotée — elle fixe le point de départ de la séquence.' });
+      }
+
+      const year = Number(String(existing.issueDate || '').slice(0, 4));
+      if (!year) return res.status(400).json({ error: 'Date de la facture invalide.' });
+
+      const all = await db.getAllInvoices(req.user.companyId);
+      const sameYearLegal = all.filter((i: any) =>
+        i.documentKind === 'FACTURE_LEGALE' && String(i.issueDate || '').slice(0, 4) === String(year),
+      );
+      if (sameYearLegal.length > 1) {
+        return res.status(400).json({
+          error: "D'autres factures légales existent déjà pour cette année — la renumérotation n'est plus possible une fois la séquence entamée.",
+        });
+      }
+
+      const requested = Number(req.body?.number);
+      if (!Number.isInteger(requested) || requested < 1 || requested > 9999) {
+        return res.status(400).json({ error: 'Le numéro doit être un entier entre 1 et 9999.' });
+      }
+      const formatted = String(requested).padStart(4, '0');
+      if (all.some((i: any) => i.id !== existing.id && i.number === formatted)) {
+        return res.status(400).json({ error: `Le numéro « ${formatted} » est déjà utilisé.` });
+      }
+
+      const updated = await db.updateInvoice(req.user.companyId, existing.id, {
+        number: formatted,
+        updatedAt: new Date().toISOString(),
+      });
+      // La séquence continue à partir de ce nouveau numéro — la prochaine
+      // facture légale portera formatted+1, exactement comme si la n° 1
+      // avait toujours porté ce numéro.
+      await db.setInvoiceCounter(req.user.companyId, requested, year);
+
+      res.json(updated);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.delete('/api/invoices/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
     try {
       const removed = await db.deleteInvoice(req.user.companyId, req.params.id);

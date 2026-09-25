@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Hash, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
@@ -67,6 +67,8 @@ export const CashManagement: React.FC = () => {
   const [editor, setEditor] = useState<false | { invoice: any | null }>(false);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [preview, setPreview] = useState<any | null>(null);
+  /** The one-time "rebase" of the legal sequence's starting point — see RenumberModal. */
+  const [renumber, setRenumber] = useState<{ invoice: any } | null>(null);
 
   const canManage = hasPermission('MANAGE_CASH');
 
@@ -297,6 +299,15 @@ export const CashManagement: React.FC = () => {
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
+                          {inv.documentKind === 'FACTURE_LEGALE' && inv.number === '0001' && (
+                            <button
+                              onClick={e => { e.stopPropagation(); setRenumber({ invoice: inv }); }}
+                              className="p-1.5 text-gray-400 hover:text-navy hover:bg-gray-100 rounded"
+                              title="Renuméroter — reprendre la séquence à un autre point de départ"
+                            >
+                              <Hash className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={e => { e.stopPropagation(); remove(inv); }}
                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
@@ -363,7 +374,126 @@ export const CashManagement: React.FC = () => {
           onDelete={canManage ? async (inv) => { await remove(inv); setPreview(null); } : undefined}
         />
       )}
+
+      {renumber && (
+        <RenumberModal
+          invoice={renumber.invoice}
+          authHeaders={authHeaders}
+          onClose={() => setRenumber(null)}
+          onDone={() => { setRenumber(null); load(search.trim()); }}
+        />
+      )}
       </>}
+    </div>
+  );
+};
+
+/**
+ * Rebases the legal sequence: only invoice n° 1 of its year, and only while
+ * it's still the sole legal invoice issued for that year, can take a new
+ * number — for a cabinet migrating mid-year with numbers already issued on
+ * paper or in a previous tool. The server re-validates all of this; the
+ * client just surfaces the constraint before the round trip.
+ */
+const RenumberModal: React.FC<{
+  invoice: any;
+  authHeaders: Record<string, string>;
+  onClose: () => void;
+  onDone: () => void;
+}> = ({ invoice, authHeaders, onClose, onDone }) => {
+  const year = String(invoice.issueDate || '').slice(0, 4);
+  const [value, setValue] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > 9999) {
+      setError('Le numéro doit être un entier entre 1 et 9999.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/renumber`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ number: n }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || 'Renumérotation impossible');
+      onDone();
+    } catch (e: any) {
+      setError(friendlyError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 bg-gray-900/40 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md my-4">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="text-[15px] font-bold text-gray-800 flex items-center gap-2">
+            <Hash className="w-4 h-4" />
+            Renuméroter la facture {invoice.number} - {year}
+          </h2>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-[12.5px] text-gray-500">
+            Cette facture est la première de {year}. Vous pouvez fixer son numéro pour reprendre une
+            séquence déjà entamée hors de l'application (papier, ancien logiciel) — les prochaines
+            factures légales de {year} continueront ensuite à partir de ce numéro.
+          </p>
+          <div>
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+              Nouveau numéro
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={9999}
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              placeholder="Ex : 47"
+              className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"
+              autoFocus
+            />
+            {value && Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 9999 && (
+              <p className="mt-1.5 text-[11px] text-gray-400">
+                Cette facture deviendra <span className="font-mono font-semibold text-gray-600">{String(Number(value)).padStart(4, '0')} - {year}</span>,
+                la suivante sera <span className="font-mono font-semibold text-gray-600">{String(Number(value) + 1).padStart(4, '0')} - {year}</span>.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="px-5 py-4 border-t border-gray-100 sticky bottom-0 bg-white rounded-b-xl">
+          {error && (
+            <div className="mb-3 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Fermer
+            </button>
+            <button
+              onClick={submit}
+              disabled={saving || !value}
+              className="bg-navy hover:bg-navy-hover text-white px-4 py-2 rounded-lg text-[13px] font-medium disabled:opacity-50 flex items-center gap-2"
+            >
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
