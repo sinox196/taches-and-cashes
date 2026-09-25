@@ -5905,12 +5905,24 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
 
       // Recale le curseur lui-même : c'est tout l'intérêt de la route — la
       // prochaine facture légale doit continuer depuis le plus haut numéro
-      // réellement en usage cette année, pas repartir de « 0002 ». Recalculé
-      // à partir des numéros eux-mêmes plutôt que lu sur le compteur stocké,
-      // pour rester juste même si ce dernier avait dérivé.
-      const highestOriginal = othersThisYear.length
+      // *jamais attribué* cette année, pas depuis le plus haut numéro
+      // *actuellement existant*. Les deux divergent dès qu'une facture a été
+      // supprimée entre-temps : le compteur ne redescend jamais quand une
+      // facture disparaît (même règle que documentée pour nextInvoiceNumber),
+      // donc une ligne manquante dans `othersThisYear` ne doit jamais faire
+      // retomber le curseur plus bas qu'il n'a réellement été. On prend donc
+      // le plus grand des deux — le compteur stocké (source de vérité) et le
+      // plus haut numéro effectivement observé (au cas où le compteur aurait
+      // dérivé) — jamais le second seul, qui avait fait renaître un numéro
+      // déjà utilisé (« 0016 ») une fois une facture intermédiaire supprimée.
+      const settingsRow = await db.getSettings(req.user.companyId);
+      const trustedCounter = settingsRow.invoiceCounterYear === year && typeof settingsRow.invoiceCounter === 'number'
+        ? settingsRow.invoiceCounter
+        : 1;
+      const observedMax = othersThisYear.length
         ? Math.max(...othersThisYear.map((i: any) => Number(i.number)))
         : 1;
+      const highestOriginal = Math.max(trustedCounter, observedMax);
       await db.updateSettings(req.user.companyId, { invoiceCounter: highestOriginal + offset });
 
       console.warn(`[cash] facture légale n° 0001 renumérotée en ${formatted} par ${req.user.username} — départ de séquence ${year}, ${othersThisYear.length} autre(s) facture(s) décalée(s) d'autant`);
