@@ -75,6 +75,13 @@ interface InvoiceEditorProps {
 export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, onClose, onSaved }) => {
   useEscapeToClose(onClose);
   const isEdit = !!invoice;
+  // Le type de document d'un document déjà émis est figé — le serveur
+  // l'ignore désormais silencieusement sur PUT (voir server.ts) ; seul
+  // « Convertir en facture légale » (bouton dédié de la liste) fait
+  // passer un « autre document » en facture légale, puisque c'est lui qui
+  // réserve un vrai numéro de séquence. Un brouillon n'a encore rien
+  // réservé et peut donc encore changer de type librement.
+  const kindLocked = isEdit && invoice?.status !== 'DRAFT';
   const { token, hasPermission } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
@@ -379,10 +386,13 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-5 border-b border-gray-200">
             <Choice
               label="Type de document"
-              hint={documentKind === 'AUTRE_NON_FACTURABLE' ? 'Non pris en compte dans le solde du client (Clients et Tableau de bord).' : undefined}
+              hint={kindLocked
+                ? "Figé une fois émis — utilisez « Convertir en facture légale » depuis la liste pour un autre document."
+                : documentKind === 'AUTRE_NON_FACTURABLE' ? 'Non pris en compte dans le solde du client (Clients et Tableau de bord).' : undefined}
             >
               <select
                 value={documentKind}
+                disabled={kindLocked}
                 onChange={e => {
                   const kind = e.target.value;
                   setDocumentKind(kind);
@@ -396,7 +406,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
                   // while still being saved.
                   if (kind === 'FACTURE_LEGALE' && !TITLES.includes(title)) setTitle(TITLES[0]);
                 }}
-                className={SELECT_CLS}
+                className={`${SELECT_CLS} ${kindLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
               >
                 {DOCUMENT_KINDS.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
               </select>

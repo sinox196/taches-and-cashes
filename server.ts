@@ -5615,6 +5615,22 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       merged.status = existing.status || 'ISSUED';
       const editingDraft = merged.status === 'DRAFT';
 
+      // Le type de document ne se change pas non plus par une simple
+      // modification d'un document déjà émis — seul /convert-to-legal fait
+      // passer un « autre document » en facture légale, et c'est lui, pas
+      // PUT, qui réserve alors un vrai numéro dans la séquence. Sans ce
+      // verrou, choisir « Facture légale » dans le formulaire d'édition d'un
+      // document déjà émis faisait passer `documentKind` à FACTURE_LEGALE
+      // tout en gardant l'ancienne référence libre telle quelle (branche
+      // `else` ci-dessous) — un numéro jamais réservé, qui n'empêchait ni
+      // collision ni non-sens : une référence libre comme « 16 » se
+      // comparait alors à la chronologie de la vraie séquence légale
+      // (`legalSequenceDateError` ci-dessous), refusant des dates sans
+      // aucun rapport avec une véritable position dans la séquence. Un
+      // brouillon n'a encore rien réservé — il peut librement changer de
+      // type avant d'être émis, comme avant.
+      if (!editingDraft) merged.documentKind = existing.documentKind;
+
       // A legal invoice's number belongs to the sequence and is never
       // reassigned; a free document's may be corrected.
       if (editingDraft) {
