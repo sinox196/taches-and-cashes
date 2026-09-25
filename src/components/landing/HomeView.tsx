@@ -79,8 +79,9 @@ export function HomeView({ onStart, onFeatures, onContact }: { onStart: () => vo
           <div className="home-kicker"><span />LE LOGICIEL QUI RELIE TEMPS, ÉQUIPE & CASH</div>
           <h1 id="home-title"><span className="home-title-line"><span>Le <em>premier logiciel</em></span></span><span className="home-title-line"><span>tunisien conçu</span></span><span className="home-title-line"><span><em>exclusivement</em> pour les</span></span><span className="home-title-line"><span>professionnels des</span></span><span className="home-title-line"><em>services.</em></span></h1>
           <svg className="home-title-stroke" viewBox="0 0 220 12" fill="none" aria-hidden="true"><path d="M3 9C65 1 143 1 216 6" stroke="currentColor" strokeWidth="3" strokeLinecap="round" pathLength="1" /></svg>
-          <p>Faites grandir votre activité, pas vos tableurs.</p>
-          <p className="home-hero-description">Missions, chronomètres, équipe et facturation : tout se connecte pour vous donner une vision claire de votre rentabilité.</p>
+          <p>Gérez mieux, facturez plus, gagnez en rentabilité</p>
+          <p className="home-hero-description">Pour les comptables, auditeurs, fiscalistes, avocats, consultants, architectes, ingénieurs-conseils et autres professionnels des services.
+Centralisez vos missions, pilotez vos équipes, suivez le temps consacré à chaque client et transformez votre travail en valeur, en facturation et en rentabilité.</p>
           <div className="home-actions"><button className="home-btn home-btn-mint" onClick={onStart}>Commencer gratuitement <ArrowUpRight size={19} /></button><button className="home-watch" onClick={explore}><span><Play size={14} fill="currentColor" /></span>Découvrir la plateforme</button></div>
           <div className="home-trial-note"><Check size={14} /> Essai gratuit <span /> Sans carte bancaire</div>
         </div>
