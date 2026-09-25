@@ -12,7 +12,8 @@
     "lint": "tsc --noEmit",
     "db:import": "tsx scripts/db-import.ts",
     "db:backup": "tsx scripts/db-backup.ts",
-    "db:fix-timezone": "tsx scripts/fix-timezone-history.ts"
+    "db:fix-timezone": "tsx scripts/fix-timezone-history.ts",
+    "db:seed-demo": "tsx scripts/seed-demo-data.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
