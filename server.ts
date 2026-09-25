@@ -5051,6 +5051,27 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   };
 
   /**
+   * En régime de suspension de TVA, le document est légalement adossé à une
+   * attestation d'achat en suspension — ces trois champs ne sont pas de la
+   * simple documentation, ils sont ce qui justifie l'absence de TVA. Le
+   * client les affiche déjà comme obligatoires (astérisque, `required`), ce
+   * qui ne remplace jamais la vérification serveur.
+   */
+  const suspensionError = (body: any): string | null => {
+    if (body?.vatRegime !== 'SUSPENSION') return null;
+    if (!String(body?.attestationNumber || '').trim()) {
+      return "Le n° d'attestation est obligatoire en régime de suspension de TVA.";
+    }
+    if (!String(body?.attestationDate || '').trim()) {
+      return "La date de l'attestation est obligatoire en régime de suspension de TVA.";
+    }
+    if (!String(body?.bonCommandeNumber || '').trim()) {
+      return 'Le n° de bon de commande est obligatoire en régime de suspension de TVA.';
+    }
+    return null;
+  };
+
+  /**
    * Dates may not decrease along the legal sequence.
    *
    * Numbering and chronology have to agree: invoice n° 2 cannot be dated before
@@ -5521,6 +5542,8 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
 
       const debError = disbursementsError(body);
       if (debError) return res.status(400).json({ error: debError });
+      const suspError = suspensionError(body);
+      if (suspError) return res.status(400).json({ error: suspError });
 
       const totals = computeInvoiceTotals(body);
       if (kind === 'FACTURE_LEGALE' && !isDraft) number = await db.nextInvoiceNumber(req.user.companyId);
@@ -5671,6 +5694,8 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       }
       const debError = disbursementsError(req.body);
       if (debError) return res.status(400).json({ error: debError });
+      const suspError = suspensionError(merged);
+      if (suspError) return res.status(400).json({ error: suspError });
       const totals = computeInvoiceTotals(merged);
 
       const updated = await db.updateInvoice(req.user.companyId, req.params.id, {

@@ -226,9 +226,15 @@ export const CashManagement: React.FC = () => {
       '',
     );
     if (input === null) return;
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    const formatted = trimmed.padStart(4, '0');
+    if (!confirm(
+      `Confirmer la renumérotation ?\n\nLa facture N°0001-${new Date().getFullYear()} deviendra N°${formatted}-${new Date().getFullYear()}. Toute autre facture légale déjà émise cette année sera décalée du même écart. Cette action ne peut pas être annulée.`
+    )) return;
     const res = await fetch(`/api/invoices/${invoice.id}/renumber-first`, {
       method: 'POST', headers: authHeaders,
-      body: JSON.stringify({ number: input.trim() }),
+      body: JSON.stringify({ number: trimmed }),
     });
     if (res.ok) {
       const body = await res.json().catch(() => ({}));

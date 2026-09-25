@@ -447,8 +447,15 @@ export default function App() {
   }, []);
 
   // Overtime alert: ask the collaborator whether they're still on a task
-  // every 2h *of that task's own duration* — at 2h, then 4h, 6h, … Responding
-  // keeps it running; ignoring it for the grace period below pauses it.
+  // every 2h *of that task's own duration* — at 2h, then 4h, 6h, … The task
+  // keeps running on its own either way — this only ever asks; it never
+  // changes the task's status by itself. A prior version auto-paused the
+  // task if the popup went unanswered for 2 minutes, at the user's explicit
+  // request that never happen: a task must keep running for as long as
+  // nobody has actually told it to do otherwise, whatever they're doing away
+  // from the screen at that moment. The popup now simply waits — it has no
+  // deadline and no timer of its own — until the collaborator picks one of
+  // the three real answers: continuer, mettre en pause, or arrêter.
   //
   // The milestone already asked about is recorded **on the entry itself**
   // (`overtimeAckCycle`), not in the browser. That is what makes "every 2h"
@@ -462,9 +469,7 @@ export default function App() {
   //    lands when the work actually crosses 4h — not merely because two
   //    hours have gone by since the last one.
   const OVERTIME_THRESHOLD_SECONDS = 2 * 3600;
-  const OVERTIME_GRACE_MS = 2 * 60 * 1000;
-  const [overtimeAlert, setOvertimeAlert] = useState<{ entryId: string; deadline: number } | null>(null);
-  const [overtimeSecondsLeft, setOvertimeSecondsLeft] = useState(0);
+  const [overtimeAlert, setOvertimeAlert] = useState<{ entryId: string } | null>(null);
 
   /** Which 2h milestone a duration has reached: 0 under 2h, 1 at 2h, 2 at 4h… */
   const overtimeCycleOf = (seconds: number) =>
@@ -494,22 +499,8 @@ export default function App() {
     // otherwise this effect would re-fire on the next tick, before the
     // round-trip and broadcast land.
     updateTimeEntryApi(myRunning.id, { overtimeAckCycle: nextCycle });
-    setOvertimeAlert({ entryId: myRunning.id, deadline: Date.now() + OVERTIME_GRACE_MS });
+    setOvertimeAlert({ entryId: myRunning.id });
   }, [timeEntries, user?.id, overtimeAlert]);
-
-  useEffect(() => {
-    if (!overtimeAlert) return;
-    const tick = () => setOvertimeSecondsLeft(Math.max(0, Math.ceil((overtimeAlert.deadline - Date.now()) / 1000)));
-    tick();
-    const countdown = setInterval(tick, 1000);
-    const timeout = setTimeout(() => {
-      updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
-      setOvertimeAlert(null);
-      showToast('Tâche mise en pause automatiquement — aucune réponse à l’alerte de 2h.');
-    }, Math.max(0, overtimeAlert.deadline - Date.now()));
-    return () => { clearInterval(countdown); clearTimeout(timeout); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overtimeAlert]);
 
   const acknowledgeOvertimeAlert = () => {
     if (!overtimeAlert) return;
@@ -519,6 +510,12 @@ export default function App() {
   const pauseFromOvertimeAlert = () => {
     if (!overtimeAlert) return;
     updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
+    setOvertimeAlert(null);
+  };
+
+  const stopFromOvertimeAlert = () => {
+    if (!overtimeAlert) return;
+    updateTimeEntryApi(overtimeAlert.entryId, { statut: 'COMPLETED' });
     setOvertimeAlert(null);
   };
 
@@ -1121,14 +1118,18 @@ export default function App() {
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
               <h3 className="text-[15px] font-bold text-gray-900 mb-1">Toujours sur cette tâche ?</h3>
-              <p className="text-[13px] text-gray-600 mb-3">
+              <p className="text-[13px] text-gray-600 mb-4">
                 Vous travaillez sur <span className="font-semibold">{entry?.pole || 'cette tâche'}</span>
-                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h cumulées.
+                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h cumulées. La tâche continue de
+                tourner — choisissez ce que vous voulez en faire.
               </p>
-              <p className="text-[12px] text-gray-400 mb-4">
-                Sans réponse, la tâche sera mise en pause automatiquement dans {overtimeSecondsLeft}s.
-              </p>
-              <div className="flex justify-end gap-3">
+              <div className="flex flex-wrap justify-end gap-3">
+                <button
+                  onClick={stopFromOvertimeAlert}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-[13px] font-medium hover:bg-red-700"
+                >
+                  Arrêter
+                </button>
                 <button
                   onClick={pauseFromOvertimeAlert}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50"

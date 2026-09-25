@@ -57,7 +57,7 @@ const SELECT_CLS =
  * its children — which slammed the native <select> dropdown shut the moment you
  * picked an option, and dropped focus after every keystroke.
  */
-const Choice: React.FC<{ label: string; children: React.ReactNode; hint?: string }> = ({ label, children, hint }) => (
+const Choice: React.FC<{ label: React.ReactNode; children: React.ReactNode; hint?: string }> = ({ label, children, hint }) => (
   <div>
     <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">{label}</label>
     {children}
@@ -306,6 +306,9 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
     // Un brouillon prend un numéro provisoire côté serveur : on ne le réclame
     // qu'à l'émission.
     if (freeNumber && !asDraft && !number.trim()) { setError('Le numéro du document est obligatoire.'); return; }
+    if (suspended && !attestationNumber.trim()) { setError("Le n° d'attestation est obligatoire en régime de suspension de TVA."); return; }
+    if (suspended && !attestationDate) { setError("La date de l'attestation est obligatoire en régime de suspension de TVA."); return; }
+    if (suspended && !bonCommandeNumber.trim()) { setError('Le n° de bon de commande est obligatoire en régime de suspension de TVA.'); return; }
     if (!currency.trim()) { setError('La devise est obligatoire.'); return; }
     if (lines.some(l => !l.designation.trim())) { setError('Chaque ligne doit avoir une désignation.'); return; }
     if (dateWarning) { setError(dateWarning); return; }
@@ -428,30 +431,33 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ invoice = null, on
 
           {suspended && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-5 border-b border-gray-200 -mt-2">
-              <Choice label="N° Attestation">
+              <Choice label={<>N° Attestation <span className="text-red-500">*</span></>}>
                 <input
                   type="text"
                   value={attestationNumber}
                   onChange={e => setAttestationNumber(e.target.value)}
                   className={SELECT_CLS}
                   placeholder="xxxxxxxxx"
+                  required
                 />
               </Choice>
-              <Choice label="Date de l'attestation">
+              <Choice label={<>Date de l'attestation <span className="text-red-500">*</span></>}>
                 <input
                   type="date"
                   value={attestationDate}
                   onChange={e => setAttestationDate(e.target.value)}
                   className={SELECT_CLS}
+                  required
                 />
               </Choice>
-              <Choice label="N° Bon de commande">
+              <Choice label={<>N° Bon de commande <span className="text-red-500">*</span></>}>
                 <input
                   type="text"
                   value={bonCommandeNumber}
                   onChange={e => setBonCommandeNumber(e.target.value)}
                   className={SELECT_CLS}
                   placeholder="xxxxxxxxx"
+                  required
                 />
               </Choice>
             </div>
