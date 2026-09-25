@@ -808,10 +808,20 @@ export async function initPostgres(connectionString: string): Promise<Database> 
       const rows = await q(
         `INSERT INTO settings (company_id, data, invoice_counter) VALUES ($1, $2::jsonb, 0)
          ON CONFLICT (company_id) DO UPDATE SET company_id = EXCLUDED.company_id
-         RETURNING data, invoice_counter`,
+         RETURNING data, invoice_counter, invoice_counter_year`,
         [companyId, JSON.stringify(defaultSettings())],
       );
-      return { ...rows[0].data, invoiceCounter: Number(rows[0].invoice_counter) };
+      // `invoice_counter_year` is its own column, written only by
+      // nextInvoiceNumber()'s atomic UPDATE — never returned before this,
+      // so a caller reading it back via getSettings() always saw undefined.
+      // Harmless as long as nothing needed to know the year the live counter
+      // belongs to; the invoice-renumbering route does, to confirm the
+      // sequence hasn't moved past n° 0001 before letting it be re-based.
+      return {
+        ...rows[0].data,
+        invoiceCounter: Number(rows[0].invoice_counter),
+        invoiceCounterYear: rows[0].invoice_counter_year == null ? null : Number(rows[0].invoice_counter_year),
+      };
     },
     updateSettings: async (companyId: string, updates: any) => {
       const { invoiceCounter, ...rest } = updates ?? {};

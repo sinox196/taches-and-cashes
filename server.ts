@@ -5815,6 +5815,103 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     }
   });
 
+  /**
+   * Recale le point de départ de la séquence légale — la seule exception à
+   * « le numéro d'une facture légale n'est jamais réattribué en édition »
+   * (voir PUT ci-dessus). Utile une fois, à la migration : un cabinet qui
+   * reprend une numérotation déjà entamée ailleurs (papier, un autre
+   * logiciel) tape sa première facture légale dans l'app, qui prend « 0001 »,
+   * puis la fait ici correspondre à la suite réelle — 0047, par exemple —
+   * avant de continuer à facturer normalement.
+   *
+   * Volontairement étroit : seule la facture n° 0001 de l'année en cours est
+   * éligible, et seulement tant qu'elle est encore la seule facture légale
+   * émise cette année. Au-delà, renuméroter romprait la chronologie que
+   * `legalSequenceDateError` fait respecter partout ailleurs — une facture
+   * n° 0002 déjà émise a déjà sa propre date, et décaler n° 0001 devant ou
+   * derrière elle numériquement sans toucher les dates casserait l'ordre que
+   * la séquence promet. C'est aussi pourquoi ce n'est pas un cas de plus dans
+   * PUT : une action dédiée, explicite, auditée — pas une porte dérobée vers
+   * la règle générale.
+   */
+  app.post('/api/invoices/:id/renumber-first', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+
+      if (existing.documentKind !== 'FACTURE_LEGALE' || existing.status === 'DRAFT') {
+        return res.status(409).json({ error: 'Seule une facture légale déjà émise peut être renumérotée.' });
+      }
+
+      const year = new Date().getFullYear();
+      const issueYear = String(existing.issueDate || '').slice(0, 4);
+      if (Number(existing.number) !== 1 || issueYear !== String(year)) {
+        return res.status(409).json({
+          error: "Seule la première facture légale de l'année en cours (n° 0001) peut être renumérotée — c'est elle qui recale le départ de toute la séquence.",
+        });
+      }
+
+      // Le curseur vivant de la séquence est la seule autorité fiable sur
+      // « est-ce encore la seule facture légale émise cette année » — un
+      // compteur qui a déjà avancé veut dire qu'une n° 0002 existe (ou a
+      // existé), et recaler maintenant romprait soit une collision, soit la
+      // chronologie que la séquence promet.
+      const settingsRow = await db.getSettings(req.user.companyId);
+      if (settingsRow.invoiceCounterYear !== year || settingsRow.invoiceCounter !== 1) {
+        return res.status(409).json({
+          error: "Ce n'est plus possible : d'autres factures légales ont déjà été émises cette année après celle-ci.",
+        });
+      }
+      // Ceinture et bretelles : le compteur est la source de vérité, mais on
+      // revérifie aussi qu'aucune autre facture légale de l'année ne porte
+      // déjà un numéro — au cas où une ligne existante daterait d'avant que
+      // ce compteur ne soit fiable.
+      const all = await db.getAllInvoices(req.user.companyId);
+      const otherThisYear = all.some((i: any) =>
+        i.id !== existing.id && i.documentKind === 'FACTURE_LEGALE' &&
+        String(i.issueDate || '').slice(0, 4) === String(year) && Number(i.number) >= 2,
+      );
+      if (otherThisYear) {
+        return res.status(409).json({
+          error: "Ce n'est plus possible : d'autres factures légales ont déjà été émises cette année après celle-ci.",
+        });
+      }
+
+      const raw = String(req.body?.number ?? '').trim();
+      if (!/^\d{1,4}$/.test(raw)) {
+        return res.status(400).json({ error: 'Le numéro doit être un nombre entier entre 1 et 9999.' });
+      }
+      const n = parseInt(raw, 10);
+      if (n < 1 || n > 9999) {
+        return res.status(400).json({ error: 'Le numéro doit être un nombre entier entre 1 et 9999.' });
+      }
+
+      const companyForLock = await db.getCompanyById(req.user.companyId);
+      if (isQuotaLocked(companyForLock, existing, all)) {
+        return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
+      }
+
+      const formatted = String(n).padStart(4, '0');
+      const updated = await db.updateInvoice(req.user.companyId, existing.id, {
+        number: formatted,
+        // Garde la trace de l'ancien numéro, même règle que
+        // `convertedFromNumber` pour une conversion — l'historique de ce qui
+        // a changé ne doit jamais se perdre en corrigeant un numéro.
+        renumberedFrom: existing.number,
+        renumberedAt: new Date().toISOString(),
+      });
+      // Recale le curseur lui-même : c'est tout l'intérêt de la route — la
+      // prochaine facture légale doit prendre formatted+1, pas « 0002 ».
+      await db.updateSettings(req.user.companyId, { invoiceCounter: n });
+
+      console.warn(`[cash] facture légale n° 0001 renumérotée en ${formatted} par ${req.user.username} — départ de séquence ${year}`);
+      res.json(updated);
+    } catch (error) {
+      console.error('Renumber first invoice error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.delete('/api/invoices/:id', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
     try {
       const removed = await db.deleteInvoice(req.user.companyId, req.params.id);

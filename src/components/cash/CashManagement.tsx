@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft, ChevronRight, ChevronDown, Lock } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft, ChevronRight, ChevronDown, Lock, Hash } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
@@ -214,6 +214,23 @@ export const CashManagement: React.FC = () => {
     const res = await fetch(`/api/invoices/${invoice.id}/convert-to-legal`, { method: 'POST', headers: authHeaders });
     if (res.ok) { setError(''); load(search.trim()); }
     else setError((await res.json().catch(() => ({}))).error || 'Conversion impossible');
+  };
+
+  /** Recaler le point de départ de la séquence légale — n'existe que pour la
+   *  facture n° 0001 de l'année en cours, tant qu'aucune autre facture légale
+   *  n'a encore été émise cette année (le serveur revérifie tout ça). */
+  const renumberFirst = async (invoice: any) => {
+    const input = window.prompt(
+      `Nouveau numéro de départ pour la séquence ${new Date().getFullYear()} (actuellement 0001) :\n\nLes prochaines factures légales reprendront la suite à partir de ce numéro.`,
+      '',
+    );
+    if (input === null) return;
+    const res = await fetch(`/api/invoices/${invoice.id}/renumber-first`, {
+      method: 'POST', headers: authHeaders,
+      body: JSON.stringify({ number: input.trim() }),
+    });
+    if (res.ok) { setError(''); load(search.trim()); }
+    else setError((await res.json().catch(() => ({}))).error || 'Renumérotation impossible');
   };
 
   const remove = async (invoice: any) => {
@@ -550,6 +567,16 @@ export const CashManagement: React.FC = () => {
                                   title="Transformer en facture légale"
                                 >
                                   <ArrowRightLeft className="w-4 h-4" />
+                                </button>
+                              )}
+                              {inv.status !== 'DRAFT' && inv.documentKind === 'FACTURE_LEGALE' && inv.number === '0001' &&
+                                String(inv.issueDate || '').slice(0, 4) === String(new Date().getFullYear()) && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); renumberFirst(inv); }}
+                                  className="p-1.5 text-gray-400 hover:text-navy hover:bg-gray-100 rounded"
+                                  title="Recaler le point de départ de la séquence de l'année"
+                                >
+                                  <Hash className="w-4 h-4" />
                                 </button>
                               )}
                               <button
