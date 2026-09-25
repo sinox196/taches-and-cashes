@@ -5818,21 +5818,27 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   /**
    * Recale le point de départ de la séquence légale — la seule exception à
    * « le numéro d'une facture légale n'est jamais réattribué en édition »
-   * (voir PUT ci-dessus). Utile une fois, à la migration : un cabinet qui
-   * reprend une numérotation déjà entamée ailleurs (papier, un autre
-   * logiciel) tape sa première facture légale dans l'app, qui prend « 0001 »,
-   * puis la fait ici correspondre à la suite réelle — 0047, par exemple —
-   * avant de continuer à facturer normalement.
+   * (voir PUT ci-dessus). Utile à la migration : un cabinet qui reprend une
+   * numérotation déjà entamée ailleurs (papier, un autre logiciel) tape sa
+   * première facture légale dans l'app, qui prend « 0001 », puis la fait ici
+   * correspondre à la suite réelle — 0047, par exemple.
    *
-   * Volontairement étroit : seule la facture n° 0001 de l'année en cours est
-   * éligible, et seulement tant qu'elle est encore la seule facture légale
-   * émise cette année. Au-delà, renuméroter romprait la chronologie que
-   * `legalSequenceDateError` fait respecter partout ailleurs — une facture
-   * n° 0002 déjà émise a déjà sa propre date, et décaler n° 0001 devant ou
-   * derrière elle numériquement sans toucher les dates casserait l'ordre que
-   * la séquence promet. C'est aussi pourquoi ce n'est pas un cas de plus dans
-   * PUT : une action dédiée, explicite, auditée — pas une porte dérobée vers
-   * la règle générale.
+   * Une première version n'acceptait ça que tant que n° 0001 restait la
+   * seule facture légale émise cette année — ce qui refusait
+   * systématiquement l'opération dès qu'un cabinet avait déjà continué à
+   * facturer normalement (n° 0002, 0003…) avant de penser à corriger le
+   * départ, c'est-à-dire le cas réel le plus courant. Ce n'était pas ce qui
+   * a été demandé : « il faut que ce soit respecté sur toute la séquence
+   * complète des factures légales ». La route décale donc maintenant TOUTES
+   * les autres factures légales déjà émises cette année par le même écart
+   * (n° 0002 → 0048, n° 0003 → 0049…) au lieu de refuser leur existence —
+   * un décalage uniforme, qui ne touche qu'aux numéros, jamais aux dates, et
+   * qui ne peut donc jamais inverser leur ordre chronologique entre elles ni
+   * vis-à-vis de n° 0001 (qui reste, après décalage, la plus petite valeur
+   * de toutes puisque l'écart est le même pour tout le monde). C'est aussi
+   * pourquoi ce n'est pas un cas de plus dans PUT : une action dédiée,
+   * explicite, auditée, qui touche plusieurs documents à la fois — pas une
+   * porte dérobée vers la règle générale.
    */
   app.post('/api/invoices/:id/renumber-first', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
     try {
@@ -5851,32 +5857,6 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         });
       }
 
-      // Le curseur vivant de la séquence est la seule autorité fiable sur
-      // « est-ce encore la seule facture légale émise cette année » — un
-      // compteur qui a déjà avancé veut dire qu'une n° 0002 existe (ou a
-      // existé), et recaler maintenant romprait soit une collision, soit la
-      // chronologie que la séquence promet.
-      const settingsRow = await db.getSettings(req.user.companyId);
-      if (settingsRow.invoiceCounterYear !== year || settingsRow.invoiceCounter !== 1) {
-        return res.status(409).json({
-          error: "Ce n'est plus possible : d'autres factures légales ont déjà été émises cette année après celle-ci.",
-        });
-      }
-      // Ceinture et bretelles : le compteur est la source de vérité, mais on
-      // revérifie aussi qu'aucune autre facture légale de l'année ne porte
-      // déjà un numéro — au cas où une ligne existante daterait d'avant que
-      // ce compteur ne soit fiable.
-      const all = await db.getAllInvoices(req.user.companyId);
-      const otherThisYear = all.some((i: any) =>
-        i.id !== existing.id && i.documentKind === 'FACTURE_LEGALE' &&
-        String(i.issueDate || '').slice(0, 4) === String(year) && Number(i.number) >= 2,
-      );
-      if (otherThisYear) {
-        return res.status(409).json({
-          error: "Ce n'est plus possible : d'autres factures légales ont déjà été émises cette année après celle-ci.",
-        });
-      }
-
       const raw = String(req.body?.number ?? '').trim();
       if (!/^\d{1,4}$/.test(raw)) {
         return res.status(400).json({ error: 'Le numéro doit être un nombre entier entre 1 et 9999.' });
@@ -5886,26 +5866,55 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         return res.status(400).json({ error: 'Le numéro doit être un nombre entier entre 1 et 9999.' });
       }
 
+      // Toute autre facture légale déjà émise cette année-ci — celles qui
+      // doivent suivre le même décalage pour que la séquence reste continue.
+      const all = await db.getAllInvoices(req.user.companyId);
+      const othersThisYear = all.filter((i: any) =>
+        i.id !== existing.id && i.documentKind === 'FACTURE_LEGALE' && i.status !== 'DRAFT' &&
+        String(i.issueDate || '').slice(0, 4) === String(year) && Number(i.number) >= 2,
+      );
+
+      // Un document verrouillé (quota Freelance dépassé) ne se modifie plus
+      // du tout, même règle que PUT/convert-to-legal — y compris pour un
+      // décalage qui ne touche pourtant à aucun montant.
       const companyForLock = await db.getCompanyById(req.user.companyId);
-      if (isQuotaLocked(companyForLock, existing, all)) {
+      const toTouch = [existing, ...othersThisYear];
+      if (toTouch.some((i: any) => isQuotaLocked(companyForLock, i, all))) {
         return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
       }
 
+      const offset = n - 1;
       const formatted = String(n).padStart(4, '0');
+      const now = new Date().toISOString();
+
+      await Promise.all(othersThisYear.map((i: any) =>
+        db.updateInvoice(req.user.companyId, i.id, {
+          number: String(Number(i.number) + offset).padStart(4, '0'),
+          renumberedFrom: i.number,
+          renumberedAt: now,
+        }),
+      ));
       const updated = await db.updateInvoice(req.user.companyId, existing.id, {
         number: formatted,
         // Garde la trace de l'ancien numéro, même règle que
         // `convertedFromNumber` pour une conversion — l'historique de ce qui
         // a changé ne doit jamais se perdre en corrigeant un numéro.
         renumberedFrom: existing.number,
-        renumberedAt: new Date().toISOString(),
+        renumberedAt: now,
       });
-      // Recale le curseur lui-même : c'est tout l'intérêt de la route — la
-      // prochaine facture légale doit prendre formatted+1, pas « 0002 ».
-      await db.updateSettings(req.user.companyId, { invoiceCounter: n });
 
-      console.warn(`[cash] facture légale n° 0001 renumérotée en ${formatted} par ${req.user.username} — départ de séquence ${year}`);
-      res.json(updated);
+      // Recale le curseur lui-même : c'est tout l'intérêt de la route — la
+      // prochaine facture légale doit continuer depuis le plus haut numéro
+      // réellement en usage cette année, pas repartir de « 0002 ». Recalculé
+      // à partir des numéros eux-mêmes plutôt que lu sur le compteur stocké,
+      // pour rester juste même si ce dernier avait dérivé.
+      const highestOriginal = othersThisYear.length
+        ? Math.max(...othersThisYear.map((i: any) => Number(i.number)))
+        : 1;
+      await db.updateSettings(req.user.companyId, { invoiceCounter: highestOriginal + offset });
+
+      console.warn(`[cash] facture légale n° 0001 renumérotée en ${formatted} par ${req.user.username} — départ de séquence ${year}, ${othersThisYear.length} autre(s) facture(s) décalée(s) d'autant`);
+      res.json({ ...updated, shiftedCount: othersThisYear.length });
     } catch (error) {
       console.error('Renumber first invoice error:', error);
       res.status(500).json({ error: 'Internal server error' });

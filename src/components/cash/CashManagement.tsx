@@ -217,11 +217,12 @@ export const CashManagement: React.FC = () => {
   };
 
   /** Recaler le point de départ de la séquence légale — n'existe que pour la
-   *  facture n° 0001 de l'année en cours, tant qu'aucune autre facture légale
-   *  n'a encore été émise cette année (le serveur revérifie tout ça). */
+   *  facture n° 0001 de l'année en cours. Toute autre facture légale déjà
+   *  émise cette année est décalée du même écart pour garder la séquence
+   *  continue (le serveur fait le décalage, pas le client). */
   const renumberFirst = async (invoice: any) => {
     const input = window.prompt(
-      `Nouveau numéro de départ pour la séquence ${new Date().getFullYear()} (actuellement 0001) :\n\nLes prochaines factures légales reprendront la suite à partir de ce numéro.`,
+      `Nouveau numéro de départ pour la séquence ${new Date().getFullYear()} (actuellement 0001) :\n\nSi d'autres factures légales ont déjà été émises cette année, elles seront décalées du même écart pour garder la séquence continue.`,
       '',
     );
     if (input === null) return;
@@ -229,7 +230,14 @@ export const CashManagement: React.FC = () => {
       method: 'POST', headers: authHeaders,
       body: JSON.stringify({ number: input.trim() }),
     });
-    if (res.ok) { setError(''); load(search.trim()); }
+    if (res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError('');
+      if (body?.shiftedCount) {
+        alert(`Facture renumérotée. ${body.shiftedCount} autre(s) facture(s) légale(s) de l'année ont aussi été décalée(s) pour garder la séquence continue.`);
+      }
+      load(search.trim());
+    }
     else setError((await res.json().catch(() => ({}))).error || 'Renumérotation impossible');
   };
 
