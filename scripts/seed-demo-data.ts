@@ -16,9 +16,20 @@
  *   npm run dev                    # in one terminal — the app must be running
  *   npm run db:seed-demo           # in another — talks to http://localhost:3000
  *
- * Point it at a different running instance with SEED_BASE_URL:
+ * Point it at a different running instance with SEED_BASE_URL, and/or log in
+ * as a real, already-existing admin account instead of the fresh-boot default
+ * with SEED_ADMIN_USERNAME/SEED_ADMIN_PASSWORD — this is how to keep your own
+ * real login while filling *its* company with the demo dataset, rather than
+ * creating a second, separate fake admin account:
  *
- *   SEED_BASE_URL="https://staging.example.com" npm run db:seed-demo
+ *   SEED_BASE_URL="https://staging.example.com" \
+ *   SEED_ADMIN_USERNAME="your_real_admin" SEED_ADMIN_PASSWORD="your_real_password" \
+ *   npm run db:seed-demo
+ *
+ * The seeded collaborators/clients/invoices land in *that* admin's company —
+ * everything this script creates is scoped by companyId server-side, the
+ * same as any other authenticated request. Never run this against a
+ * production database you don't want fake clients and invoices mixed into.
  *
  * Idempotency: usernames are fixed (`ahmed.bensalah`, …) so a second run
  * fails fast on "Username already exists" for the collaborators/clients it
@@ -27,6 +38,8 @@
  */
 
 const BASE_URL = process.env.SEED_BASE_URL || 'http://localhost:3000';
+const ADMIN_USERNAME = process.env.SEED_ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'admin123';
 
 type Json = Record<string, any>;
 
@@ -92,11 +105,12 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
-  // 1. Admin login (the seeded default account, per CLAUDE.md)
+  // 1. Admin login — the fresh-boot default (admin/admin123) unless
+  //    SEED_ADMIN_USERNAME/SEED_ADMIN_PASSWORD point at a real account.
   // ---------------------------------------------------------------------
-  const adminToken = await login('admin', 'admin123');
+  const adminToken = await login(ADMIN_USERNAME, ADMIN_PASSWORD);
   const admin = await api('/api/me', { token: adminToken });
-  console.log(`Logged in as admin (id ${admin.id}).`);
+  console.log(`Logged in as ${ADMIN_USERNAME} (id ${admin.id}, company "${admin.company?.name || admin.company?.id}").`);
 
   // ---------------------------------------------------------------------
   // 2. Collaborators — full "Gestion des paies" dossier + coût employeur,
@@ -171,37 +185,45 @@ async function main() {
     console.log(`Created collaborator ${seed.username} (${seed.role}, id ${created.id}, salaire ${seed.salaireBrut} DT).`);
   }
 
-  // Also fill in the seeded default `collab` account so the documented
-  // default login shows full data too, not just the newly named accounts.
+  // Also fill in the seeded default `collab` account, *if it exists in this
+  // company* — it won't on a real admin's own environment (SEED_ADMIN_USERNAME
+  // pointed at a real account rather than the fresh-boot default), so this
+  // step is best-effort and never fatal to the rest of the seed.
   // PUT /api/users/:id replaces role/permissions wholesale rather than
   // merging (same "the client always resends the whole form" shape as
   // PUT /api/time-entries/:id) — omitting them here would silently wipe
   // this account's existing role and permissions, not just leave them
   // untouched, so both are re-sent explicitly below.
-  const collabToken = await login('collab', 'collab123');
-  const collabMe = await api('/api/me', { token: collabToken });
-  await api(`/api/users/${collabMe.id}`, {
-    method: 'PUT', token: adminToken,
-    body: {
-      role: collabMe.role, permissions: COLLAB_PERMS,
-      salaireBrut: 1000, regimeHoraire: 40,
-      cnss: CHARGES.cnss, tfp: CHARGES.tfp, foprolos: CHARGES.foprolos, accidentTravail: CHARGES.accidentTravail,
-      primesFraisNonCotisables: 30, soldeConge: 21,
+  let collabFilled = false;
+  try {
+    const collabToken = await login('collab', 'collab123');
+    const collabMe = await api('/api/me', { token: collabToken });
+    await api(`/api/users/${collabMe.id}`, {
+      method: 'PUT', token: adminToken,
+      body: {
+        role: collabMe.role, permissions: COLLAB_PERMS,
+        salaireBrut: 1000, regimeHoraire: 40,
+        cnss: CHARGES.cnss, tfp: CHARGES.tfp, foprolos: CHARGES.foprolos, accidentTravail: CHARGES.accidentTravail,
+        primesFraisNonCotisables: 30, soldeConge: 21,
+        matricule: 'EMP-000', numCin: '06112233', numCnss: '3301122334',
+        qualification: 'Collaborateur comptable', departement: 'Comptabilité', banque: 'STB', numeroCompte: 'TN59 0500 6035 0000 9988 7766',
+        situationFamiliale: 'Célibataire', nombreEnfants: 0, categorie: 'Employé', echelon: '1', salHeure: 5.82,
+      },
+    });
+    const collabSeed: Collab = {
+      username: 'collab', password: 'collab123', role: collabMe.role, permissions: COLLAB_PERMS,
+      salaireBrut: 1000, regimeHoraire: 40, primesFraisNonCotisables: 30, soldeConge: 21,
       matricule: 'EMP-000', numCin: '06112233', numCnss: '3301122334',
       qualification: 'Collaborateur comptable', departement: 'Comptabilité', banque: 'STB', numeroCompte: 'TN59 0500 6035 0000 9988 7766',
       situationFamiliale: 'Célibataire', nombreEnfants: 0, categorie: 'Employé', echelon: '1', salHeure: 5.82,
-    },
-  });
-  const collabSeed: Collab = {
-    username: 'collab', password: 'collab123', role: collabMe.role, permissions: COLLAB_PERMS,
-    salaireBrut: 1000, regimeHoraire: 40, primesFraisNonCotisables: 30, soldeConge: 21,
-    matricule: 'EMP-000', numCin: '06112233', numCnss: '3301122334',
-    qualification: 'Collaborateur comptable', departement: 'Comptabilité', banque: 'STB', numeroCompte: 'TN59 0500 6035 0000 9988 7766',
-    situationFamiliale: 'Célibataire', nombreEnfants: 0, categorie: 'Employé', echelon: '1', salHeure: 5.82,
-    id: collabMe.id, token: collabToken,
-  };
-  collaborators.push(collabSeed);
-  console.log(`Filled in the default "collab" account (id ${collabMe.id}) with salary/payroll data too.\n`);
+      id: collabMe.id, token: collabToken,
+    };
+    collaborators.push(collabSeed);
+    collabFilled = true;
+    console.log(`Filled in the default "collab" account (id ${collabMe.id}) with salary/payroll data too.\n`);
+  } catch {
+    console.log('No "collab" account here (or its password differs) — skipping, not fatal.\n');
+  }
 
   // ---------------------------------------------------------------------
   // 3. Clients
@@ -428,8 +450,10 @@ async function main() {
   console.log('='.repeat(72));
   console.log('Demo data seeded. Logins:');
   console.log('='.repeat(72));
-  console.log('  admin / admin123          (ADMIN — sees everything, including costs)');
-  console.log('  collab / collab123        (COLLABORATOR — salary + history now filled)');
+  console.log(`  ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}   (ADMIN — sees everything, including costs)`);
+  if (collabFilled) {
+    console.log('  collab / collab123        (COLLABORATOR — salary + history now filled)');
+  }
   for (const c of collaboratorSeeds) {
     console.log(`  ${c.username} / ${c.password}   (${c.role})`);
   }
