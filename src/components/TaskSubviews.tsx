@@ -595,9 +595,10 @@ const NotesList: React.FC<{
   onPlan?: (note: any) => void;
   onDelegate?: (note: any) => void;
 }> = ({ notes, services, taskTypes, color, token, startingId, onNoteAdded, onNoteDeleted, onStart, onPlan, onDelegate }) => {
-  // Formulaire d'ajout — description seule visible par défaut, le reste
-  // (client/mission/type) derrière un chevron, puisque rien de plus n'est
-  // exigé pour enregistrer une note.
+  // Formulaire d'ajout — description et client sont les deux seuls champs
+  // réellement exigés pour enregistrer une note (donc toujours visibles) ;
+  // mission et type de tâche restent derrière un chevron, puisqu'eux seuls
+  // peuvent attendre.
   const [description, setDescription] = useState('');
   const [client, setClient] = useState('');
   const [clientId, setClientId] = useState<number | undefined>(undefined);
@@ -609,9 +610,9 @@ const NotesList: React.FC<{
 
   // Ligne dont le bouton « Démarrer » a été cliqué sans mission déjà connue —
   // un mini-formulaire s'ouvre juste en dessous pour la demander. Le client
-  // y est repris (modifiable) : la mission est la seule chose réellement
-  // exigée pour démarrer, mais rien n'empêche d'en profiter pour ajouter ou
-  // corriger le client au même moment plutôt que de rouvrir la note ensuite.
+  // y est repris (modifiable, mais toujours exigé) : une note en porte déjà
+  // un depuis sa création, mais le mini-formulaire permet de le corriger au
+  // même moment plutôt que de rouvrir la note ensuite.
   const [startingRowId, setStartingRowId] = useState<string | null>(null);
   const [startClient, setStartClient] = useState('');
   const [startClientId, setStartClientId] = useState<number | undefined>(undefined);
@@ -620,9 +621,11 @@ const NotesList: React.FC<{
 
   const taskTypesFor = (svcId: string) => (svcId ? taskTypes.filter(t => String(t.serviceId) === svcId) : []);
 
+  const canAdd = !!description.trim() && !!client.trim();
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description.trim() || !token) return;
+    if (!canAdd || !token) return;
     setAdding(true);
     setAddError('');
     try {
@@ -701,20 +704,28 @@ const NotesList: React.FC<{
           <input
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder="Notez une tâche à faire — client, mission et type de tâche peuvent attendre…"
+            placeholder="Notez une tâche à faire — mission et type de tâche peuvent attendre…"
             className="flex-1 bg-rose-50/60 border border-rose-200 rounded-md px-3 py-2 text-[13px] focus:outline-none focus:border-rose-400"
           />
+          <div className="w-full sm:w-56">
+            <ClientSearchInput
+              value={client}
+              onChange={(name, id) => { setClient(name); setClientId(id); }}
+              placeholder="Client"
+              bgClassName="bg-rose-50/60"
+            />
+          </div>
           <button
             type="button"
             onClick={() => setDetailsOpen(o => !o)}
             className="px-3 py-2 border border-gray-200 rounded-md text-[12px] font-medium text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 shrink-0"
           >
             {detailsOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-            Client / mission / type
+            Mission / type
           </button>
           <button
             type="submit"
-            disabled={!description.trim() || adding}
+            disabled={!canAdd || adding}
             className="px-4 py-2 bg-navy text-white rounded-md text-[12.5px] font-bold hover:bg-navy-hover disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0"
           >
             {adding ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
@@ -722,13 +733,7 @@ const NotesList: React.FC<{
           </button>
         </div>
         {detailsOpen && (
-          <div className="grid sm:grid-cols-3 gap-2 mt-2">
-            <ClientSearchInput
-              value={client}
-              onChange={(name, id) => { setClient(name); setClientId(id); }}
-              placeholder="Client (facultatif)"
-              bgClassName="bg-rose-50/60"
-            />
+          <div className="grid sm:grid-cols-2 gap-2 mt-2">
             <SearchableSelect
               value={serviceId}
               onChange={id => { setServiceId(id); setTaskTypeId(''); }}
@@ -821,14 +826,14 @@ const NotesList: React.FC<{
                     <tr className="bg-rose-50/40">
                       <td colSpan={6} className="px-3 py-3">
                         <p className="text-[11.5px] font-medium text-gray-600 mb-2">
-                          Mission requise pour démarrer — client et type de tâche facultatifs :
+                          Client et mission requis pour démarrer — type de tâche facultatif :
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="w-full sm:w-52">
                             <ClientSearchInput
                               value={startClient}
                               onChange={(name, id) => { setStartClient(name); setStartClientId(id); }}
-                              placeholder="Client (facultatif)"
+                              placeholder="Client"
                               bgClassName="bg-rose-50/60"
                             />
                           </div>
@@ -855,7 +860,7 @@ const NotesList: React.FC<{
                           <div className="flex gap-1.5 shrink-0">
                             <button
                               onClick={() => confirmStart(note)}
-                              disabled={!startServiceId}
+                              disabled={!startServiceId || !startClient.trim()}
                               className="px-3 py-1.5 bg-navy text-white rounded-lg text-[11px] font-bold hover:bg-navy-hover disabled:opacity-50"
                             >
                               Démarrer

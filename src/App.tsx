@@ -30,7 +30,7 @@ import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
 import { ClientPortal } from './pages/ClientPortal';
 import { ResetPassword } from './pages/ResetPassword';
-import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X, Timer, StickyNote } from 'lucide-react';
+import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X, Timer } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -934,17 +934,10 @@ export default function App() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
-                {/* Ouvre directement l'onglet « Notes » de TaskSubviews —
-                    même mécanisme (sessionStorage + événement window) que
-                    NotificationBell.tsx utilise déjà pour cibler un
-                    sous-onglet depuis en dehors du composant. */}
-                <button
-                  onClick={() => window.dispatchEvent(new CustomEvent('open-task-subview', { detail: 'notes' }))}
-                  className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  <StickyNote className="w-3.5 h-3.5" />
-                  Notes
-                </button>
+                {/* « Notes » n'est plus un raccourci d'en-tête — l'onglet
+                    juste à côté de « Mon chrono », dans la barre d'onglets de
+                    TaskSubviews, est désormais le seul chemin vers cette
+                    sous-vue. */}
                 <button
                   onClick={() => setPlanTaskOpen({})}
                   className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -1090,6 +1083,7 @@ export default function App() {
           services={servicesList}
           taskTypes={taskTypesList}
           initial={assignTaskOpen}
+          requireClient={!!assignTaskOpen.sourceNoteId}
           onClose={() => setAssignTaskOpen(null)}
           onAssigned={() => {
             showToast('Tâche déléguée.');
@@ -1108,6 +1102,7 @@ export default function App() {
           services={servicesList}
           taskTypes={taskTypesList}
           initial={planTaskOpen}
+          requireClient={!!planTaskOpen.sourceNoteId}
           onClose={() => setPlanTaskOpen(null)}
           onPlanned={() => {
             showToast('Tâche planifiée.');

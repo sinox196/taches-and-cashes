@@ -34,9 +34,16 @@ interface AssignTaskModalProps {
     taskTypeId?: number | string | null;
     description?: string;
   };
+  /**
+   * Le client devient obligatoire quand la modale vient d'une note — une
+   * note en porte toujours un depuis sa création, donc « Déléguer » ne doit
+   * jamais l'effacer en route. Ouverte depuis le bouton d'en-tête (sans
+   * note), le client reste facultatif comme avant.
+   */
+  requireClient?: boolean;
 }
 
-export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, taskTypes, onClose, onAssigned, initial }) => {
+export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, taskTypes, onClose, onAssigned, initial, requireClient }) => {
   useEscapeToClose(onClose);
   const { token } = useAuth();
 
@@ -130,7 +137,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
   const toggleStaff = (id: number) =>
     setAssignedToUserIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const canSubmit = assignedToUserIds.length > 0 && !!selectedServiceId;
+  const canSubmit = assignedToUserIds.length > 0 && !!selectedServiceId && (!requireClient || !!clientSearch.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -269,7 +276,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({ services, task
 
             <div ref={dropdownRef}>
               <label className="text-[11px] font-semibold text-gray-400 block mb-1">
-                Client <span className="font-normal text-gray-300">(facultatif)</span>
+                Client{!requireClient && <span className="font-normal text-gray-300"> (facultatif)</span>}
               </label>
               <div className="relative">
                 <div className="flex items-center border border-gray-200 rounded-md bg-white focus-within:border-gray-400 transition-colors">

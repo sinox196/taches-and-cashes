@@ -39,9 +39,16 @@ interface PlanTaskModalProps {
     taskTypeId?: number | string | null;
     description?: string;
   };
+  /**
+   * Le client devient obligatoire quand la modale vient d'une note — une
+   * note en porte toujours un depuis sa création, donc « Planifier » ne
+   * doit jamais l'effacer en route. Ouverte depuis le bouton d'en-tête
+   * (sans note), le client reste facultatif comme avant.
+   */
+  requireClient?: boolean;
 }
 
-export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskTypes, onClose, onPlanned, initial }) => {
+export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskTypes, onClose, onPlanned, initial, requireClient }) => {
   useEscapeToClose(onClose);
   const { token, user } = useAuth();
 
@@ -114,7 +121,7 @@ export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskType
     ? taskTypes.filter((t) => String(t.serviceId) === String(selectedServiceId))
     : [];
 
-  const canSubmit = !!selectedServiceId;
+  const canSubmit = !!selectedServiceId && (!requireClient || !!clientSearch.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,7 +187,7 @@ export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskType
           <form onSubmit={handleSubmit} className="p-5 space-y-3.5">
             <div ref={dropdownRef}>
               <label className="text-[11px] font-semibold text-gray-400 block mb-1">
-                Client <span className="font-normal text-gray-300">(facultatif)</span>
+                Client{!requireClient && <span className="font-normal text-gray-300"> (facultatif)</span>}
               </label>
               <div className="relative">
                 <div className="flex items-center border border-gray-200 rounded-md bg-white focus-within:border-gray-400 transition-colors">
