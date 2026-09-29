@@ -794,6 +794,7 @@ const clientPathAllowed = (path: string) =>
 const PLAN_MODULE_ROUTES: [string, PlanModule][] = [
   ['/api/time-entries', 'Time Tracking'],
   ['/api/task-assignments', 'Time Tracking'],
+  ['/api/task-notes', 'Time Tracking'],
   ['/api/kpi', 'Dashboard'],
   ['/api/dashboard', 'Dashboard'],
   ['/api/resources/portfolio', 'Dashboard'],
@@ -8612,6 +8613,131 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       await db.deleteTaskAssignment(req.user.companyId, req.params.id);
       res.json({ success: true });
     } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Notes — a quick-capture staging area in Tâches, before a mission/type de
+   * tâche has been decided. Unlike task-assignments, only `description` is
+   * required at creation; client/mission/type may all be filled in later.
+   * Personal to whoever wrote it, like "Mes tâches planifiées" — not a shared
+   * inbox.
+   */
+  app.get('/api/task-notes', authenticate, async (req: any, res: any) => {
+    try {
+      const notes = (await db.getAllTaskNotes(req.user.companyId))
+        .filter((n: any) => n.userId === req.user.id);
+      notes.sort((x: any, y: any) => (y.createdAt || '').localeCompare(x.createdAt || ''));
+      res.json(notes);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/task-notes', authenticate, async (req: any, res: any) => {
+    try {
+      const { client, clientId, pole, serviceId, taskType, taskTypeId, description } = req.body;
+      if (!String(description || '').trim()) {
+        return res.status(400).json({ error: 'La description est requise' });
+      }
+      const note = await db.createTaskNote(req.user.companyId, {
+        id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        userId: req.user.id,
+        client: client || '',
+        clientId: clientId != null ? Number(clientId) : null,
+        pole: pole || '',
+        serviceId: serviceId != null ? Number(serviceId) : null,
+        taskType: taskType || '',
+        taskTypeId: taskTypeId != null ? Number(taskTypeId) : null,
+        description: String(description).trim(),
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(note);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/task-notes/:id', authenticate, async (req: any, res: any) => {
+    try {
+      const note = await db.getTaskNoteById(req.user.companyId, req.params.id);
+      if (!note) return res.status(404).json({ error: 'Not found' });
+      if (note.userId !== req.user.id) return res.status(403).json({ error: 'Cette note ne vous appartient pas' });
+
+      const { client, clientId, pole, serviceId, taskType, taskTypeId, description } = req.body;
+      const updates: any = {};
+      if (client !== undefined) updates.client = client || '';
+      if (clientId !== undefined) updates.clientId = clientId != null ? Number(clientId) : null;
+      if (pole !== undefined) updates.pole = pole || '';
+      if (serviceId !== undefined) updates.serviceId = serviceId != null ? Number(serviceId) : null;
+      if (taskType !== undefined) updates.taskType = taskType || '';
+      if (taskTypeId !== undefined) updates.taskTypeId = taskTypeId != null ? Number(taskTypeId) : null;
+      if (description !== undefined) {
+        if (!String(description).trim()) return res.status(400).json({ error: 'La description est requise' });
+        updates.description = String(description).trim();
+      }
+
+      const updated = await db.updateTaskNote(req.user.companyId, req.params.id, updates);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/task-notes/:id', authenticate, async (req: any, res: any) => {
+    try {
+      const note = await db.getTaskNoteById(req.user.companyId, req.params.id);
+      if (!note) return res.status(404).json({ error: 'Not found' });
+      if (note.userId !== req.user.id) return res.status(403).json({ error: 'Cette note ne vous appartient pas' });
+      await db.deleteTaskNote(req.user.companyId, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Démarrer directement depuis une note : exactement le même chemin que
+   * "Démarrer nouvelle tâche" et le démarrage d'une tâche déléguée
+   * (`createRunningEntryForUser`), donc la règle « une seule tâche en cours
+   * par personne » s'applique pareil. La mission est la seule chose
+   * réellement exigée pour démarrer — si la note ne l'avait pas encore, le
+   * corps de la requête la complète (avec le type de tâche, facultatif) sans
+   * qu'il ait fallu la stocker sur la note au préalable. La note est
+   * supprimée une fois convertie : ce n'est qu'une zone de saisie rapide, pas
+   * un historique.
+   */
+  app.put('/api/task-notes/:id/start', authenticate, async (req: any, res: any) => {
+    try {
+      const note = await db.getTaskNoteById(req.user.companyId, req.params.id);
+      if (!note) return res.status(404).json({ error: 'Not found' });
+      if (note.userId !== req.user.id) return res.status(403).json({ error: 'Cette note ne vous appartient pas' });
+
+      const { pole, serviceId, taskType, taskTypeId } = req.body || {};
+      const finalPole = (pole !== undefined ? pole : note.pole) || '';
+      if (!String(finalPole).trim()) {
+        return res.status(400).json({ error: 'La mission est requise pour démarrer cette tâche' });
+      }
+
+      const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, {
+        client: note.client,
+        clientId: note.clientId,
+        pole: String(finalPole).trim(),
+        serviceId: serviceId !== undefined ? (serviceId != null ? Number(serviceId) : null) : note.serviceId,
+        taskType: (taskType !== undefined ? taskType : note.taskType) || '',
+        taskTypeId: taskTypeId !== undefined ? (taskTypeId != null ? Number(taskTypeId) : null) : note.taskTypeId,
+        description: note.description,
+        statut: 'RUNNING',
+      }, deviceFromRequest(req));
+
+      await db.deleteTaskNote(req.user.companyId, req.params.id);
+
+      res.json(entry);
+      broadcastTimeEntries();
+    } catch (error) {
+      console.error(error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

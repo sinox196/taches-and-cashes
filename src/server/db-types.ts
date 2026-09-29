@@ -169,6 +169,19 @@ export interface Database {
   updateTaskAssignment(companyId: string, id: string, updates: any): Promise<any | null>;
   deleteTaskAssignment(companyId: string, id: string): Promise<boolean>;
 
+  /**
+   * A quick-capture note in Tâches — a description jotted down before a
+   * mission/type de tâche has been decided, unlike `taskAssignments` which
+   * always requires a mission. Converted (Démarrer/Planifier/Déléguer) into a
+   * real time entry or task assignment, then deleted — a note is a staging
+   * area, not a permanent record.
+   */
+  getAllTaskNotes(companyId: string): Promise<any[]>;
+  getTaskNoteById(companyId: string, id: string): Promise<any | undefined>;
+  createTaskNote(companyId: string, note: any): Promise<any>;
+  updateTaskNote(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteTaskNote(companyId: string, id: string): Promise<boolean>;
+
   /** Generic per-user notifications — new message, task assigned, HR events. */
   /**
    * Web Push subscriptions, one row per device. `getAllPushSubscriptions` is
@@ -347,6 +360,8 @@ export const emptyDb = () => ({
   messages: [],
   // Mission + type de tâche handed by an admin to a collaborator.
   taskAssignments: [],
+  // Quick-capture notes in Tâches, before a mission/type de tâche is decided.
+  taskNotes: [],
   // Per-user notifications: new message, task assigned, HR events.
   notifications: [],
   // Web Push subscriptions, one per device — how a running chronometer

@@ -27,23 +27,39 @@ interface PlanTaskModalProps {
   taskTypes: any[];
   onClose: () => void;
   onPlanned: () => void;
+  /**
+   * Pré-remplit le formulaire depuis une note (Tâches → « Notes ») — le
+   * bouton « Planifier » d'une ligne de note ouvre cette même modale plutôt
+   * qu'un second formulaire, avec ce que la note portait déjà.
+   */
+  initial?: {
+    client?: string;
+    clientId?: number | string | null;
+    serviceId?: number | string | null;
+    taskTypeId?: number | string | null;
+    description?: string;
+  };
 }
 
-export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskTypes, onClose, onPlanned }) => {
+export const PlanTaskModal: React.FC<PlanTaskModalProps> = ({ services, taskTypes, onClose, onPlanned, initial }) => {
   useEscapeToClose(onClose);
   const { token, user } = useAuth();
 
-  const [clientSearch, setClientSearch] = useState('');
+  const [clientSearch, setClientSearch] = useState(initial?.client || '');
   const [clientResults, setClientResults] = useState<any[]>([]);
-  const [selectedClient, setSelectedClient] = useState<any | null>(null);
+  // Fabriqué depuis `initial` plutôt que laissé `null` : `handleSubmit` ne lit
+  // `clientId` que depuis cet objet, jamais depuis `selectedClientId` seul.
+  const [selectedClient, setSelectedClient] = useState<any | null>(
+    initial?.clientId != null ? { id: initial.clientId, name: initial.client || '' } : null
+  );
   const [isSearchingClients, setIsSearchingClients] = useState(false);
-  const [selectedClientId, setSelectedClientId] = useState('');
+  const [selectedClientId, setSelectedClientId] = useState(initial?.clientId != null ? String(initial.clientId) : '');
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const [selectedServiceId, setSelectedServiceId] = useState('');
-  const [selectedTaskTypeId, setSelectedTaskTypeId] = useState('');
-  const [description, setDescription] = useState('');
+  const [selectedServiceId, setSelectedServiceId] = useState(initial?.serviceId != null ? String(initial.serviceId) : '');
+  const [selectedTaskTypeId, setSelectedTaskTypeId] = useState(initial?.taskTypeId != null ? String(initial.taskTypeId) : '');
+  const [description, setDescription] = useState(initial?.description || '');
   const [scheduledDate, setScheduledDate] = useState('');
   const [priority, setPriority] = useState('NORMALE');
   const [reminderAt, setReminderAt] = useState('');

@@ -30,7 +30,7 @@ import { Landing } from './pages/Landing';
 import { PlatformAdmin } from './pages/PlatformAdmin';
 import { ClientPortal } from './pages/ClientPortal';
 import { ResetPassword } from './pages/ResetPassword';
-import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X, Timer } from 'lucide-react';
+import { Loader2, ClipboardCheck, CalendarClock, LogIn, Pause, Square, X, Timer, StickyNote } from 'lucide-react';
 
 import {
   INITIAL_CLIENTS,
@@ -42,6 +42,16 @@ import {
   formatVerboseDuration,
   calculateCostDT,
 } from './utils/formatters';
+
+/** Pre-fill + optional source-note id for PlanTaskModal/AssignTaskModal — see `assignTaskOpen`/`planTaskOpen`. */
+type TaskModalInitial = {
+  client?: string;
+  clientId?: number | string | null;
+  serviceId?: number | string | null;
+  taskTypeId?: number | string | null;
+  description?: string;
+  sourceNoteId?: string;
+};
 
 export default function App() {
   const { user, token, isLoading, hasPermission, isImpersonating, stopImpersonating } = useAuth();
@@ -469,8 +479,15 @@ export default function App() {
   /** Mobile nav drawer. Has no effect from `lg` up, where the rail is static. */
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
-  const [isAssignTaskOpen, setIsAssignTaskOpen] = useState(false);
-  const [isPlanTaskOpen, setIsPlanTaskOpen] = useState(false);
+  /**
+   * `null` closed; an object (possibly `{}`) open. Carries an optional
+   * pre-fill — a note's row (Tâches → « Notes ») opens either modal already
+   * filled in with its client/mission/type/description, and `sourceNoteId`
+   * marks it for deletion once the modal actually succeeds — never before,
+   * so cancelling or a failed submit leaves the note exactly as it was.
+   */
+  const [assignTaskOpen, setAssignTaskOpen] = useState<TaskModalInitial | null>(null);
+  const [planTaskOpen, setPlanTaskOpen] = useState<TaskModalInitial | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Interval timer tick: Update running durations locally
@@ -497,78 +514,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Overtime alert: ask the collaborator whether they're still on a task
-  // every 2h *of that task's own duration* — at 2h, then 4h, 6h, … The task
-  // keeps running on its own either way — this only ever asks; it never
-  // changes the task's status by itself. A prior version auto-paused the
-  // task if the popup went unanswered for 2 minutes, at the user's explicit
-  // request that never happen: a task must keep running for as long as
-  // nobody has actually told it to do otherwise, whatever they're doing away
-  // from the screen at that moment. The popup now simply waits — it has no
-  // deadline and no timer of its own — until the collaborator picks one of
-  // the three real answers: continuer, mettre en pause, or arrêter.
-  //
-  // The milestone already asked about is recorded **on the entry itself**
-  // (`overtimeAckCycle`), not in the browser. That is what makes "every 2h"
-  // mean what it says:
-  //  - it survives a reload, so opening the app does not re-ask (it was held
-  //    in a `useRef` once, which died on every remount and re-fired the popup
-  //    on every single page load);
-  //  - it follows the task rather than the device, so answering on a phone
-  //    doesn't leave a laptop asking again about the same 2h;
-  //  - and it is tied to the duration, not to wall-clock time, so a prompt
-  //    lands when the work actually crosses 4h — not merely because two
-  //    hours have gone by since the last one.
-  const OVERTIME_THRESHOLD_SECONDS = 2 * 3600;
-  const [overtimeAlert, setOvertimeAlert] = useState<{ entryId: string } | null>(null);
-
-  /** Which 2h milestone a duration has reached: 0 under 2h, 1 at 2h, 2 at 4h… */
-  const overtimeCycleOf = (seconds: number) =>
-    Math.floor((seconds || 0) / OVERTIME_THRESHOLD_SECONDS);
-
-  useEffect(() => {
-    const myRunning = timeEntries.find(e => e.userId === user?.id && e.statut === 'RUNNING');
-    if (!myRunning) { setOvertimeAlert(null); return; }
-    if (overtimeAlert) return;
-
-    // The *next* unacknowledged milestone, not whichever one the duration
-    // currently sits at. A backgrounded tab (throttled timers, a laptop
-    // closed mid-task) can leave `dureeSeconds` unobserved for a long
-    // stretch and then jump straight from under 2h to past 4h the next time
-    // this effect runs — asking about the current cycle would silently
-    // swallow the 2h prompt every time that happens, which is exactly what
-    // reads as "the alert never comes at 2h, only at 4h". Catching up one
-    // milestone at a time keeps the "every 2h" promise: this fires for 2h
-    // first, and once that's acknowledged the very next tick re-evaluates
-    // and catches 4h too if the duration already cleared it.
-    const nextCycle = (myRunning.overtimeAckCycle || 0) + 1;
-    if (overtimeCycleOf(myRunning.dureeSeconds) < nextCycle) return;
-
-    // Recorded when the popup is *shown*, not when it is answered, so a
-    // reload while it is open doesn't bring it straight back. The write goes
-    // through updateTimeEntryApi, which applies it to local state first —
-    // otherwise this effect would re-fire on the next tick, before the
-    // round-trip and broadcast land.
-    updateTimeEntryApi(myRunning.id, { overtimeAckCycle: nextCycle });
-    setOvertimeAlert({ entryId: myRunning.id });
-  }, [timeEntries, user?.id, overtimeAlert]);
-
-  const acknowledgeOvertimeAlert = () => {
-    if (!overtimeAlert) return;
-    setOvertimeAlert(null);
-  };
-
-  const pauseFromOvertimeAlert = () => {
-    if (!overtimeAlert) return;
-    updateTimeEntryApi(overtimeAlert.entryId, { statut: 'PAUSED' });
-    setOvertimeAlert(null);
-  };
-
-  const stopFromOvertimeAlert = () => {
-    if (!overtimeAlert) return;
-    updateTimeEntryApi(overtimeAlert.entryId, { statut: 'COMPLETED' });
-    setOvertimeAlert(null);
-  };
+  // A task past 2h cumulated (RUNNING, PAUSED, or COMPLETED — the duration is
+  // what matters, not the status) is flagged red directly in
+  // TimeTrackingTable.tsx's activities table instead of interrupting with a
+  // popup, removed at the user's explicit request.
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -708,6 +657,28 @@ export default function App() {
   // older build. It was drawn with `requireInteraction`, so the OS keeps it
   // until something closes it, and nothing else does any more.
   useEffect(() => { closeLingeringTimerNotification(); }, []);
+
+  /**
+   * A note (Tâches → « Notes ») converted via « Planifier »/« Déléguer » is
+   * deleted only once that modal's own submission actually succeeded — never
+   * before, so a cancelled or failed attempt leaves the note untouched. This
+   * fires from the modal's `onPlanned`/`onAssigned` callback, which only runs
+   * on success. `refresh-task-notes` is the same idiom as
+   * `refresh-task-assignments` right below: TaskSubviews owns the Notes list
+   * and lives outside these modals, so it can't be called directly.
+   */
+  const deleteSourceNoteIfAny = async (sourceNoteId?: string) => {
+    if (!sourceNoteId || !token) return;
+    try {
+      await fetch(`/api/task-notes/${sourceNoteId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+    } catch (e) {
+      console.error(e);
+    }
+    window.dispatchEvent(new Event('refresh-task-notes'));
+  };
 
   const handleStartNewTask = async (
     client: string,
@@ -963,8 +934,19 @@ export default function App() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
+                {/* Ouvre directement l'onglet « Notes » de TaskSubviews —
+                    même mécanisme (sessionStorage + événement window) que
+                    NotificationBell.tsx utilise déjà pour cibler un
+                    sous-onglet depuis en dehors du composant. */}
                 <button
-                  onClick={() => setIsPlanTaskOpen(true)}
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-task-subview', { detail: 'notes' }))}
+                  className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <StickyNote className="w-3.5 h-3.5" />
+                  Notes
+                </button>
+                <button
+                  onClick={() => setPlanTaskOpen({})}
                   className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   <CalendarClock className="w-3.5 h-3.5" />
@@ -972,7 +954,7 @@ export default function App() {
                 </button>
                 {hasPermission('ASSIGN_TASKS') && (
                   <button
-                    onClick={() => setIsAssignTaskOpen(true)}
+                    onClick={() => setAssignTaskOpen({})}
                     className="flex items-center gap-2 px-3.5 py-2 border border-gray-300 rounded-lg text-[12.5px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   >
                     <ClipboardCheck className="w-3.5 h-3.5" />
@@ -988,7 +970,19 @@ export default function App() {
                 démarre. L'en-tête et ses deux boutons restent au-dessus de la
                 barre d'onglets : « Planifier une tâche » se clique aussi bien
                 depuis la liste des tâches planifiées. */}
-            <TaskSubviews onStarted={fetchTimeEntries}>
+            <TaskSubviews
+              onStarted={fetchTimeEntries}
+              services={servicesList}
+              taskTypes={taskTypesList}
+              onPlanNote={(note) => setPlanTaskOpen({
+                client: note.client, clientId: note.clientId, serviceId: note.serviceId,
+                taskTypeId: note.taskTypeId, description: note.description, sourceNoteId: note.id,
+              })}
+              onDelegateNote={(note) => setAssignTaskOpen({
+                client: note.client, clientId: note.clientId, serviceId: note.serviceId,
+                taskTypeId: note.taskTypeId, description: note.description, sourceNoteId: note.id,
+              })}
+            >
             <div className="flex flex-col gap-4 sm:gap-6">
             {/* Two columns: the activity on the left, and on the right a panel
                 that always answers "what are you on right now" — the running
@@ -1091,11 +1085,12 @@ export default function App() {
         taskTypes={taskTypesList}
       />
 
-      {isAssignTaskOpen && (
+      {assignTaskOpen && (
         <AssignTaskModal
           services={servicesList}
           taskTypes={taskTypesList}
-          onClose={() => setIsAssignTaskOpen(false)}
+          initial={assignTaskOpen}
+          onClose={() => setAssignTaskOpen(null)}
           onAssigned={() => {
             showToast('Tâche déléguée.');
             // TaskSubviews vit sous la vue Tâches, hors de cette modale montée
@@ -1103,18 +1098,21 @@ export default function App() {
             // remettait à jour qu'au prochain montage, donc au rechargement
             // de la page.
             window.dispatchEvent(new Event('refresh-task-assignments'));
+            deleteSourceNoteIfAny(assignTaskOpen.sourceNoteId);
           }}
         />
       )}
 
-      {isPlanTaskOpen && (
+      {planTaskOpen && (
         <PlanTaskModal
           services={servicesList}
           taskTypes={taskTypesList}
-          onClose={() => setIsPlanTaskOpen(false)}
+          initial={planTaskOpen}
+          onClose={() => setPlanTaskOpen(null)}
           onPlanned={() => {
             showToast('Tâche planifiée.');
             window.dispatchEvent(new Event('refresh-task-assignments'));
+            deleteSourceNoteIfAny(planTaskOpen.sourceNoteId);
           }}
         />
       )}
@@ -1153,47 +1151,6 @@ export default function App() {
               <p className="text-[11.5px] text-gray-400 mt-3">
                 Une tâche mise en pause se reprend quand vous voulez ; une tâche arrêtée est clôturée.
               </p>
-            </div>
-          </div>
-        );
-      })()}
-
-      {overtimeAlert && (() => {
-        const entry = timeEntries.find(e => e.id === overtimeAlert.entryId);
-        // The milestone being acknowledged, not the raw duration — the two
-        // diverge exactly when catch-up applies (see the effect above): a
-        // task already past 4h when the 2h prompt fires must still read
-        // "depuis plus de 2h", not overshoot to the duration's own cycle.
-        const hours = (entry?.overtimeAckCycle || 1) * 2;
-        return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-              <h3 className="text-[15px] font-bold text-gray-900 mb-1">Toujours sur cette tâche ?</h3>
-              <p className="text-[13px] text-gray-600 mb-4">
-                Vous travaillez sur <span className="font-semibold">{entry?.pole || 'cette tâche'}</span>
-                {entry?.client ? <> ({entry.client})</> : null} depuis plus de {hours}h cumulées. La tâche continue de
-                tourner — choisissez ce que vous voulez en faire.
-              </p>
-              <div className="flex flex-wrap justify-end gap-3">
-                <button
-                  onClick={stopFromOvertimeAlert}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-[13px] font-medium hover:bg-red-700"
-                >
-                  Arrêter
-                </button>
-                <button
-                  onClick={pauseFromOvertimeAlert}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Mettre en pause
-                </button>
-                <button
-                  onClick={acknowledgeOvertimeAlert}
-                  className="px-4 py-2 bg-navy text-white rounded-lg text-[13px] font-medium hover:bg-navy-hover"
-                >
-                  Oui, je continue
-                </button>
-              </div>
             </div>
           </div>
         );

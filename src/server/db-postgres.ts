@@ -69,6 +69,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   messages: { desc: false },
   message_groups: { desc: false },
   task_assignments: { desc: true },
+  task_notes: { desc: true },
   notifications: { desc: true },
   push_subscriptions: { desc: false },
   cash_journal_entries: { desc: false },
@@ -107,6 +108,7 @@ const TABLE_FOR: Record<string, string> = {
   messages: 'messages',
   messageGroups: 'message_groups',
   taskAssignments: 'task_assignments',
+  taskNotes: 'task_notes',
   notifications: 'notifications',
   pushSubscriptions: 'push_subscriptions',
   cashJournalEntries: 'cash_journal_entries',
@@ -375,6 +377,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const messages = tenantCollection('messages');
   const messageGroups = tenantCollection('message_groups');
   const taskAssignments = tenantCollection('task_assignments');
+  const taskNotes = tenantCollection('task_notes');
   const notifications = tenantCollection('notifications');
   const pushSubscriptions = tenantCollection('push_subscriptions');
   const cashJournal = tenantCollection('cash_journal_entries');
@@ -682,6 +685,12 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     createTaskAssignment: taskAssignments.create,
     updateTaskAssignment: taskAssignments.update,
     deleteTaskAssignment: taskAssignments.remove,
+
+    getAllTaskNotes: taskNotes.all,
+    getTaskNoteById: taskNotes.byId,
+    createTaskNote: taskNotes.create,
+    updateTaskNote: taskNotes.update,
+    deleteTaskNote: taskNotes.remove,
 
     getAllPushSubscriptionsForCompany: pushSubscriptions.all,
     getAllPushSubscriptions: async () => (await q(`SELECT data FROM push_subscriptions`)).map(r => r.data),

@@ -337,11 +337,20 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                   Grouper par mois cassait exactement cette priorité : une
                   tâche en cours datée d'un mois plus ancien se serait
                   retrouvée sous des tâches terminées d'un mois plus récent. */}
-              {filteredEntries.map((row) => (
+              {filteredEntries.map((row) => {
+                // A task past 2h cumulated is flagged red regardless of its
+                // status (RUNNING, PAUSED or COMPLETED) — `dureeSeconds` is
+                // the accumulated duration either way, so this needs no
+                // status check of its own. Replaces a popup that used to
+                // interrupt the collaborator every 2h, removed at the user's
+                // explicit request; the red highlight takes priority over
+                // the ordinary RUNNING tint since it's the stronger signal.
+                const isOvertime = (row.dureeSeconds || 0) >= 7200;
+                return (
                 <tr
                   key={row.id}
                   className={`hover:bg-gray-50/80 transition-colors ${
-                    row.statut === 'RUNNING' ? 'bg-[#EFF8FF]/40' : ''
+                    isOvertime ? 'bg-red-50' : row.statut === 'RUNNING' ? 'bg-[#EFF8FF]/40' : ''
                   }`}
                 >
                   {/* Collaborator */}
@@ -401,7 +410,10 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                   </td>
 
                   {/* Durée */}
-                  <td className="px-2 py-2.5 font-medium text-gray-900 truncate" title={row.duree}>
+                  <td
+                    className={`px-2 py-2.5 font-medium truncate ${isOvertime ? 'text-red-700' : 'text-gray-900'}`}
+                    title={isOvertime ? `${row.duree} — dépasse 2h cumulées` : row.duree}
+                  >
                     {row.duree}
                   </td>
 
@@ -511,7 +523,8 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
                     </td>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           )}
         </table>

@@ -60,7 +60,7 @@ export async function initDb(): Promise<Database> {
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
   'absenceAuthorizations', 'loans', 'advances', 'attendanceRecords', 'referrals', 'leaveBalances', 'timeEntries', 'messages',
-  'taskAssignments', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories', 'messageGroups',
+  'taskAssignments', 'taskNotes', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories', 'messageGroups',
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
@@ -86,6 +86,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.timeEntries) db.timeEntries = [];
     if (!db.messages) db.messages = [];
     if (!db.taskAssignments) db.taskAssignments = [];
+    if (!db.taskNotes) db.taskNotes = [];
     if (!db.notifications) db.notifications = [];
     if (!db.pushSubscriptions) db.pushSubscriptions = [];
     if (!db.cashJournalEntries) db.cashJournalEntries = [];
@@ -658,6 +659,29 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.taskAssignments, companyId, id);
       if (index === -1) return false;
       db.taskAssignments.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllTaskNotes: async (companyId: string) => scoped(db.taskNotes, companyId),
+    getTaskNoteById: async (companyId: string, id: string) => findScoped(db.taskNotes, companyId, id),
+    createTaskNote: async (companyId: string, note: any) => {
+      const row = { ...note, companyId };
+      db.taskNotes.unshift(row);
+      await saveDb();
+      return row;
+    },
+    updateTaskNote: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.taskNotes, companyId, id);
+      if (index === -1) return null;
+      db.taskNotes[index] = { ...db.taskNotes[index], ...updates };
+      await saveDb();
+      return db.taskNotes[index];
+    },
+    deleteTaskNote: async (companyId: string, id: string) => {
+      const index = indexScoped(db.taskNotes, companyId, id);
+      if (index === -1) return false;
+      db.taskNotes.splice(index, 1);
       await saveDb();
       return true;
     },

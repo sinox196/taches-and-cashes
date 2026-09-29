@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Timer, CalendarClock, ClipboardCheck, Play, Loader, X, Send } from 'lucide-react';
+import { Timer, CalendarClock, ClipboardCheck, Play, Loader, X, Send, StickyNote, Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 import { SearchableSelect, type SearchableOption } from './SearchableSelect';
 import { usePeriodPage, PaginationBar } from './PeriodPager';
+import { ClientSearchInput } from './cash/ClientSearchInput';
+import { APP_TIMEZONE } from '../utils/formatters';
 
 const DELEGATED_PAGE_SIZE = 15;
 
@@ -28,15 +30,16 @@ const DELEGATED_STATUS_LABEL: Record<string, string> = {
   PENDING: 'En attente', RUNNING: 'En cours', PAUSED: 'En pause', COMPLETED: 'Terminée',
 };
 
-type Tab = 'chrono' | 'planned' | 'assigned' | 'delegatedByMe';
+type Tab = 'notes' | 'chrono' | 'planned' | 'assigned' | 'delegatedByMe';
 
 /**
- * Une couleur par sous-vue — le chrono, ce qu'on s'est planifié, ce qu'on
- * vous a délégué, ce que vous avez délégué à d'autres — reprise sur l'onglet
- * actif et sur la carte qu'il affiche, pour qu'un coup d'œil dise sous quel
- * onglet on se trouve sans avoir à relire son libellé.
+ * Une couleur par sous-vue — les notes, le chrono, ce qu'on s'est planifié,
+ * ce qu'on vous a délégué, ce que vous avez délégué à d'autres — reprise sur
+ * l'onglet actif et sur la carte qu'il affiche, pour qu'un coup d'œil dise
+ * sous quel onglet on se trouve sans avoir à relire son libellé.
  */
 const TAB_COLOR: Record<Tab, { border: string; text: string; badgeActive: string; badgeIdle: string; cardBorder: string; caption: string }> = {
+  notes:          { border: 'border-rose-600',    text: 'text-rose-700',    badgeActive: 'bg-rose-600 text-white',    badgeIdle: 'bg-rose-50 text-rose-600',     cardBorder: 'border-l-rose-400',    caption: 'text-rose-700' },
   chrono:         { border: 'border-sky-600',     text: 'text-sky-700',     badgeActive: 'bg-sky-600 text-white',     badgeIdle: 'bg-sky-50 text-sky-600',       cardBorder: 'border-l-sky-400',     caption: 'text-sky-700' },
   planned:        { border: 'border-amber-600',   text: 'text-amber-700',   badgeActive: 'bg-amber-600 text-white',   badgeIdle: 'bg-amber-50 text-amber-600',   cardBorder: 'border-l-amber-400',   caption: 'text-amber-700' },
   assigned:       { border: 'border-violet-600',  text: 'text-violet-700',  badgeActive: 'bg-violet-600 text-white',  badgeIdle: 'bg-violet-50 text-violet-600', cardBorder: 'border-l-violet-400',  caption: 'text-violet-700' },
@@ -75,7 +78,13 @@ export const TaskSubviews: React.FC<{
   children: React.ReactNode;
   /** Une tâche vient de démarrer : le pointage a une entrée de plus à aller chercher. */
   onStarted?: () => void;
-}> = ({ children, onStarted }) => {
+  /** Pour le formulaire d'ajout de note et son expansion « Démarrer ». */
+  services?: any[];
+  taskTypes?: any[];
+  /** Bouton « Planifier »/« Déléguer » d'une ligne de note — ouvre la modale correspondante, déjà remplie. */
+  onPlanNote?: (note: any) => void;
+  onDelegateNote?: (note: any) => void;
+}> = ({ children, onStarted, services = [], taskTypes = [], onPlanNote, onDelegateNote }) => {
   const { token, user, hasPermission } = useAuth();
   const canDelegate = hasPermission('ASSIGN_TASKS');
   // Clicking a "tâche déléguée"/"rappel de tâche planifiée" notification
@@ -87,13 +96,22 @@ export const TaskSubviews: React.FC<{
   const [tab, setTab] = useState<Tab>(() => {
     const pending = sessionStorage.getItem('open_task_subview');
     if (pending) sessionStorage.removeItem('open_task_subview');
-    return pending === 'planned' || pending === 'assigned' || pending === 'delegatedByMe' ? pending : 'chrono';
+    return pending === 'notes' || pending === 'planned' || pending === 'assigned' || pending === 'delegatedByMe' ? pending : 'chrono';
   });
   const [items, setItems] = useState<any[]>([]);
   const [delegated, setDelegated] = useState<any[]>([]);
+  const [notes, setNotes] = useState<any[]>([]);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [error, setError] = useState('');
+
+  const loadNotes = useCallback(() => {
+    if (!token) return;
+    fetch('/api/task-notes', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : []))
+      .then(data => setNotes(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [token]);
 
   const load = useCallback(() => {
     if (!token) return;
@@ -111,7 +129,8 @@ export const TaskSubviews: React.FC<{
         .then(data => setDelegated(Array.isArray(data) ? data : []))
         .catch(() => {});
     }
-  }, [token, canDelegate]);
+    loadNotes();
+  }, [token, canDelegate, loadNotes]);
 
   // Planifier/déléguer une tâche se fait depuis les boutons de l'en-tête,
   // au-dessus de cette sous-vue mais hors d'elle (App.tsx monte les modales
@@ -126,6 +145,15 @@ export const TaskSubviews: React.FC<{
     return () => window.removeEventListener('refresh-task-assignments', load);
   }, [load]);
 
+  // Une note convertie via « Planifier »/« Déléguer » (App.tsx, modales
+  // montées au niveau de la page) est supprimée côté serveur puis annoncée
+  // ici — cette liste vit dans ce composant, ces modales n'y ont aucun accès
+  // direct. Même idiome que `refresh-task-assignments` juste au-dessus.
+  useEffect(() => {
+    window.addEventListener('refresh-task-notes', loadNotes);
+    return () => window.removeEventListener('refresh-task-notes', loadNotes);
+  }, [loadNotes]);
+
   // Same signal as the `sessionStorage` read above, for when this component
   // is already mounted (Time Tracking already open) when the notification is
   // clicked — the initial-state read only fires on mount, so a live update
@@ -133,7 +161,7 @@ export const TaskSubviews: React.FC<{
   useEffect(() => {
     const onOpenTab = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail === 'chrono' || detail === 'planned' || detail === 'assigned' || detail === 'delegatedByMe') {
+      if (detail === 'notes' || detail === 'chrono' || detail === 'planned' || detail === 'assigned' || detail === 'delegatedByMe') {
         setTab(detail);
       }
     };
@@ -185,7 +213,37 @@ export const TaskSubviews: React.FC<{
     }
   };
 
+  /**
+   * Démarrer une note : exactement le même geste que « Démarrer » sur une
+   * tâche déléguée (`start()` ci-dessus), plus loin dans la route — quand la
+   * note n'a pas encore de mission, `pole`/`serviceId`/`taskType`/
+   * `taskTypeId` viennent du mini-formulaire que `NotesList` a fait remplir
+   * avant d'appeler ceci ; sinon ils sont `undefined` et la route relit ceux
+   * déjà stockés sur la note.
+   */
+  const startNote = async (id: string, fields?: { pole?: string; serviceId?: string | number | null; taskType?: string; taskTypeId?: string | number | null }) => {
+    setError('');
+    setStartingId(id);
+    try {
+      const res = await fetch(`/api/task-notes/${id}/start`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(fields || {}),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Démarrage impossible.');
+      setNotes(prev => prev.filter(n => n.id !== id));
+      onStarted?.();
+      setTab('chrono');
+    } catch (e: any) {
+      setError(friendlyError(e));
+    } finally {
+      setStartingId(null);
+    }
+  };
+
   const TABS: { id: Tab; label: string; icon: any; count?: number }[] = [
+    { id: 'notes', label: 'Notes', icon: StickyNote, count: notes.length },
     { id: 'chrono', label: 'Mon chrono', icon: Timer },
     { id: 'planned', label: 'Mes tâches planifiées', icon: CalendarClock, count: planned.length },
     { id: 'assigned', label: 'Tâches déléguées', icon: ClipboardCheck, count: assigned.length },
@@ -226,7 +284,28 @@ export const TaskSubviews: React.FC<{
       </div>
 
       <div className="flex flex-col sm:flex-1 sm:min-h-0">
-        {tab === 'chrono' ? children : tab === 'delegatedByMe' ? (
+        {tab === 'chrono' ? children : tab === 'notes' ? (
+          <>
+            {error && (
+              <div className="mb-3 p-2.5 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">
+                {error}
+              </div>
+            )}
+            <NotesList
+              notes={notes}
+              services={services}
+              taskTypes={taskTypes}
+              color={TAB_COLOR.notes}
+              token={token}
+              startingId={startingId}
+              onNoteAdded={n => setNotes(prev => [n, ...prev])}
+              onNoteDeleted={id => setNotes(prev => prev.filter(n => n.id !== id))}
+              onStart={startNote}
+              onPlan={onPlanNote}
+              onDelegate={onDelegateNote}
+            />
+          </>
+        ) : tab === 'delegatedByMe' ? (
           <DelegatedByMeList rows={delegated} color={TAB_COLOR.delegatedByMe} />
         ) : (
           <div className="flex flex-col gap-4">
@@ -473,6 +552,305 @@ const DelegatedByMeList: React.FC<{ rows: any[]; color: typeof TAB_COLOR[Tab] }>
             Brouillard de caisse et les onglets RH. */}
         <PaginationBar page={pager} unit="tâches déléguées" />
       </div>
+    </div>
+  );
+};
+
+/**
+ * « Notes » — une zone de saisie rapide, avant même de savoir la mission.
+ * Contrairement à « Planifier »/« Déléguer » (`task_assignments`, mission
+ * requise), une note n'exige que la description : le client, la mission et
+ * le type de tâche peuvent tous les trois attendre. Trois façons de la
+ * convertir, chacune un bouton par ligne :
+ *
+ * - **Démarrer** — si la mission manque encore, une ligne s'ouvre en
+ *   dessous pour la demander (avec le type de tâche, facultatif) avant de
+ *   lancer réellement le chrono ; sinon la note démarre d'un clic. Dans les
+ *   deux cas c'est `PUT /api/task-notes/:id/start`, qui crée l'entrée de
+ *   pointage par le même chemin que « Démarrer nouvelle tâche » et supprime
+ *   la note.
+ * - **Planifier** / **Déléguer** — ouvrent directement la modale
+ *   correspondante (App.tsx), déjà remplie avec ce que la note portait ; la
+ *   note n'est supprimée qu'une fois cette modale effectivement soumise
+ *   avec succès (voir `deleteSourceNoteIfAny` dans App.tsx), jamais avant.
+ *
+ * La note elle-même n'est donc jamais qu'une étape de transit — elle
+ * disparaît dès qu'elle est devenue autre chose (une tâche en cours, une
+ * planification, une délégation), ou sur suppression manuelle.
+ */
+const NotesList: React.FC<{
+  notes: any[];
+  services: any[];
+  taskTypes: any[];
+  color: typeof TAB_COLOR[Tab];
+  token: string | null;
+  startingId: string | null;
+  onNoteAdded: (note: any) => void;
+  onNoteDeleted: (id: string) => void;
+  onStart: (id: string, fields?: { pole?: string; serviceId?: number; taskType?: string; taskTypeId?: number }) => void;
+  onPlan?: (note: any) => void;
+  onDelegate?: (note: any) => void;
+}> = ({ notes, services, taskTypes, color, token, startingId, onNoteAdded, onNoteDeleted, onStart, onPlan, onDelegate }) => {
+  // Formulaire d'ajout — description seule visible par défaut, le reste
+  // (client/mission/type) derrière un chevron, puisque rien de plus n'est
+  // exigé pour enregistrer une note.
+  const [description, setDescription] = useState('');
+  const [client, setClient] = useState('');
+  const [clientId, setClientId] = useState<number | undefined>(undefined);
+  const [serviceId, setServiceId] = useState('');
+  const [taskTypeId, setTaskTypeId] = useState('');
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
+
+  // Ligne dont le bouton « Démarrer » a été cliqué sans mission déjà connue —
+  // un mini-formulaire s'ouvre juste en dessous pour la demander.
+  const [startingRowId, setStartingRowId] = useState<string | null>(null);
+  const [startServiceId, setStartServiceId] = useState('');
+  const [startTaskTypeId, setStartTaskTypeId] = useState('');
+
+  const taskTypesFor = (svcId: string) => (svcId ? taskTypes.filter(t => String(t.serviceId) === svcId) : []);
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!description.trim() || !token) return;
+    setAdding(true);
+    setAddError('');
+    try {
+      const service = services.find(s => String(s.id) === serviceId);
+      const taskType = taskTypes.find(t => String(t.id) === taskTypeId);
+      const res = await fetch('/api/task-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          client: client || undefined,
+          clientId,
+          pole: service?.name,
+          serviceId: service ? Number(service.id) : undefined,
+          taskType: taskType?.name,
+          taskTypeId: taskType ? Number(taskType.id) : undefined,
+          description: description.trim(),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Impossible d'enregistrer la note.");
+      onNoteAdded(body);
+      setDescription('');
+      setClient('');
+      setClientId(undefined);
+      setServiceId('');
+      setTaskTypeId('');
+      setDetailsOpen(false);
+    } catch (err: any) {
+      setAddError(friendlyError(err));
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Supprimer cette note ?') || !token) return;
+    try {
+      await fetch(`/api/task-notes/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    } catch { /* la liste locale se corrige quand même en dessous */ }
+    onNoteDeleted(id);
+  };
+
+  const beginStart = (note: any) => {
+    if (note.pole) { onStart(note.id); return; }
+    setStartServiceId('');
+    setStartTaskTypeId('');
+    setStartingRowId(note.id);
+  };
+
+  const confirmStart = (note: any) => {
+    const service = services.find(s => String(s.id) === startServiceId);
+    const taskType = taskTypes.find(t => String(t.id) === startTaskTypeId);
+    onStart(note.id, {
+      pole: service?.name,
+      serviceId: service ? Number(service.id) : undefined,
+      taskType: taskType?.name,
+      taskTypeId: taskType ? Number(taskType.id) : undefined,
+    });
+    setStartingRowId(null);
+  };
+
+  /** Date civile pure, fuseau du cabinet — même raisonnement que `formatTimeTN`. */
+  const noteDate = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('fr-FR', { timeZone: APP_TIMEZONE });
+  };
+
+  return (
+    <div className={`bg-white rounded-xl border border-gray-200 border-l-4 ${color.cardBorder} shadow-xs overflow-hidden flex flex-col sm:flex-1 sm:min-h-0`}>
+      <form onSubmit={handleAdd} className="p-4 border-b border-gray-100 shrink-0">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="Notez une tâche à faire — client, mission et type de tâche peuvent attendre…"
+            className="flex-1 border border-gray-200 rounded-md px-3 py-2 text-[13px] focus:outline-none focus:border-gray-400"
+          />
+          <button
+            type="button"
+            onClick={() => setDetailsOpen(o => !o)}
+            className="px-3 py-2 border border-gray-200 rounded-md text-[12px] font-medium text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 shrink-0"
+          >
+            {detailsOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            Client / mission / type
+          </button>
+          <button
+            type="submit"
+            disabled={!description.trim() || adding}
+            className="px-4 py-2 bg-navy text-white rounded-md text-[12.5px] font-bold hover:bg-navy-hover disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0"
+          >
+            {adding ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            Ajouter la note
+          </button>
+        </div>
+        {detailsOpen && (
+          <div className="grid sm:grid-cols-3 gap-2 mt-2">
+            <ClientSearchInput
+              value={client}
+              onChange={(name, id) => { setClient(name); setClientId(id); }}
+              placeholder="Client (facultatif)"
+            />
+            <SearchableSelect
+              value={serviceId}
+              onChange={id => { setServiceId(id); setTaskTypeId(''); }}
+              options={services.map(s => ({ id: s.id, label: s.name }))}
+              placeholder="Mission (facultatif)"
+              size="sm"
+            />
+            <SearchableSelect
+              value={taskTypeId}
+              onChange={setTaskTypeId}
+              options={taskTypesFor(serviceId).map(t => ({ id: t.id, label: t.name }))}
+              placeholder="Type de tâche (facultatif)"
+              size="sm"
+            />
+          </div>
+        )}
+        {addError && <p className="text-[11.5px] text-red-600 mt-1.5">{addError}</p>}
+      </form>
+
+      {notes.length === 0 ? (
+        <div className="p-10 text-center">
+          <p className="text-[13px] font-medium text-gray-600">Aucune note pour le moment.</p>
+          <p className="text-[12px] text-gray-400 mt-1 max-w-[46ch] mx-auto leading-relaxed">
+            Notez une idée de tâche même sans savoir encore la mission — vous la préciserez au moment de démarrer, planifier ou déléguer.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-auto flex-1 min-h-0 sm:min-h-[200px]">
+          <table className="w-full text-[12.5px] border-collapse">
+            <thead className="sticky top-0 bg-gray-50 text-[10.5px] font-bold text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th className="px-3 py-2 text-left whitespace-nowrap">Date d'enregistrement</th>
+                <th className="px-3 py-2 text-left">Client</th>
+                <th className="px-3 py-2 text-left">Mission</th>
+                <th className="px-3 py-2 text-left">Type de tâche</th>
+                <th className="px-3 py-2 text-left">Description</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {notes.map(note => (
+                <React.Fragment key={note.id}>
+                  <tr className="hover:bg-gray-50/60">
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-500">{noteDate(note.createdAt)}</td>
+                    <td className="px-3 py-2 text-gray-700">{note.client || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2 text-gray-700">{note.pole || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2 text-gray-700">{note.taskType || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2 text-gray-600 italic max-w-[260px] truncate" title={note.description}>
+                      {note.description}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => beginStart(note)}
+                          disabled={startingId === note.id}
+                          className="px-2.5 py-1.5 bg-navy text-white rounded-lg text-[11px] font-bold hover:bg-navy-hover disabled:opacity-50 flex items-center gap-1 whitespace-nowrap"
+                        >
+                          {startingId === note.id ? <Loader className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3 fill-current" />}
+                          Démarrer
+                        </button>
+                        <button
+                          onClick={() => onPlan?.(note)}
+                          className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-[11px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1 whitespace-nowrap"
+                        >
+                          <CalendarClock className="w-3 h-3" />
+                          Planifier
+                        </button>
+                        {onDelegate && (
+                          <button
+                            onClick={() => onDelegate?.(note)}
+                            className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-[11px] font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1 whitespace-nowrap"
+                          >
+                            <ClipboardCheck className="w-3 h-3" />
+                            Déléguer
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDelete(note.id)}
+                          title="Supprimer la note"
+                          className="w-7 h-7 border border-gray-200 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 hover:border-red-200 transition-colors shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {startingRowId === note.id && (
+                    <tr className="bg-rose-50/40">
+                      <td colSpan={6} className="px-3 py-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                          <span className="text-[11.5px] font-medium text-gray-600 shrink-0">
+                            Mission requise pour démarrer :
+                          </span>
+                          <div className="w-full sm:w-52">
+                            <SearchableSelect
+                              value={startServiceId}
+                              onChange={id => { setStartServiceId(id); setStartTaskTypeId(''); }}
+                              options={services.map(s => ({ id: s.id, label: s.name }))}
+                              placeholder="Sélectionner une mission"
+                              size="sm"
+                            />
+                          </div>
+                          <div className="w-full sm:w-52">
+                            <SearchableSelect
+                              value={startTaskTypeId}
+                              onChange={setStartTaskTypeId}
+                              options={taskTypesFor(startServiceId).map(t => ({ id: t.id, label: t.name }))}
+                              placeholder="Type de tâche (facultatif)"
+                              size="sm"
+                            />
+                          </div>
+                          <div className="flex gap-1.5 shrink-0">
+                            <button
+                              onClick={() => confirmStart(note)}
+                              disabled={!startServiceId}
+                              className="px-3 py-1.5 bg-navy text-white rounded-lg text-[11px] font-bold hover:bg-navy-hover disabled:opacity-50"
+                            >
+                              Démarrer
+                            </button>
+                            <button
+                              onClick={() => setStartingRowId(null)}
+                              className="px-3 py-1.5 border border-gray-300 rounded-lg text-[11px] font-medium text-gray-700 hover:bg-gray-50"
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
