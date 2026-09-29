@@ -10,12 +10,15 @@ interface HeaderProps {
   onToggleSidebar?: () => void;
   userCode?: string;
   userName?: string;
+  /** Current view label in the workspace breadcrumb. */
+  section?: string;
   /** Switches the active sidebar section — used by the notification bell. */
   onNavigate?: (section: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onToggleSidebar,
+  section,
   userCode = 'ABA01',
   userName = 'Alexandre Dupont',
   onNavigate,
@@ -26,7 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   const initials = displayUserName.substring(0, 2).toUpperCase();
 
   return (
-    <header className="h-[60px] shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 md:px-8 sticky top-0 z-20 font-sans">
+    <header className="app-header h-[68px] shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 md:px-8 sticky top-0 z-20 font-sans">
       {/* Left: drawer toggle. Hidden from `lg` up, where the rail is static
           and the button would open nothing. */}
       <div className="flex items-center gap-4">
@@ -38,6 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Menu className="w-5 h-5" />
         </button>
+        <div className="hidden xl:flex items-center gap-2 text-[12px] text-gray-500"><span>Mon espace</span><span className="text-gray-300">/</span><span className="font-semibold text-navy">{section || 'Tableau de bord'}</span></div>
       </div>
 
       {/* Right section utilities */}

@@ -5051,6 +5051,27 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   };
 
   /**
+   * En régime de suspension de TVA, le document est légalement adossé à une
+   * attestation d'achat en suspension — ces trois champs ne sont pas de la
+   * simple documentation, ils sont ce qui justifie l'absence de TVA. Le
+   * client les affiche déjà comme obligatoires (astérisque, `required`), ce
+   * qui ne remplace jamais la vérification serveur.
+   */
+  const suspensionError = (body: any): string | null => {
+    if (body?.vatRegime !== 'SUSPENSION') return null;
+    if (!String(body?.attestationNumber || '').trim()) {
+      return "Le n° d'attestation est obligatoire en régime de suspension de TVA.";
+    }
+    if (!String(body?.attestationDate || '').trim()) {
+      return "La date de l'attestation est obligatoire en régime de suspension de TVA.";
+    }
+    if (!String(body?.bonCommandeNumber || '').trim()) {
+      return 'Le n° de bon de commande est obligatoire en régime de suspension de TVA.';
+    }
+    return null;
+  };
+
+  /**
    * Dates may not decrease along the legal sequence.
    *
    * Numbering and chronology have to agree: invoice n° 2 cannot be dated before
@@ -5521,6 +5542,8 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
 
       const debError = disbursementsError(body);
       if (debError) return res.status(400).json({ error: debError });
+      const suspError = suspensionError(body);
+      if (suspError) return res.status(400).json({ error: suspError });
 
       const totals = computeInvoiceTotals(body);
       if (kind === 'FACTURE_LEGALE' && !isDraft) number = await db.nextInvoiceNumber(req.user.companyId);
@@ -5615,6 +5638,22 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       merged.status = existing.status || 'ISSUED';
       const editingDraft = merged.status === 'DRAFT';
 
+      // Le type de document ne se change pas non plus par une simple
+      // modification d'un document déjà émis — seul /convert-to-legal fait
+      // passer un « autre document » en facture légale, et c'est lui, pas
+      // PUT, qui réserve alors un vrai numéro dans la séquence. Sans ce
+      // verrou, choisir « Facture légale » dans le formulaire d'édition d'un
+      // document déjà émis faisait passer `documentKind` à FACTURE_LEGALE
+      // tout en gardant l'ancienne référence libre telle quelle (branche
+      // `else` ci-dessous) — un numéro jamais réservé, qui n'empêchait ni
+      // collision ni non-sens : une référence libre comme « 16 » se
+      // comparait alors à la chronologie de la vraie séquence légale
+      // (`legalSequenceDateError` ci-dessous), refusant des dates sans
+      // aucun rapport avec une véritable position dans la séquence. Un
+      // brouillon n'a encore rien réservé — il peut librement changer de
+      // type avant d'être émis, comme avant.
+      if (!editingDraft) merged.documentKind = existing.documentKind;
+
       // A legal invoice's number belongs to the sequence and is never
       // reassigned; a free document's may be corrected.
       if (editingDraft) {
@@ -5655,6 +5694,8 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       }
       const debError = disbursementsError(req.body);
       if (debError) return res.status(400).json({ error: debError });
+      const suspError = suspensionError(merged);
+      if (suspError) return res.status(400).json({ error: suspError });
       const totals = computeInvoiceTotals(merged);
 
       const updated = await db.updateInvoice(req.user.companyId, req.params.id, {
@@ -5811,6 +5852,124 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       res.json(updated);
     } catch (error) {
       console.error('Convert invoice error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Recale le point de départ de la séquence légale — la seule exception à
+   * « le numéro d'une facture légale n'est jamais réattribué en édition »
+   * (voir PUT ci-dessus). Utile à la migration : un cabinet qui reprend une
+   * numérotation déjà entamée ailleurs (papier, un autre logiciel) tape sa
+   * première facture légale dans l'app, qui prend « 0001 », puis la fait ici
+   * correspondre à la suite réelle — 0047, par exemple.
+   *
+   * Une première version n'acceptait ça que tant que n° 0001 restait la
+   * seule facture légale émise cette année — ce qui refusait
+   * systématiquement l'opération dès qu'un cabinet avait déjà continué à
+   * facturer normalement (n° 0002, 0003…) avant de penser à corriger le
+   * départ, c'est-à-dire le cas réel le plus courant. Ce n'était pas ce qui
+   * a été demandé : « il faut que ce soit respecté sur toute la séquence
+   * complète des factures légales ». La route décale donc maintenant TOUTES
+   * les autres factures légales déjà émises cette année par le même écart
+   * (n° 0002 → 0048, n° 0003 → 0049…) au lieu de refuser leur existence —
+   * un décalage uniforme, qui ne touche qu'aux numéros, jamais aux dates, et
+   * qui ne peut donc jamais inverser leur ordre chronologique entre elles ni
+   * vis-à-vis de n° 0001 (qui reste, après décalage, la plus petite valeur
+   * de toutes puisque l'écart est le même pour tout le monde). C'est aussi
+   * pourquoi ce n'est pas un cas de plus dans PUT : une action dédiée,
+   * explicite, auditée, qui touche plusieurs documents à la fois — pas une
+   * porte dérobée vers la règle générale.
+   */
+  app.post('/api/invoices/:id/renumber-first', authenticate, requirePermission('MANAGE_CASH'), async (req: any, res: any) => {
+    try {
+      const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+
+      if (existing.documentKind !== 'FACTURE_LEGALE' || existing.status === 'DRAFT') {
+        return res.status(409).json({ error: 'Seule une facture légale déjà émise peut être renumérotée.' });
+      }
+
+      const year = new Date().getFullYear();
+      const issueYear = String(existing.issueDate || '').slice(0, 4);
+      if (Number(existing.number) !== 1 || issueYear !== String(year)) {
+        return res.status(409).json({
+          error: "Seule la première facture légale de l'année en cours (n° 0001) peut être renumérotée — c'est elle qui recale le départ de toute la séquence.",
+        });
+      }
+
+      const raw = String(req.body?.number ?? '').trim();
+      if (!/^\d{1,4}$/.test(raw)) {
+        return res.status(400).json({ error: 'Le numéro doit être un nombre entier entre 1 et 9999.' });
+      }
+      const n = parseInt(raw, 10);
+      if (n < 1 || n > 9999) {
+        return res.status(400).json({ error: 'Le numéro doit être un nombre entier entre 1 et 9999.' });
+      }
+
+      // Toute autre facture légale déjà émise cette année-ci — celles qui
+      // doivent suivre le même décalage pour que la séquence reste continue.
+      const all = await db.getAllInvoices(req.user.companyId);
+      const othersThisYear = all.filter((i: any) =>
+        i.id !== existing.id && i.documentKind === 'FACTURE_LEGALE' && i.status !== 'DRAFT' &&
+        String(i.issueDate || '').slice(0, 4) === String(year) && Number(i.number) >= 2,
+      );
+
+      // Un document verrouillé (quota Freelance dépassé) ne se modifie plus
+      // du tout, même règle que PUT/convert-to-legal — y compris pour un
+      // décalage qui ne touche pourtant à aucun montant.
+      const companyForLock = await db.getCompanyById(req.user.companyId);
+      const toTouch = [existing, ...othersThisYear];
+      if (toTouch.some((i: any) => isQuotaLocked(companyForLock, i, all))) {
+        return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
+      }
+
+      const offset = n - 1;
+      const formatted = String(n).padStart(4, '0');
+      const now = new Date().toISOString();
+
+      await Promise.all(othersThisYear.map((i: any) =>
+        db.updateInvoice(req.user.companyId, i.id, {
+          number: String(Number(i.number) + offset).padStart(4, '0'),
+          renumberedFrom: i.number,
+          renumberedAt: now,
+        }),
+      ));
+      const updated = await db.updateInvoice(req.user.companyId, existing.id, {
+        number: formatted,
+        // Garde la trace de l'ancien numéro, même règle que
+        // `convertedFromNumber` pour une conversion — l'historique de ce qui
+        // a changé ne doit jamais se perdre en corrigeant un numéro.
+        renumberedFrom: existing.number,
+        renumberedAt: now,
+      });
+
+      // Recale le curseur lui-même : c'est tout l'intérêt de la route — la
+      // prochaine facture légale doit continuer depuis le plus haut numéro
+      // *jamais attribué* cette année, pas depuis le plus haut numéro
+      // *actuellement existant*. Les deux divergent dès qu'une facture a été
+      // supprimée entre-temps : le compteur ne redescend jamais quand une
+      // facture disparaît (même règle que documentée pour nextInvoiceNumber),
+      // donc une ligne manquante dans `othersThisYear` ne doit jamais faire
+      // retomber le curseur plus bas qu'il n'a réellement été. On prend donc
+      // le plus grand des deux — le compteur stocké (source de vérité) et le
+      // plus haut numéro effectivement observé (au cas où le compteur aurait
+      // dérivé) — jamais le second seul, qui avait fait renaître un numéro
+      // déjà utilisé (« 0016 ») une fois une facture intermédiaire supprimée.
+      const settingsRow = await db.getSettings(req.user.companyId);
+      const trustedCounter = settingsRow.invoiceCounterYear === year && typeof settingsRow.invoiceCounter === 'number'
+        ? settingsRow.invoiceCounter
+        : 1;
+      const observedMax = othersThisYear.length
+        ? Math.max(...othersThisYear.map((i: any) => Number(i.number)))
+        : 1;
+      const highestOriginal = Math.max(trustedCounter, observedMax);
+      await db.updateSettings(req.user.companyId, { invoiceCounter: highestOriginal + offset });
+
+      console.warn(`[cash] facture légale n° 0001 renumérotée en ${formatted} par ${req.user.username} — départ de séquence ${year}, ${othersThisYear.length} autre(s) facture(s) décalée(s) d'autant`);
+      res.json({ ...updated, shiftedCount: othersThisYear.length });
+    } catch (error) {
+      console.error('Renumber first invoice error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

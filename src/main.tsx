@@ -6,6 +6,7 @@ import { PresenceProvider } from './context/PresenceContext';
 import { LanguageProvider } from './context/LanguageContext';
 import { ToastProvider } from './context/ToastContext';
 import './index.css';
+import './styles/frontend-refresh.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

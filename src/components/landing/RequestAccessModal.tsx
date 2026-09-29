@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { useEscapeToClose } from '../../hooks/useEscapeToClose';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, Loader2, Mail, CheckCircle2, Lock, Phone, Building2 } from 'lucide-react';
 import { friendlyError } from '../../utils/errors';
 import { useAuth } from '../../context/AuthContext';
@@ -40,7 +39,14 @@ const PLAN_CODES: Record<string, string> =
  *   notifies contact@taches-and-cash.com.
  */
 export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, initialSeats, onClose }) => {
-  useEscapeToClose(onClose);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousOverflow = document.body.style.overflow;
+    dialog?.showModal();
+    document.body.style.overflow = 'hidden';
+    return () => { dialog?.close(); document.body.style.overflow = previousOverflow; };
+  }, []);
   const { login } = useAuth();
   const isSignup = plan in PLAN_CODES;
 
@@ -139,13 +145,13 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, in
   if (signedUp) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+    <dialog ref={dialogRef} aria-labelledby="request-access-title" className="request-access-dialog" onCancel={event => { event.preventDefault(); onClose(); }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col">
         <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between shrink-0">
-          <h2 className="text-[16px] font-bold text-navy">
+          <h2 id="request-access-title" className="text-[16px] font-bold text-navy">
             {reference ? 'Demande envoyée' : isSignup ? `Créer votre compte — ${plan}` : `Demande d'accès — ${plan}`}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100">
+          <button aria-label="Fermer le formulaire" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -377,6 +383,6 @@ export const RequestAccessModal: React.FC<RequestAccessModalProps> = ({ plan, in
           </form>
         )}
       </div>
-    </div>
+    </dialog>
   );
 };
