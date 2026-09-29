@@ -8704,10 +8704,10 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
    * (`createRunningEntryForUser`), donc la règle « une seule tâche en cours
    * par personne » s'applique pareil. La mission est la seule chose
    * réellement exigée pour démarrer — si la note ne l'avait pas encore, le
-   * corps de la requête la complète (avec le type de tâche, facultatif) sans
-   * qu'il ait fallu la stocker sur la note au préalable. La note est
-   * supprimée une fois convertie : ce n'est qu'une zone de saisie rapide, pas
-   * un historique.
+   * corps de la requête la complète (avec le client et le type de tâche,
+   * tous deux facultatifs) sans qu'il ait fallu les stocker sur la note au
+   * préalable. La note est supprimée une fois convertie : ce n'est qu'une
+   * zone de saisie rapide, pas un historique.
    */
   app.put('/api/task-notes/:id/start', authenticate, async (req: any, res: any) => {
     try {
@@ -8715,15 +8715,15 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       if (!note) return res.status(404).json({ error: 'Not found' });
       if (note.userId !== req.user.id) return res.status(403).json({ error: 'Cette note ne vous appartient pas' });
 
-      const { pole, serviceId, taskType, taskTypeId } = req.body || {};
+      const { client, clientId, pole, serviceId, taskType, taskTypeId } = req.body || {};
       const finalPole = (pole !== undefined ? pole : note.pole) || '';
       if (!String(finalPole).trim()) {
         return res.status(400).json({ error: 'La mission est requise pour démarrer cette tâche' });
       }
 
       const entry = await createRunningEntryForUser(req.user.companyId, req.user.id, {
-        client: note.client,
-        clientId: note.clientId,
+        client: (client !== undefined ? client : note.client) || '',
+        clientId: clientId !== undefined ? (clientId != null ? Number(clientId) : null) : note.clientId,
         pole: String(finalPole).trim(),
         serviceId: serviceId !== undefined ? (serviceId != null ? Number(serviceId) : null) : note.serviceId,
         taskType: (taskType !== undefined ? taskType : note.taskType) || '',

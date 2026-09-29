@@ -26,6 +26,14 @@ interface Props {
   disabled?: boolean;
   /** Compact (Pointage) ou normal (modales) — la seule différence est la densité. */
   size?: 'sm' | 'md';
+  /**
+   * Fond du bouton fermé — par défaut blanc. Même idée que le `bgClassName`
+   * de `ClientSearchInput` : un champ éditable posé dans une carte déjà
+   * blanche (le formulaire d'ajout de note, la ligne de démarrage inline)
+   * se confond avec son entourage sans une teinte pour le distinguer. Le
+   * panneau ouvert (recherche + liste) reste blanc dans tous les cas.
+   */
+  bgClassName?: string;
 }
 
 /**
@@ -56,7 +64,7 @@ interface Props {
  */
 export const SearchableSelect: React.FC<Props> = ({
   value, onChange, options, placeholder, searchPlaceholder = 'Rechercher…',
-  emptyLabel = 'Aucun résultat.', disabled, size = 'md',
+  emptyLabel = 'Aucun résultat.', disabled, size = 'md', bgClassName = 'bg-white',
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -166,7 +174,7 @@ export const SearchableSelect: React.FC<Props> = ({
         disabled={disabled}
         onClick={() => setOpen(o => !o)}
         title={selected?.label || placeholder}
-        className={`w-full text-left bg-white border border-gray-200 rounded-md ${pad} pr-8 font-medium text-gray-800 hover:border-gray-400 focus:outline-none focus:border-gray-400 transition-colors disabled:bg-gray-50 disabled:text-gray-400 truncate`}
+        className={`w-full text-left ${bgClassName} border border-gray-200 rounded-md ${pad} pr-8 font-medium text-gray-800 hover:border-gray-400 focus:outline-none focus:border-gray-400 transition-colors disabled:bg-gray-50 disabled:text-gray-400 truncate`}
       >
         {selected ? selected.label : <span className="text-gray-400 font-normal">{placeholder}</span>}
         <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />

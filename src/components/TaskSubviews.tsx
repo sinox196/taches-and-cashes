@@ -216,12 +216,16 @@ export const TaskSubviews: React.FC<{
   /**
    * Démarrer une note : exactement le même geste que « Démarrer » sur une
    * tâche déléguée (`start()` ci-dessus), plus loin dans la route — quand la
-   * note n'a pas encore de mission, `pole`/`serviceId`/`taskType`/
+   * note n'a pas encore de mission, `client`/`pole`/`serviceId`/`taskType`/
    * `taskTypeId` viennent du mini-formulaire que `NotesList` a fait remplir
    * avant d'appeler ceci ; sinon ils sont `undefined` et la route relit ceux
    * déjà stockés sur la note.
    */
-  const startNote = async (id: string, fields?: { pole?: string; serviceId?: string | number | null; taskType?: string; taskTypeId?: string | number | null }) => {
+  const startNote = async (id: string, fields?: {
+    client?: string; clientId?: number;
+    pole?: string; serviceId?: string | number | null;
+    taskType?: string; taskTypeId?: string | number | null;
+  }) => {
     setError('');
     setStartingId(id);
     try {
@@ -587,7 +591,7 @@ const NotesList: React.FC<{
   startingId: string | null;
   onNoteAdded: (note: any) => void;
   onNoteDeleted: (id: string) => void;
-  onStart: (id: string, fields?: { pole?: string; serviceId?: number; taskType?: string; taskTypeId?: number }) => void;
+  onStart: (id: string, fields?: { client?: string; clientId?: number; pole?: string; serviceId?: number; taskType?: string; taskTypeId?: number }) => void;
   onPlan?: (note: any) => void;
   onDelegate?: (note: any) => void;
 }> = ({ notes, services, taskTypes, color, token, startingId, onNoteAdded, onNoteDeleted, onStart, onPlan, onDelegate }) => {
@@ -604,8 +608,13 @@ const NotesList: React.FC<{
   const [addError, setAddError] = useState('');
 
   // Ligne dont le bouton « Démarrer » a été cliqué sans mission déjà connue —
-  // un mini-formulaire s'ouvre juste en dessous pour la demander.
+  // un mini-formulaire s'ouvre juste en dessous pour la demander. Le client
+  // y est repris (modifiable) : la mission est la seule chose réellement
+  // exigée pour démarrer, mais rien n'empêche d'en profiter pour ajouter ou
+  // corriger le client au même moment plutôt que de rouvrir la note ensuite.
   const [startingRowId, setStartingRowId] = useState<string | null>(null);
+  const [startClient, setStartClient] = useState('');
+  const [startClientId, setStartClientId] = useState<number | undefined>(undefined);
   const [startServiceId, setStartServiceId] = useState('');
   const [startTaskTypeId, setStartTaskTypeId] = useState('');
 
@@ -658,6 +667,8 @@ const NotesList: React.FC<{
 
   const beginStart = (note: any) => {
     if (note.pole) { onStart(note.id); return; }
+    setStartClient(note.client || '');
+    setStartClientId(note.clientId ?? undefined);
     setStartServiceId('');
     setStartTaskTypeId('');
     setStartingRowId(note.id);
@@ -667,6 +678,8 @@ const NotesList: React.FC<{
     const service = services.find(s => String(s.id) === startServiceId);
     const taskType = taskTypes.find(t => String(t.id) === startTaskTypeId);
     onStart(note.id, {
+      client: startClient || undefined,
+      clientId: startClientId,
       pole: service?.name,
       serviceId: service ? Number(service.id) : undefined,
       taskType: taskType?.name,
@@ -689,7 +702,7 @@ const NotesList: React.FC<{
             value={description}
             onChange={e => setDescription(e.target.value)}
             placeholder="Notez une tâche à faire — client, mission et type de tâche peuvent attendre…"
-            className="flex-1 border border-gray-200 rounded-md px-3 py-2 text-[13px] focus:outline-none focus:border-gray-400"
+            className="flex-1 bg-rose-50/60 border border-rose-200 rounded-md px-3 py-2 text-[13px] focus:outline-none focus:border-rose-400"
           />
           <button
             type="button"
@@ -714,6 +727,7 @@ const NotesList: React.FC<{
               value={client}
               onChange={(name, id) => { setClient(name); setClientId(id); }}
               placeholder="Client (facultatif)"
+              bgClassName="bg-rose-50/60"
             />
             <SearchableSelect
               value={serviceId}
@@ -721,6 +735,7 @@ const NotesList: React.FC<{
               options={services.map(s => ({ id: s.id, label: s.name }))}
               placeholder="Mission (facultatif)"
               size="sm"
+              bgClassName="bg-rose-50/60"
             />
             <SearchableSelect
               value={taskTypeId}
@@ -728,6 +743,7 @@ const NotesList: React.FC<{
               options={taskTypesFor(serviceId).map(t => ({ id: t.id, label: t.name }))}
               placeholder="Type de tâche (facultatif)"
               size="sm"
+              bgClassName="bg-rose-50/60"
             />
           </div>
         )}
@@ -804,10 +820,18 @@ const NotesList: React.FC<{
                   {startingRowId === note.id && (
                     <tr className="bg-rose-50/40">
                       <td colSpan={6} className="px-3 py-3">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                          <span className="text-[11.5px] font-medium text-gray-600 shrink-0">
-                            Mission requise pour démarrer :
-                          </span>
+                        <p className="text-[11.5px] font-medium text-gray-600 mb-2">
+                          Mission requise pour démarrer — client et type de tâche facultatifs :
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="w-full sm:w-52">
+                            <ClientSearchInput
+                              value={startClient}
+                              onChange={(name, id) => { setStartClient(name); setStartClientId(id); }}
+                              placeholder="Client (facultatif)"
+                              bgClassName="bg-rose-50/60"
+                            />
+                          </div>
                           <div className="w-full sm:w-52">
                             <SearchableSelect
                               value={startServiceId}
@@ -815,6 +839,7 @@ const NotesList: React.FC<{
                               options={services.map(s => ({ id: s.id, label: s.name }))}
                               placeholder="Sélectionner une mission"
                               size="sm"
+                              bgClassName="bg-rose-50/60"
                             />
                           </div>
                           <div className="w-full sm:w-52">
@@ -824,6 +849,7 @@ const NotesList: React.FC<{
                               options={taskTypesFor(startServiceId).map(t => ({ id: t.id, label: t.name }))}
                               placeholder="Type de tâche (facultatif)"
                               size="sm"
+                              bgClassName="bg-rose-50/60"
                             />
                           </div>
                           <div className="flex gap-1.5 shrink-0">
