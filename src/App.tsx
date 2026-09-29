@@ -140,11 +140,23 @@ export default function App() {
    * How many of the newest entries `fetchTimeEntries` asks the server for.
    * Mirrors the server's own `ENTRIES_PAGE_SIZE` (server.ts) as the starting
    * point; "Charger plus" in TimeTrackingTable raises it in the same
-   * increments, capped at the server's own hard limit of 1000 — a click never
-   * asks for something the route would refuse anyway.
+   * increments, capped at the server's own hard *per-call* limit of 1000 —
+   * a single request never asks for more than the route would serve anyway.
    */
   const ENTRIES_PAGE_SIZE = 200;
   const [entriesLimit, setEntriesLimit] = useState(ENTRIES_PAGE_SIZE);
+  /**
+   * Once `entriesLimit` has maxed out at 1000 (the server's per-call
+   * ceiling), there's no bigger `limit` left to ask for — `?limit=` alone
+   * can never reach further back. Beyond that point "Charger plus" walks
+   * `offset` instead, exactly like `fetchAllFilteredEntries` already does
+   * for Export (TimeTrackingTable.tsx): 0 while still in the "grow limit"
+   * phase, then the next `offset` to request (1000, 2000, …) once chunked
+   * loading has taken over. This is what let a team with >1000 activities
+   * see anything past the 1000th on screen at all — before this, "Charger
+   * plus" simply disappeared past that point with no way to reach the rest.
+   */
+  const [entriesOffset, setEntriesOffset] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   // Sidebar badge: polled as a fallback and updated live by ChatPage's own
@@ -269,21 +281,60 @@ export default function App() {
       const rows = Array.isArray(body) ? body : (body.data ?? []);
       setTimeEntries(rows.map(decorate));
       if (!Array.isArray(body) && typeof body.total === 'number') setTotalEntries(body.total);
+      // This is always a wholesale replace at offset=0 — any chunks
+      // `loadMoreEntries` had appended past the first 1000 no longer exist
+      // in `timeEntries` after it, so the next "Charger plus" must resume
+      // its offset-walk from scratch too, not from wherever it last left off.
+      setEntriesOffset(0);
     } catch (e) {
       console.error(e);
     }
   }, [token, entriesLimit]);
 
   /**
-   * "Charger plus" in TimeTrackingTable — raises the page size and re-fetches
-   * once, superset of what's already shown, so this alone (unlike the SSE
-   * frame below) can just replace `timeEntries` wholesale.
+   * "Charger plus" in TimeTrackingTable. Two phases:
+   *
+   * 1. While `entriesLimit < 1000`: raise the page size and re-fetch from
+   *    `offset=0` — the new page is a superset of what's already shown, so
+   *    this can just replace `timeEntries` wholesale (unlike the SSE merge
+   *    below).
+   * 2. Once `entriesLimit` has hit the server's per-call ceiling of 1000,
+   *    there's no bigger `limit` left to ask for. From here each click walks
+   *    `offset` forward by 1000 instead (mirroring the offset-chunking
+   *    `fetchAllFilteredEntries` already uses for Export) and *appends* the
+   *    fresh chunk rather than replacing — a plain re-fetch at `offset=0`
+   *    would just hand back the same first 1000 rows every time. Entries
+   *    pinned to the very top of `offset=0` (RUNNING/PAUSED — see
+   *    `withPinnedActiveEntries` in server.ts) can also reappear at their
+   *    natural position in a later chunk, so the merge dedupes by id, same
+   *    as the export path.
    */
-  const loadMoreEntries = useCallback(() => {
-    const newLimit = Math.min(entriesLimit + ENTRIES_PAGE_SIZE, 1000);
-    setEntriesLimit(newLimit);
-    fetchTimeEntries(newLimit);
-  }, [entriesLimit, fetchTimeEntries]);
+  const loadMoreEntries = useCallback(async () => {
+    if (entriesLimit < 1000) {
+      const newLimit = Math.min(entriesLimit + ENTRIES_PAGE_SIZE, 1000);
+      setEntriesLimit(newLimit);
+      await fetchTimeEntries(newLimit);
+      return;
+    }
+    if (!token) return;
+    const nextOffset = entriesOffset === 0 ? 1000 : entriesOffset + 1000;
+    try {
+      const res = await fetch(`/api/time-entries?limit=1000&offset=${nextOffset}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const body = await res.json();
+      const rows = Array.isArray(body) ? body : (body.data ?? []);
+      if (!Array.isArray(body) && typeof body.total === 'number') setTotalEntries(body.total);
+      setTimeEntries(prev => {
+        const existingIds = new Set(prev.map(e => e.id));
+        const fresh = rows.filter((r: any) => !existingIds.has(r.id)).map(decorate);
+        return [...prev, ...fresh];
+      });
+      setEntriesOffset(nextOffset);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [entriesLimit, entriesOffset, token, fetchTimeEntries]);
 
   useEffect(() => {
     if (!token || isClientUser || activeNav !== 'Time Tracking') return;

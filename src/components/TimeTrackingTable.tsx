@@ -528,10 +528,13 @@ export const TimeTrackingTable: React.FC<TimeTrackingTableProps & { hasRunningTa
               </span>
             )}
           </span>
-          {/* Only offered while there's genuinely more to fetch — the server
-              caps a single page at 1000, so past that "load more" would just
-              re-request the same page and do nothing. */}
-          {onLoadMore && totalEntries != null && totalEntries > entries.length && entries.length < 1000 && (
+          {/* Only offered while there's genuinely more to fetch. The server
+              caps a single call's `limit` at 1000, but App.tsx's onLoadMore
+              switches to walking `offset` in chunks of 1000 once that's
+              reached, so this can keep going arbitrarily far past 1000 —
+              the button no longer disappears just because 1000 rows are
+              already loaded. */}
+          {onLoadMore && totalEntries != null && totalEntries > entries.length && (
             <button
               onClick={onLoadMore}
               className="px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 text-[10.5px] font-bold hover:border-gray-400 hover:bg-gray-50 transition-colors"
