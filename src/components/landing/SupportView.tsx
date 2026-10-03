@@ -51,10 +51,12 @@ const GROUPS = [
 
 type GroupId = typeof GROUPS[number]['id'];
 
-/** Vidéo de démonstration « Créer un compte & se connecter » — hébergée une
- *  seule fois, référencée depuis le chapitre du guide *et* depuis l'étape 1
- *  du Démarrage rapide, pour ne jamais risquer deux copies qui divergent. */
+/** Vidéos de démonstration — chacune hébergée une seule fois, référencée à
+ *  la fois depuis le chapitre du guide concerné *et* depuis l'étape du
+ *  Démarrage rapide qui en parle, pour ne jamais risquer deux copies qui
+ *  divergent. */
 const ACCOUNT_DEMO_VIDEO = '/support/compte-demo.mp4';
+const CLIENTS_DEMO_VIDEO = '/support/clients-demo.mp4';
 
 /**
  * Chaque entrée reprend un chapitre réel du guide utilisateur (téléchargeable
@@ -93,6 +95,7 @@ const GUIDE_CHAPTERS: {
   {
     id: 'clients',
     shot: '/support/clients.webp',
+    video: CLIENTS_DEMO_VIDEO,
     title: 'Clients',
     group: 'piloter',
     summary: "La fiche client centralise coordonnées, facturation, échéances et encaissements. Ajoutez des colonnes personnalisées, importez votre fichier clients en masse depuis un tableur, ou ouvrez l'espace d'un client sans jamais avoir besoin de son mot de passe.",
@@ -241,7 +244,7 @@ const FAQ_ITEMS: { id: string; q: string; a: string }[] = [
  */
 const QUICK_START_INTRO = "Vous mettez en place Tâches & Cash pour votre cabinet ? Voici la feuille de route idéale pour opérationnaliser votre plateforme en quelques minutes.";
 
-const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; items: string[]; video?: string }[] = [
+const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; items: string[]; video?: string; videoPoster?: string; videoLabel?: string }[] = [
   {
     title: "Création du compte & Paramétrage de l'équipe",
     sub: 'Équipe de travail',
@@ -252,6 +255,8 @@ const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; i
       "Transmettez à chaque membre de l'équipe son identifiant et son mot de passe pour qu'il puisse se connecter.",
     ],
     video: ACCOUNT_DEMO_VIDEO,
+    videoPoster: '/support/compte.webp',
+    videoLabel: "Créer un compte & paramétrer l'équipe",
   },
   {
     title: 'Base clients',
@@ -260,6 +265,9 @@ const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; i
     items: [
       'Importez votre portefeuille en masse via un fichier Excel ou créez individuellement vos fiches clients.',
     ],
+    video: CLIENTS_DEMO_VIDEO,
+    videoPoster: '/support/clients.webp',
+    videoLabel: 'Importer un fichier clients',
   },
   {
     title: "Catalogue d'activités",
@@ -1115,18 +1123,20 @@ export const SupportView: React.FC<SupportViewProps> = ({
                           diverger. */}
                       {step.video && (
                         <button
-                          onClick={() => setZoom({ src: step.video!, title: step.title, kind: 'video', poster: '/support/compte.webp' })}
+                          onClick={() => setZoom({ src: step.video!, title: step.title, kind: 'video', poster: step.videoPoster })}
                           className="group/qsvid mt-3 flex items-center gap-3 w-full rounded-xl border border-[#E6E9EE] bg-[#FBFCFD] hover:border-turquoise/50 hover:bg-[#F2F9F8] transition-colors px-3 py-2.5 text-left"
                         >
                           <span className="relative w-16 h-11 rounded-lg overflow-hidden shrink-0 bg-navy">
-                            <img
-                              src="/support/compte.webp"
-                              alt=""
-                              aria-hidden
-                              loading="lazy"
-                              decoding="async"
-                              className="w-full h-full object-cover opacity-70"
-                            />
+                            {step.videoPoster && (
+                              <img
+                                src={step.videoPoster}
+                                alt=""
+                                aria-hidden
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover opacity-70"
+                              />
+                            )}
                             <span className="absolute inset-0 flex items-center justify-center">
                               <span className="w-7 h-7 rounded-full bg-white flex items-center justify-center group-hover/qsvid:scale-110 transition-transform duration-300">
                                 <Play className="w-3 h-3 text-navy ml-0.5" fill="currentColor" />
@@ -1135,7 +1145,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
                           </span>
                           <span className="min-w-0">
                             <span className="block text-[12.5px] font-bold text-navy">Voir la vidéo de démonstration</span>
-                            <span className="block text-[11px] text-[#8A93A0]">Créer un compte & paramétrer l'équipe</span>
+                            <span className="block text-[11px] text-[#8A93A0]">{step.videoLabel}</span>
                           </span>
                         </button>
                       )}
