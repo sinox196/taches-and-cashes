@@ -3,7 +3,7 @@ import {
   Search, HelpCircle, Headphones, MessageCircle, Sparkles, Video, Download,
   ChevronDown, BookOpen, Mail, Clock, Users, LayoutDashboard, Building2, Timer,
   ListChecks, Wallet, CalendarCheck, FolderKanban, MessageSquare, Gift, Globe,
-  FileText, ArrowRight, CornerDownLeft, X, Maximize2,
+  FileText, ArrowRight, CornerDownLeft, X, Maximize2, Rocket,
 } from 'lucide-react';
 import { Reveal } from './Reveal';
 
@@ -223,6 +223,52 @@ const FAQ_ITEMS: { id: string; q: string; a: string }[] = [
   },
 ];
 
+/**
+ * Le parcours « Démarrage rapide » — contenu fourni tel quel par le cabinet,
+ * pas reformulé : c'est la feuille de route qu'il remet déjà à un nouveau
+ * client, mise en forme pour se lire d'un coup d'œil (une étape = un numéro,
+ * un titre, ses points) plutôt qu'en un seul bloc de texte.
+ */
+const QUICK_START_INTRO = "Vous mettez en place Tâches & Cash pour votre cabinet ? Voici la feuille de route idéale pour opérationnaliser votre plateforme en quelques minutes.";
+
+const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; items: string[] }[] = [
+  {
+    title: "Création du compte & Paramétrage de l'équipe",
+    sub: 'Équipe de travail',
+    icon: <Users className="w-[18px] h-[18px]" />,
+    items: [
+      'Créez votre compte Administrateur.',
+      "Ajoutez et paramétrez les comptes de vos collaborateurs (droits d'accès, régime horaire et éléments de paie).",
+      "Transmettez à chaque membre de l'équipe son identifiant et son mot de passe pour qu'il puisse se connecter.",
+    ],
+  },
+  {
+    title: 'Base clients',
+    sub: 'Clients',
+    icon: <Building2 className="w-[18px] h-[18px]" />,
+    items: [
+      'Importez votre portefeuille en masse via un fichier Excel ou créez individuellement vos fiches clients.',
+    ],
+  },
+  {
+    title: "Catalogue d'activités",
+    sub: 'Missions',
+    icon: <ListChecks className="w-[18px] h-[18px]" />,
+    items: [
+      'Configurez vos missions (ex. Comptabilité, Fiscalité, Conseil) et les types de tâches associées pour alimenter le formulaire de pointage de votre équipe.',
+    ],
+  },
+  {
+    title: 'Prise en main & Accompagnement',
+    icon: <Headphones className="w-[18px] h-[18px]" />,
+    items: [
+      "Effectuez une démonstration / formation auprès de vos collaborateurs et de vos clients pour leur présenter la création des tâches, l'utilisation du chronomètre et la navigation dans les différents modules.",
+    ],
+  },
+];
+
+const QUICK_START_OUTRO = "Notre équipe d'accompagnement reste à votre entière disposition à tout moment pour vous guider et optimiser votre expérience.";
+
 const useReducedMotion = () => {
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
@@ -280,6 +326,8 @@ export const SupportView: React.FC<SupportViewProps> = ({
   /** La capture ouverte en grand. Une capture d'écran d'application se lit mal
    *  à 500px de large : la vignette sert à situer, l'agrandissement à lire. */
   const [zoom, setZoom] = useState<{ src: string; title: string } | null>(null);
+  /** Le parcours « Démarrage rapide », ouvert depuis son propre bouton dans le hero. */
+  const [quickStartOpen, setQuickStartOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
@@ -362,6 +410,19 @@ export const SupportView: React.FC<SupportViewProps> = ({
     };
   }, [zoom]);
 
+  // Même geste qu'au-dessus pour la modale « Démarrage rapide ».
+  useEffect(() => {
+    if (!quickStartOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setQuickStartOpen(false); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [quickStartOpen]);
+
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
       if (query) { setQuery(''); setPanelOpen(false); } else inputRef.current?.blur();
@@ -416,7 +477,26 @@ export const SupportView: React.FC<SupportViewProps> = ({
         <div className="max-w-[1200px] mx-auto flex gap-14 items-center flex-wrap">
           <div style={{ flex: '1 1 480px', minWidth: 0 }} className="relative z-20">
             <Reveal>
-              <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Centre d'assistance</div>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Centre d'assistance</div>
+                {/* Le seul CTA du hero à porter un mouvement qui lui est
+                    propre — un halo qui respire derrière l'icône, toujours
+                    actif plutôt qu'au survol seul — précisément pour qu'il se
+                    remarque avant même d'être lu. `landing-shine` ajoute le
+                    balayage déjà utilisé sur les autres CTA pleins de cette
+                    page (« Télécharger le guide complet », WhatsApp). */}
+                <button
+                  onClick={() => setQuickStartOpen(true)}
+                  className="landing-shine group inline-flex items-center gap-2 pl-2.5 pr-4 py-1.5 rounded-full bg-navy text-white text-[12px] font-bold hover:bg-turquoise hover:text-navy transition-colors"
+                >
+                  <span className="relative flex items-center justify-center w-6 h-6 shrink-0">
+                    <span aria-hidden className="absolute inset-0 rounded-full bg-turquoise/60 animate-[landingBreathe_2.6s_ease-in-out_infinite]" />
+                    <Rocket className="relative w-3.5 h-3.5" />
+                  </span>
+                  Démarrage rapide
+                  <ArrowRight className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-1" />
+                </button>
+              </div>
             </Reveal>
             <Reveal delay={80}>
               <h1 className="mt-[18px] text-[34px] sm:text-[42px] font-extrabold text-navy tracking-[-0.02em] leading-[1.15]">
@@ -875,6 +955,101 @@ export const SupportView: React.FC<SupportViewProps> = ({
               alt={`L'écran ${zoom.title} dans Tâches & Cash`}
               className="w-full h-auto max-h-[80vh] object-contain rounded-xl bg-white"
             />
+          </div>
+        </div>
+      )}
+
+      {/* « Démarrage rapide » — même geste de fermeture que l'agrandissement
+          ci-dessus (clic au fond, Échap, défilement bloqué). Le contenu est
+          celui remis par le cabinet, mis en forme en étapes numérotées et
+          reliées par un trait plutôt qu'en un seul paragraphe : c'est ce qui
+          le rend facile à lire d'un coup d'œil et à suivre dans l'ordre. */}
+      {quickStartOpen && (
+        <div
+          onClick={() => setQuickStartOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Démarrage rapide"
+          className="fixed inset-0 z-[100] bg-navy/70 backdrop-blur-[2px] flex items-start sm:items-center justify-center p-4 sm:p-8 overflow-y-auto animate-[landingPanelIn_160ms_ease-out]"
+        >
+          <div
+            className="w-full max-w-[680px] my-auto bg-white rounded-[24px] overflow-hidden"
+            style={{ boxShadow: '0 40px 90px -24px rgba(13,27,42,0.45)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-6 sm:px-8 pt-7 pb-6 border-b border-[#E6E9EE] flex items-start gap-4">
+              <div className="relative w-11 h-11 rounded-xl bg-navy flex items-center justify-center shrink-0 text-turquoise">
+                <span aria-hidden className="absolute inset-0 rounded-xl bg-turquoise/25 animate-[landingBreathe_3s_ease-in-out_infinite]" />
+                <Rocket className="relative w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-[19px] sm:text-[21px] font-extrabold text-navy tracking-[-0.01em]">Démarrage rapide</h2>
+                <p className="mt-0.5 text-[13px] text-[#8A93A0] font-semibold">Le parcours de configuration en 4 étapes</p>
+              </div>
+              <button
+                onClick={() => setQuickStartOpen(false)}
+                aria-label="Fermer"
+                className="w-9 h-9 rounded-lg hover:bg-[#F2F4F7] text-[#8A93A0] hover:text-navy flex items-center justify-center transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-6 sm:px-8 py-6 max-h-[62vh] overflow-y-auto">
+              <p className="text-[14px] text-[#5B6472] leading-[1.6]">{QUICK_START_INTRO}</p>
+
+              <div className="mt-6">
+                {QUICK_START_STEPS.map((step, i) => (
+                  <div key={step.title} className="flex gap-4">
+                    {/* Colonne numéro + trait de liaison vers l'étape
+                        suivante — c'est ce trait, plus que le numéro seul,
+                        qui dit « ceci est un parcours », pas une liste. */}
+                    <div className="flex flex-col items-center shrink-0">
+                      <span className="w-8 h-8 rounded-full bg-[#E3F7F5] text-[#00857C] text-[13px] font-extrabold flex items-center justify-center shrink-0">
+                        {String(i + 1).padStart(2, '0')}
+                      </span>
+                      {i < QUICK_START_STEPS.length - 1 && (
+                        <span aria-hidden className="w-[2px] flex-1 bg-[#E6E9EE] my-1" />
+                      )}
+                    </div>
+                    <div className={`min-w-0 ${i < QUICK_START_STEPS.length - 1 ? 'pb-6' : ''}`}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="w-6 h-6 rounded-md bg-[#F2F4F7] text-[#00857C] flex items-center justify-center shrink-0">{step.icon}</span>
+                        <span className="text-[14.5px] font-bold text-navy">{step.title}</span>
+                        {step.sub && <span className="text-[11.5px] font-semibold text-[#8A93A0]">({step.sub})</span>}
+                      </div>
+                      <ul className="mt-2 space-y-1.5">
+                        {step.items.map((item, j) => (
+                          <li key={j} className="flex gap-2 text-[13.5px] text-[#5B6472] leading-[1.55]">
+                            <span aria-hidden className="mt-[7px] w-1 h-1 rounded-full bg-[#B6BCC6] shrink-0" />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-2 text-[13.5px] text-[#5B6472] leading-[1.6] border-t border-[#F0F2F5] pt-5">{QUICK_START_OUTRO}</p>
+            </div>
+
+            <div className="px-6 sm:px-8 py-5 bg-[#FBFCFD] border-t border-[#E6E9EE] flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                <a href={`mailto:${contactEmail}`} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-navy text-white text-[12.5px] font-bold hover:bg-navy-hover transition-colors">
+                  <Mail className="w-3.5 h-3.5" /> Écrire un e-mail
+                </a>
+                <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#F2F4F7] text-navy text-[12.5px] font-bold hover:bg-[#E6E9EE] transition-colors">
+                  <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                </a>
+              </div>
+              <button
+                onClick={() => setQuickStartOpen(false)}
+                className="px-4 py-2 rounded-lg text-[12.5px] font-bold text-[#5B6472] hover:text-navy hover:bg-[#F2F4F7] transition-colors"
+              >
+                Fermer
+              </button>
+            </div>
           </div>
         </div>
       )}
