@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, BellRing, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check, Wallet, FileClock, FileText, FolderCheck, BarChart3 } from 'lucide-react';
+import { Bell, BellRing, MessageCircle, ClipboardCheck, CalendarDays, CalendarClock, Clock4, Check, Wallet, FileClock, FileText, FolderCheck, BarChart3, Landmark } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast, type ToastVariant } from '../context/ToastContext';
 import {
@@ -48,6 +48,12 @@ const TYPE_META: Record<string, { icon: React.ElementType; nav: string; iconClas
   PORTAL_DELIVERABLE: { icon: FolderCheck, nav: 'Deliverables', iconClass: 'bg-emerald-50 text-emerald-600' },
   PORTAL_TASK_DONE: { icon: ClipboardCheck, nav: 'Tasks', iconClass: 'bg-emerald-50 text-emerald-600' },
   PORTAL_REPORT: { icon: BarChart3, nav: 'Report', iconClass: 'bg-blue-50 text-blue-600' },
+  PORTAL_BANK_STATEMENT: { icon: Landmark, nav: 'BankStatement', iconClass: 'bg-sky-50 text-sky-600' },
+  // Celle-ci part vers l'équipe, pas vers un compte portail — le relevé
+  // bancaire vit uniquement dans le portail client (voir CLAUDE.md « Relevé
+  // bancaire »), donc la destination admin est la fiche du client concerné,
+  // d'où l'« Espace client » rouvre le même écran.
+  BANK_STATEMENT_JUSTIF: { icon: Landmark, nav: 'Clients', iconClass: 'bg-amber-50 text-amber-600' },
 };
 
 /**
@@ -110,6 +116,8 @@ const TOAST_VARIANT: Record<string, ToastVariant> = {
   PORTAL_DELIVERABLE: 'info',
   PORTAL_TASK_DONE: 'info',
   PORTAL_REPORT: 'info',
+  PORTAL_BANK_STATEMENT: 'info',
+  BANK_STATEMENT_JUSTIF: 'info',
 };
 
 /** "il y a 5 min" — coarse on purpose, this is a notification list, not a log. */

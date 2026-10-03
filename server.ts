@@ -4203,7 +4203,15 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       console.log(`[impersonate] admin ${req.user.id} -> user ${target.id} (client ${clientId}, "${client.name}") at ${new Date().toISOString()}`);
 
       const token = jwt.sign(
-        { id: target.id, role: target.role, companyId: req.user.companyId, clientId: target.clientId ?? null, isPlatformAdmin: false },
+        {
+          id: target.id, role: target.role, companyId: req.user.companyId, clientId: target.clientId ?? null,
+          isPlatformAdmin: false,
+          // Porte l'id de l'admin derrière la bascule — c'est ce qui distingue
+          // cette session d'un vrai login client, et ce que le Relevé
+          // bancaire du portail (voir CLAUDE.md) lit pour savoir si la session
+          // a le droit d'y faire plus que renseigner un justificatif.
+          impersonatedBy: req.user.id,
+        },
         JWT_SECRET, { expiresIn: '1d' },
       );
       res.json({ token, username: target.username });
@@ -5353,6 +5361,245 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       }
 
       const ok = await db.deleteCashJournalEntry(req.user.companyId, req.params.id);
+      if (!ok) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Relevé bancaire — une ligne par transaction sur le relevé d'un client,
+   * saisie par le cabinet (date, libellé, date de valeur, débit, crédit),
+   * que le client confirme avec un `justif`. Le statut n'est jamais stocké —
+   * dérivé de la présence de `justif`, même règle que `available` sur un
+   * solde de congé.
+   */
+  const bankStatementStatus = (line: any): 'OK' | 'SANS_JUSTIF' =>
+    String(line?.justif ?? '').trim() ? 'OK' : 'SANS_JUSTIF';
+
+  const withBankStatementStatus = (line: any) => ({ ...line, statut: bankStatementStatus(line) });
+
+  const normalizeBankStatementLine = (body: any) => {
+    const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+    const customFields: Record<string, string> = {};
+    if (body?.customFields && typeof body.customFields === 'object') {
+      for (const [k, v] of Object.entries(body.customFields)) {
+        const key = text(k, 60);
+        if (key) customFields[key] = text(v, 300);
+      }
+    }
+    return {
+      date: text(body?.date, 10),
+      libelle: text(body?.libelle, 200),
+      dateValeur: text(body?.dateValeur, 10),
+      debit: round3(num(Number(body?.debit), 0)),
+      credit: round3(num(Number(body?.credit), 0)),
+      justif: text(body?.justif, 300),
+      customFields,
+    };
+  };
+
+  const validateBankStatementLine = (row: any): string | null => {
+    if (!row.date) return 'La date est obligatoire';
+    if (!row.libelle) return 'Le libellé est obligatoire';
+    return null;
+  };
+
+  /** Notifie chaque compte CLIENT rattaché au dossier — même "silencieux si
+   *  aucun compte portail" que les quatre autres notifications portail. */
+  async function notifyBankStatementToClient(companyId: string, clientId: number, body: string) {
+    const portalIds = await portalUserIdsFor(companyId, clientId);
+    for (const uid of portalIds) {
+      await notify(companyId, uid, 'PORTAL_BANK_STATEMENT', 'Relevé bancaire mis à jour', body);
+    }
+  }
+
+  /** Le pendant interne : quand le client renseigne son justificatif, ADMIN
+   *  et SUPERVISEUR — le même duo que `DASHBOARD_ROLES` — en sont avertis,
+   *  pour qu'un justif déposé ne dorme pas sans que personne ne le voie. */
+  async function notifyBankStatementJustifToStaff(companyId: string, clientId: number, body: string) {
+    const client = await db.getClientById(companyId, clientId);
+    const staff = (await db.getAllUsers(companyId)).filter((u: any) => DASHBOARD_ROLES.includes(u.role));
+    for (const u of staff) {
+      await notify(companyId, u.id, 'BANK_STATEMENT_JUSTIF', 'Justificatif déposé',
+        `${client?.name || 'Un client'} a déposé un justificatif sur son relevé bancaire — ${body}`);
+    }
+  }
+
+  /**
+   * Le relevé bancaire n'existe que dans le portail client — voir CLAUDE.md
+   * « Relevé bancaire » : il n'y a plus d'onglet Cash dédié. Un administrateur
+   * y accède par « Espace client » (POST /api/clients/:id/impersonate), dont
+   * le jeton porte désormais `impersonatedBy`. Une session ainsi élevée — et
+   * seulement elle — peut créer, modifier n'importe quel champ, supprimer et
+   * importer en masse ; un vrai login client garde le comportement d'origine
+   * (justif seul, aucune suppression, aucune création).
+   */
+  const isElevatedBankStatementSession = async (req: any): Promise<boolean> => {
+    const adminId = req.user?.impersonatedBy;
+    if (!adminId) return false;
+    const admin = await db.getUserById(req.user.companyId, adminId);
+    if (!admin) return false;
+    return admin.role === 'ADMIN' || JSON.parse(admin.permissions || '[]').includes('MANAGE_BANK_STATEMENT');
+  };
+
+  /**
+   * Un vrai client voit toujours son propre dossier — ce n'est pas une
+   * permission qui le concerne. Un administrateur en « Espace client », lui,
+   * doit tenir VIEW_BANK_STATEMENT (ou MANAGE, qui la contient) pour seulement
+   * *voir* l'onglet — c'est la permission demandée pour l'équipe, voir
+   * CLAUDE.md « Relevé bancaire ».
+   */
+  const canAccessBankStatementAsStaff = async (req: any): Promise<boolean> => {
+    const adminId = req.user?.impersonatedBy;
+    if (!adminId) return true;
+    const admin = await db.getUserById(req.user.companyId, adminId);
+    if (!admin) return false;
+    if (admin.role === 'ADMIN') return true;
+    const perms: string[] = JSON.parse(admin.permissions || '[]');
+    return perms.includes('VIEW_BANK_STATEMENT') || perms.includes('MANAGE_BANK_STATEMENT');
+  };
+
+  /**
+   * Portail client — le dossier vient du jeton, jamais d'un paramètre.
+   */
+  app.get('/api/portal/bank-statement', authenticate, async (req: any, res: any) => {
+    try {
+      if (!req.user.clientId) return res.json([]);
+      if (!(await canAccessBankStatementAsStaff(req))) return res.status(403).json({ error: 'Forbidden' });
+      const rows = (await db.getAllBankStatementLines(req.user.companyId))
+        .filter((r: any) => Number(r.clientId) === Number(req.user.clientId))
+        .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      res.json(rows.map(withBankStatementStatus));
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/portal/bank-statement', authenticate, async (req: any, res: any) => {
+    try {
+      if (!req.user.clientId) return res.status(403).json({ error: 'Forbidden' });
+      if (!(await isElevatedBankStatementSession(req))) return res.status(403).json({ error: 'Forbidden' });
+
+      const row = normalizeBankStatementLine(req.body);
+      const invalid = validateBankStatementLine(row);
+      if (invalid) return res.status(400).json({ error: invalid });
+
+      const created = await db.createBankStatementLine(req.user.companyId, {
+        id: genId('bankstmt'),
+        clientId: req.user.clientId,
+        ...row,
+        createdBy: req.user.impersonatedBy,
+        createdAt: new Date().toISOString(),
+      });
+      await notifyBankStatementToClient(req.user.companyId, req.user.clientId,
+        `Une nouvelle ligne a été ajoutée (${row.date}${row.libelle ? ` — ${row.libelle}` : ''}).`);
+      res.status(201).json(withBankStatementStatus(created));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * Importe en masse les lignes d'un relevé bancaire déjà analysé côté
+   * navigateur (SheetJS, même idiome que l'import de clients) — un tableau
+   * d'objets `{date, libelle, dateValeur, debit, credit}` déjà mappés, le
+   * serveur ne voit jamais le fichier. Une seule notification au client
+   * plutôt qu'une par ligne : une rafale de dizaines de notifications pour un
+   * import de relevé ne dirait rien de plus qu'« un relevé a été importé ».
+   */
+  app.post('/api/portal/bank-statement/import', authenticate, async (req: any, res: any) => {
+    try {
+      if (!req.user.clientId) return res.status(403).json({ error: 'Forbidden' });
+      if (!(await isElevatedBankStatementSession(req))) return res.status(403).json({ error: 'Forbidden' });
+
+      const rawRows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 2000) : [];
+      if (!rawRows.length) return res.status(400).json({ error: 'Aucune ligne à importer' });
+
+      const created: any[] = [];
+      for (const raw of rawRows) {
+        const row = normalizeBankStatementLine(raw);
+        if (validateBankStatementLine(row)) continue; // une ligne mal formée est ignorée, pas bloquante pour les autres
+        created.push(await db.createBankStatementLine(req.user.companyId, {
+          id: genId('bankstmt'),
+          clientId: req.user.clientId,
+          ...row,
+          createdBy: req.user.impersonatedBy,
+          createdAt: new Date().toISOString(),
+        }));
+      }
+      if (created.length) {
+        await notifyBankStatementToClient(req.user.companyId, req.user.clientId,
+          `${created.length} ligne(s) importée(s) depuis un relevé bancaire.`);
+      }
+      res.status(201).json({ imported: created.length, skipped: rawRows.length - created.length, rows: created.map(withBankStatementStatus) });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * `PUT` redérive la ligne entière depuis l'existant plutôt que de fusionner
+   * le corps de la requête, exactement comme `echeance-statuses` redérive
+   * `quittanceNumber`/`montant`. Une session ordinaire (client réel) ne
+   * retient que `justif` du corps ; une session élevée (admin en « Espace
+   * client ») peut corriger n'importe quel champ.
+   */
+  app.put('/api/portal/bank-statement/:id', authenticate, async (req: any, res: any) => {
+    try {
+      if (!req.user.clientId) return res.status(403).json({ error: 'Forbidden' });
+      if (!(await canAccessBankStatementAsStaff(req))) return res.status(403).json({ error: 'Forbidden' });
+      const existing = await db.getBankStatementLineById(req.user.companyId, req.params.id);
+      if (!existing || Number(existing.clientId) !== Number(req.user.clientId)) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+
+      const elevated = await isElevatedBankStatementSession(req);
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      const wasEmpty = !String(existing.justif ?? '').trim();
+
+      let updated: any;
+      if (elevated) {
+        const row = normalizeBankStatementLine({ ...existing, ...req.body });
+        const invalid = validateBankStatementLine(row);
+        if (invalid) return res.status(400).json({ error: invalid });
+        updated = await db.updateBankStatementLine(req.user.companyId, req.params.id, {
+          ...row,
+          lastEditedBy: req.user.impersonatedBy,
+          lastEditedAt: new Date().toISOString(),
+        });
+        await notifyBankStatementToClient(req.user.companyId, req.user.clientId,
+          `La ligne du ${row.date}${row.libelle ? ` — ${row.libelle}` : ''} a été modifiée.`);
+      } else {
+        const justif = text(req.body?.justif, 300);
+        updated = await db.updateBankStatementLine(req.user.companyId, req.params.id, { justif });
+        // Seule une ligne qui passe de vide à remplie prévient l'équipe — un
+        // justif déjà déposé qu'on retouche, ou qu'on efface, n'est pas un
+        // nouveau dépôt à signaler. Même garde que les items de livrable.
+        if (wasEmpty && justif) {
+          await notifyBankStatementJustifToStaff(req.user.companyId, req.user.clientId,
+            `${existing.date}${existing.libelle ? ` — ${existing.libelle}` : ''}.`);
+        }
+      }
+      res.json(withBankStatementStatus(updated));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/portal/bank-statement/:id', authenticate, async (req: any, res: any) => {
+    try {
+      if (!req.user.clientId) return res.status(403).json({ error: 'Forbidden' });
+      if (!(await isElevatedBankStatementSession(req))) return res.status(403).json({ error: 'Forbidden' });
+      const existing = await db.getBankStatementLineById(req.user.companyId, req.params.id);
+      if (!existing || Number(existing.clientId) !== Number(req.user.clientId)) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+      const ok = await db.deleteBankStatementLine(req.user.companyId, req.params.id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (error) {
@@ -8275,6 +8522,11 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     PORTAL_DELIVERABLE: 'Deliverables',
     PORTAL_TASK_DONE: 'Tasks',
     PORTAL_REPORT: 'Report',
+    PORTAL_BANK_STATEMENT: 'BankStatement',
+    // Celle-ci part vers l'équipe (ADMIN/SUPERVISEUR) — le relevé bancaire vit
+    // uniquement dans le portail client (voir CLAUDE.md « Relevé bancaire »),
+    // donc la destination back-office est la fiche du client concerné.
+    BANK_STATEMENT_JUSTIF: 'Clients',
   };
 
   /**

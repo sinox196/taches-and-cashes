@@ -215,6 +215,19 @@ export interface Database {
   createCashCategory(companyId: string, category: any): Promise<any>;
   deleteCashCategory(companyId: string, id: string): Promise<boolean>;
 
+  /**
+   * Relevé bancaire — one row per transaction on a client's bank statement,
+   * entered by the cabinet (date, libellé, date de valeur, débit, crédit)
+   * for the client to confirm with a `justif`. `statut` is never stored —
+   * derived from whether `justif` is filled, same "derived, never stored"
+   * rule as a leave balance's `available`.
+   */
+  getAllBankStatementLines(companyId: string): Promise<any[]>;
+  getBankStatementLineById(companyId: string, id: string): Promise<any | undefined>;
+  createBankStatementLine(companyId: string, line: any): Promise<any>;
+  updateBankStatementLine(companyId: string, id: string, updates: any): Promise<any | null>;
+  deleteBankStatementLine(companyId: string, id: string): Promise<boolean>;
+
   getAllNotifications(companyId: string): Promise<any[]>;
   createNotification(companyId: string, notification: any): Promise<any>;
   updateNotification(companyId: string, id: string, updates: any): Promise<any | null>;
@@ -371,6 +384,8 @@ export const emptyDb = () => ({
   cashJournalEntries: [],
   // The picklist of objets used by those rows.
   cashCategories: [],
+  // Relevé bancaire — one row per transaction on a client's bank statement.
+  bankStatementLines: [],
   // Ressources Métier — see the interface comments above for what each holds.
   resourceTemplates: [],
   resourceTemplateItems: [],

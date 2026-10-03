@@ -37,7 +37,12 @@ export interface JournalRow {
   paymentMethod?: string;
 }
 
-const emptyDraft = (): Omit<JournalRow, 'id'> => ({
+/** Une ligne créée depuis le Brouillard bancaire part avec un mode non
+ *  cash fixe : sans ça, `paymentMethod` resterait vide et `isCashMode()` la
+ *  lirait comme une ligne de caisse — exactement l'inverse de la vue qui
+ *  vient de la créer. Le mode précis (virement, chèque…) ne compte pas ici,
+ *  seul le fait que ce ne soit pas de l'espèce. */
+const emptyDraft = (variant: 'caisse' | 'banque'): Omit<JournalRow, 'id'> => ({
   date: new Date().toISOString().slice(0, 10),
   label: '',
   clientId: null,
@@ -45,6 +50,7 @@ const emptyDraft = (): Omit<JournalRow, 'id'> => ({
   category: '',
   entree: 0,
   sortie: 0,
+  ...(variant === 'banque' ? { paymentMethod: 'VIREMENT' } : {}),
 });
 
 /**
@@ -111,7 +117,15 @@ const Fields: React.FC<{
 );
 
 /**
- * Brouillard de caisse — the cabinet's cash daybook, one row per movement.
+ * Brouillard de caisse — the cabinet's cash daybook, one row per movement —
+ * and its mirror, Brouillard bancaire, for everything that moved through the
+ * bank instead of the till. Same component, same columns, same CRUD: the two
+ * daybooks read the *same* `cashJournal` collection and simply keep opposite
+ * halves of it, via `isCashMode(r.paymentMethod)` — a cash row has no mode
+ * (or an explicit cash one), a bank row carries a non-cash mode. `variant`
+ * is the only thing that differs between the two screens: which half of the
+ * rows it shows, what a freshly created row is tagged with, and the few
+ * strings that name "caisse" vs "banque".
  *
  * The column that matters beyond this screen is **Entrée**: a row with an
  * entrée tied to a client *is* that client's encaissement on the Clients
@@ -122,7 +136,8 @@ const Fields: React.FC<{
  * the whole filtered set *before* paging: a balance that restarted at zero on
  * page 2 would be worse than no balance at all.
  */
-export const CashJournal: React.FC = () => {
+export const CashJournal: React.FC<{ variant?: 'caisse' | 'banque' }> = (props) => {
+  const variant: 'caisse' | 'banque' = props.variant ?? 'caisse';
   const { token, hasPermission } = useAuth();
   const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   // Brouillard de caisse est la vue complète (sorties et mouvements internes
@@ -156,7 +171,7 @@ export const CashJournal: React.FC = () => {
       const cats = await cRes.json();
       if (cRes.ok && Array.isArray(cats)) setCategories(cats);
     } catch (e) {
-      setError(friendlyError(e, 'Impossible de charger le brouillard de caisse.'));
+      setError(friendlyError(e, variant === 'banque' ? 'Impossible de charger le brouillard bancaire.' : 'Impossible de charger le brouillard de caisse.'));
     } finally {
       setIsLoading(false);
     }
@@ -205,14 +220,15 @@ export const CashJournal: React.FC = () => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter(r => {
-      // The daybook is a *cash* book. A règlement client settled by virement,
-      // chèque or lettre de change is recorded in Cash and counts towards the
-      // client's encaissements, but it never passes through the till, so it
-      // has no place here — and leaving it in would put money in the running
-      // solde that the caisse never held. Rows with no mode at all (loyer,
+      // Brouillard de caisse is a *cash* book: a règlement client settled by
+      // virement, chèque ou lettre de change never passed through the till,
+      // so it has no place there — and leaving it in would put money in the
+      // running solde the caisse never held. Rows with no mode at all (loyer,
       // STEG, alimentation de caisse, and everything entered before the field
-      // existed) read as cash; see isCashMode().
-      if (!isCashMode(r.paymentMethod)) return false;
+      // existed) read as cash; see isCashMode(). Brouillard bancaire is its
+      // exact mirror — same rows, kept out instead of kept in.
+      const rowIsCash = isCashMode(r.paymentMethod);
+      if (variant === 'caisse' ? !rowIsCash : rowIsCash) return false;
       if (year && yearOf(r.date) !== year) return false;
       if (month && monthOf(r.date) !== month) return false;
       if (!q) return true;
@@ -291,9 +307,14 @@ export const CashJournal: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <p className="text-[11.5px] text-gray-500">
           Chaque <span className="font-semibold text-gray-700">entrée</span> rattachée à un client apparaît
-          automatiquement dans ses encaissements sur la page Clients. Les règlements clients en{' '}
-          <span className="font-semibold text-gray-700">espèce</span> y figurent d'office ; les autres modes
-          restent hors caisse.
+          automatiquement dans ses encaissements sur la page Clients.{' '}
+          {variant === 'banque' ? (
+            <>Les règlements clients par virement, chèque ou lettre de change y figurent d'office ; l'
+              <span className="font-semibold text-gray-700">espèce</span> reste dans le brouillard de caisse.</>
+          ) : (
+            <>Les règlements clients en <span className="font-semibold text-gray-700">espèce</span> y figurent
+              d'office ; les autres modes restent hors caisse.</>
+          )}
         </p>
         {/* Wraps on a phone: unwrapped, this row was ~500px wide, so the
             search ran off the edge and "Nouvelle ligne" sat entirely
@@ -317,7 +338,7 @@ export const CashJournal: React.FC = () => {
           {/* Exporte l'ensemble filtré, pas la page : le solde n'aurait
               aucun sens tronqué à vingt lignes. */}
           <ExportButton
-            fileName="brouillard-de-caisse"
+            fileName={variant === 'banque' ? 'brouillard-bancaire' : 'brouillard-de-caisse'}
             rows={withSolde}
             columns={[
               { header: 'Date', value: (r: any) => frDate(r.row.date) },
@@ -330,7 +351,7 @@ export const CashJournal: React.FC = () => {
             ]}
           />
           {canManage && !draft && (
-            <button onClick={() => { setDraft(emptyDraft()); setPage(1); }}
+            <button onClick={() => { setDraft(emptyDraft(variant)); setPage(1); }}
               className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 shrink-0 whitespace-nowrap">
               <Plus className="w-4 h-4" /> Nouvelle ligne
             </button>
@@ -449,7 +470,9 @@ export const CashJournal: React.FC = () => {
                 <div className="p-10 text-center">
                   <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-3" />
                   <p className="text-[13px] text-gray-500">
-                    {search || month || year ? 'Aucune ligne ne correspond à ce filtre.' : 'Aucun mouvement de caisse enregistré.'}
+                    {search || month || year
+                      ? 'Aucune ligne ne correspond à ce filtre.'
+                      : variant === 'banque' ? 'Aucun mouvement bancaire enregistré.' : 'Aucun mouvement de caisse enregistré.'}
                   </p>
                 </div>
               )}

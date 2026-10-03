@@ -122,7 +122,7 @@ export interface PlanMeta {
  */
 export type PlanModule =
   | 'Dashboard' | 'Users' | 'Missions' | 'Clients' | 'Time Tracking'
-  | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage' | 'Payroll';
+  | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage' | 'Payroll' | 'Support';
 
 /**
  * Le socle du pack Complet, qui ouvre toutes les vues : écrit une fois, pas
@@ -285,7 +285,7 @@ export const PLANS: PlanMeta[] = [
     baseSeats: 1,
     seatLimit: 1,
     portalSeatLimit: 0,
-    modules: ['HR', 'Payroll', 'Users', 'Parrainage'],
+    modules: ['HR', 'Payroll', 'Users', 'Parrainage', 'Support'],
     features: RH_PAIE_FEATURES,
     legacy: true,
   },
@@ -298,7 +298,7 @@ export const PLANS: PlanMeta[] = [
     baseSeats: 1,
     seatLimit: 1,
     portalSeatLimit: 0,
-    modules: ['Clients', 'Cash', 'Users', 'Parrainage'],
+    modules: ['Clients', 'Cash', 'Users', 'Parrainage', 'Support'],
     features: FACTURATION_FEATURES,
     legacy: true,
   },
@@ -443,6 +443,7 @@ export const PERMISSION_MODULE: Record<string, PlanModule> = {
   VIEW_CASH: 'Cash', MANAGE_CASH: 'Cash', VIEW_CASH_TOTALS: 'Cash',
   VIEW_CLIENT_PAYMENTS: 'Cash', VIEW_CASH_JOURNAL: 'Cash',
   MANAGE_CLIENT_PAYMENTS: 'Cash', MANAGE_CASH_JOURNAL: 'Cash',
+  VIEW_BANK_STATEMENT: 'Cash', MANAGE_BANK_STATEMENT: 'Cash',
 
   VIEW_HR: 'HR', CREATE_LEAVE_REQUEST: 'HR', MANAGE_LEAVE_REQUESTS: 'HR',
   CREATE_ABSENCE_AUTHORIZATION: 'HR', MANAGE_ABSENCE_AUTHORIZATIONS: 'HR',

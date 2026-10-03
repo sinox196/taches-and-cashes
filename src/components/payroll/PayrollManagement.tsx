@@ -602,7 +602,6 @@ export const PayrollManagement: React.FC<PayrollManagementProps> = ({ embedded =
                       ['Salaire brut imposable', shownPreview.salaireBrutImposable],
                       ['Impôt sur le revenu', -shownPreview.impotSurLeRevenu],
                       ['Contribution sociale de solidarité', -shownPreview.contributionSocialeSolidarite],
-                      ['Salaire net', shownPreview.salaireNet],
                     ].map(([label, value]) => (
                       <div key={label as string} className="flex justify-between px-3 py-1.5 odd:bg-gray-50">
                         <span className="text-gray-600">{label}</span>
@@ -681,7 +680,6 @@ const PayslipViewer: React.FC<{ payslip: Payslip; companyBlock: CompanyBlock | n
             ['Salaire brut imposable', payslip.salaireBrutImposable],
             ['Impôt sur le revenu', -payslip.impotSurLeRevenu],
             ['Contribution sociale de solidarité', -payslip.contributionSocialeSolidarite],
-            ['Salaire net', payslip.salaireNet],
           ].map(([label, value]) => (
             <div key={label as string} className="flex justify-between px-1 py-1.5 border-b border-gray-100">
               <span className="text-gray-600">{label}</span>

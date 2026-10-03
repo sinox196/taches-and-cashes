@@ -74,6 +74,7 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   push_subscriptions: { desc: false },
   cash_journal_entries: { desc: false },
   cash_categories: { desc: false },
+  bank_statement_lines: { desc: false },
   resource_templates: { desc: false },
   resource_template_items: { desc: false },
   client_resource_instances: { desc: true },
@@ -113,6 +114,7 @@ const TABLE_FOR: Record<string, string> = {
   pushSubscriptions: 'push_subscriptions',
   cashJournalEntries: 'cash_journal_entries',
   cashCategories: 'cash_categories',
+  bankStatementLines: 'bank_statement_lines',
   resourceTemplates: 'resource_templates',
   resourceTemplateItems: 'resource_template_items',
   clientResourceInstances: 'client_resource_instances',
@@ -382,6 +384,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
   const pushSubscriptions = tenantCollection('push_subscriptions');
   const cashJournal = tenantCollection('cash_journal_entries');
   const cashCategories = tenantCollection('cash_categories');
+  const bankStatementLines = tenantCollection('bank_statement_lines');
   const resourceTemplates = tenantCollection('resource_templates');
   const resourceTemplateItems = tenantCollection('resource_template_items');
   const clientResourceInstances = tenantCollection('client_resource_instances');
@@ -718,6 +721,12 @@ export async function initPostgres(connectionString: string): Promise<Database> 
     getAllCashCategories: cashCategories.all,
     createCashCategory: cashCategories.create,
     deleteCashCategory: cashCategories.remove,
+
+    getAllBankStatementLines: bankStatementLines.all,
+    getBankStatementLineById: bankStatementLines.byId,
+    createBankStatementLine: bankStatementLines.create,
+    updateBankStatementLine: bankStatementLines.update,
+    deleteBankStatementLine: bankStatementLines.remove,
 
     getAllNotifications: notifications.all,
     createNotification: notifications.create,

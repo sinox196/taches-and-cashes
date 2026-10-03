@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft, ChevronRight, ChevronDown, Lock, Hash } from 'lucide-react';
+import { Plus, Loader2, Receipt, Search, Trash2, Pencil, FileText, Building2, BookOpen, Wallet, FileClock, Send, ArrowRightLeft, ChevronRight, ChevronDown, Lock, Hash, Landmark } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InvoiceEditor } from './InvoiceEditor';
 import { InvoicePreview } from './InvoicePreview';
@@ -44,10 +44,11 @@ const CURRENCY_SUFFIX: Record<string, string> = { TND: 'DT', USD: 'USD', EUR: 'E
  *  blue Total Général card, Règlements clients' green total, Brouillard de
  *  caisse's violet total) — same idiom as Tâches'/RH's per-subview tabs,
  *  so switching subviews here reads the same way it does there. */
-const CASH_TAB_COLOR: Record<'documents' | 'reglements' | 'journal', string> = {
+const CASH_TAB_COLOR: Record<'documents' | 'reglements' | 'journal' | 'bank-journal', string> = {
   documents: 'border-blue-600 text-blue-600',
   reglements: 'border-emerald-600 text-emerald-700',
   journal: 'border-violet-600 text-violet-700',
+  'bank-journal': 'border-sky-600 text-sky-700',
 };
 /** Matches the Clients table's own page size, so both lists page the same way. */
 const PAGE_SIZE = 20;
@@ -75,11 +76,13 @@ export const CashManagement: React.FC = () => {
     { id: 'documents' as const, allowed: hasPermission('VIEW_CASH') },
     { id: 'reglements' as const, allowed: hasPermission('VIEW_CLIENT_PAYMENTS') },
     { id: 'journal' as const, allowed: hasPermission('VIEW_CASH_JOURNAL') },
+    // Même permission que Brouillard de caisse : c'est son miroir exact sur
+    // les mêmes données (voir CashJournal.tsx), pas une fonctionnalité à
+    // part qui justifierait une permission à elle.
+    { id: 'bank-journal' as const, allowed: hasPermission('VIEW_CASH_JOURNAL') },
   ]).filter(t => t.allowed).map(t => t.id);
 
-  const [tab, setTab] = useState<'documents' | 'reglements' | 'journal'>(
-    () => visibleCashTabs[0] ?? 'documents',
-  );
+  const [tab, setTab] = useState<'documents' | 'reglements' | 'journal' | 'bank-journal'>(() => visibleCashTabs[0] ?? 'documents');
   const [invoices, setInvoices] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -377,6 +380,7 @@ export const CashManagement: React.FC = () => {
           { id: 'documents', label: 'Facturation', icon: FileText },
           { id: 'reglements', label: 'Règlements clients', icon: Wallet },
           { id: 'journal', label: 'Brouillard de caisse', icon: BookOpen },
+          { id: 'bank-journal', label: 'Brouillard bancaire', icon: Landmark },
         ] as const).filter(t => visibleCashTabs.includes(t.id)).map(t => (
           <button
             key={t.id}
@@ -392,7 +396,7 @@ export const CashManagement: React.FC = () => {
         ))}
       </div>
 
-      {tab === 'journal' ? <CashJournal /> : tab === 'reglements' ? <ClientPayments /> : <>
+      {tab === 'journal' ? <CashJournal /> : tab === 'bank-journal' ? <CashJournal variant="banque" /> : tab === 'reglements' ? <ClientPayments /> : <>
 
       {error && (
         <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">

@@ -165,7 +165,6 @@ export function buildPayslipPdf(p: any, block?: CompanyBlock | null): jsPDF {
     { label: 'SALAIRE BRUTE IMPOSABLE', gains: p.salaireBrutImposable },
     { label: 'IMPÔT SUR LE REVENU', retenues: p.impotSurLeRevenu },
     { label: 'CONTRIBUTION SOCIALE DE SOLIDARITÉ', taux: '0.5', retenues: p.contributionSocialeSolidarite },
-    { label: 'SALAIRE NET', gains: p.salaireNet },
   ];
 
   const rowH = 6.3;

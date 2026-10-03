@@ -60,7 +60,7 @@ export async function initDb(): Promise<Database> {
 const TENANT_COLLECTIONS = [
   'users', 'clients', 'services', 'taskTypes', 'invoices', 'leaveRequests',
   'absenceAuthorizations', 'loans', 'advances', 'attendanceRecords', 'referrals', 'leaveBalances', 'timeEntries', 'messages',
-  'taskAssignments', 'taskNotes', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories', 'messageGroups',
+  'taskAssignments', 'taskNotes', 'notifications', 'pushSubscriptions', 'cashJournalEntries', 'cashCategories', 'bankStatementLines', 'messageGroups',
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
@@ -91,6 +91,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.pushSubscriptions) db.pushSubscriptions = [];
     if (!db.cashJournalEntries) db.cashJournalEntries = [];
     if (!db.cashCategories) db.cashCategories = [];
+    if (!db.bankStatementLines) db.bankStatementLines = [];
     if (!db.resourceTemplates) db.resourceTemplates = [];
     if (!db.resourceTemplateItems) db.resourceTemplateItems = [];
     if (!db.clientResourceInstances) db.clientResourceInstances = [];
@@ -725,6 +726,29 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.cashJournalEntries, companyId, id);
       if (index === -1) return false;
       db.cashJournalEntries.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllBankStatementLines: async (companyId: string) => scoped(db.bankStatementLines, companyId),
+    getBankStatementLineById: async (companyId: string, id: string) => findScoped(db.bankStatementLines, companyId, id),
+    createBankStatementLine: async (companyId: string, line: any) => {
+      const row = { ...line, companyId };
+      db.bankStatementLines.push(row);
+      await saveDb();
+      return row;
+    },
+    updateBankStatementLine: async (companyId: string, id: string, updates: any) => {
+      const index = indexScoped(db.bankStatementLines, companyId, id);
+      if (index === -1) return null;
+      db.bankStatementLines[index] = { ...db.bankStatementLines[index], ...updates };
+      await saveDb();
+      return db.bankStatementLines[index];
+    },
+    deleteBankStatementLine: async (companyId: string, id: string) => {
+      const index = indexScoped(db.bankStatementLines, companyId, id);
+      if (index === -1) return false;
+      db.bankStatementLines.splice(index, 1);
       await saveDb();
       return true;
     },

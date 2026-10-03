@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Logo } from '../components/Logo';
 import { NotificationBell } from '../components/NotificationBell';
 import { ChatPage } from '../components/chat/ChatPage';
@@ -11,7 +11,8 @@ import { paymentModeLabel, isCashMode } from '../constants/paymentModes';
 import { companyHasResourcesModule } from '../constants/secteurs';
 import {
   LogOut, FileText, ClipboardCheck, FolderCheck, CalendarClock, MessageCircle,
-  AlertTriangle, CheckCircle2, Loader2, Menu, X, Wallet, BarChart3, Download,
+  AlertTriangle, CheckCircle2, Loader2, Menu, X, Wallet, BarChart3, Download, Landmark,
+  Plus, Pencil, Trash2, Upload,
 } from 'lucide-react';
 
 /**
@@ -74,12 +75,23 @@ interface Deliverable {
   items: { id: string; label: string; done: boolean }[];
 }
 
+interface BankLine {
+  id: string;
+  date: string;
+  libelle: string;
+  dateValeur: string;
+  debit: number;
+  credit: number;
+  justif: string;
+  statut: 'OK' | 'SANS_JUSTIF';
+}
+
 interface EcheanceColumn { id: string; year: number; month: number; label: string; sortOrder: number }
 interface EcheanceStatusCell { columnId: string; status: string | null; quittanceNumber?: string | null; montant?: number | null }
 interface EcheanceStatusOption { id: string; label: string; color?: string }
 interface EcheanceData { columns: EcheanceColumn[]; statuses: EcheanceStatusCell[]; statusOptions: EcheanceStatusOption[] }
 
-type Tab = 'statement' | 'tasks' | 'deliverables' | 'echeances' | 'report' | 'messages';
+type Tab = 'statement' | 'tasks' | 'deliverables' | 'echeances' | 'report' | 'bankStatement' | 'messages';
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'statement', label: 'Relevé de compte', icon: FileText },
@@ -90,6 +102,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   // toujours vide pour une entreprise qui n'a jamais eu de grille.
   { id: 'echeances', label: 'Échéances', icon: CalendarClock },
   { id: 'report', label: 'Rapport mensuel', icon: BarChart3 },
+  { id: 'bankStatement', label: 'Relevé bancaire', icon: Landmark },
   { id: 'messages', label: 'Messages', icon: MessageCircle },
 ];
 
@@ -109,6 +122,7 @@ const PORTAL_NAV_TO_TAB: Record<string, Tab> = {
   Deliverables: 'deliverables',
   Tasks: 'tasks',
   Report: 'report',
+  BankStatement: 'bankStatement',
   Messages: 'messages',
 };
 
@@ -141,7 +155,7 @@ const fdate = (iso: string) => {
 };
 
 export const ClientPortal: React.FC = () => {
-  const { token, user, logout } = useAuth();
+  const { token, user, logout, isImpersonating } = useAuth();
   const [tab, setTab] = useState<Tab>('statement');
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -177,6 +191,13 @@ export const ClientPortal: React.FC = () => {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState('');
 
+  // Relevé bancaire — même paresse que le rapport mensuel : chargé à
+  // l'ouverture de l'onglet, pas dans la salve initiale, puisque tous les
+  // clients n'en ont pas.
+  const [bankLines, setBankLines] = useState<BankLine[] | null>(null);
+  const [bankLoading, setBankLoading] = useState(false);
+  const [bankError, setBankError] = useState('');
+
   const get = useCallback(async (path: string) => {
     const res = await fetch(`/api/portal/${path}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -207,6 +228,18 @@ export const ClientPortal: React.FC = () => {
       .finally(() => { if (!cancelled) setReportLoading(false); });
     return () => { cancelled = true; };
   }, [tab, report, get]);
+
+  useEffect(() => {
+    if (tab !== 'bankStatement' || bankLines) return;
+    let cancelled = false;
+    setBankLoading(true);
+    setBankError('');
+    get('bank-statement')
+      .then(r => { if (!cancelled) setBankLines(Array.isArray(r) ? r : []); })
+      .catch(e => { if (!cancelled) setBankError(e.message || 'Erreur de chargement.'); })
+      .finally(() => { if (!cancelled) setBankLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab, bankLines, get]);
 
   useEffect(() => {
     if (!token) return;
@@ -312,7 +345,7 @@ export const ClientPortal: React.FC = () => {
                   arrivant ; absente sur Échéances, qui ne porte aucun
                   montant, et sur Rapport mensuel, qui porte les siennes
                   propres (bornées au mois, pas au solde global). */}
-              {summary && tab !== 'echeances' && tab !== 'report' && (
+              {summary && tab !== 'echeances' && tab !== 'report' && tab !== 'bankStatement' && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <StatCard label="Solde antérieur" value={formatCostTND(summary.soldeAnterieur)} />
                   <StatCard label="Total facturé" value={formatCostTND(summary.montantFacture)} />
@@ -332,6 +365,21 @@ export const ClientPortal: React.FC = () => {
               {tab === 'deliverables' && <DeliverablesView deliverables={deliverables} />}
               {tab === 'echeances' && <EcheancesView data={echeances} />}
               {tab === 'report' && <ReportView report={report} loading={reportLoading} error={reportError} />}
+              {tab === 'bankStatement' && (
+                <BankStatementView
+                  lines={bankLines} loading={bankLoading} error={bankError}
+                  canManage={isImpersonating}
+                  onJustifSaved={(id, justif, statut) => setBankLines(prev => prev
+                    ? prev.map(l => l.id === id ? { ...l, justif, statut } : l) : prev)}
+                  onLineSaved={line => setBankLines(prev => {
+                    if (!prev) return [line];
+                    const exists = prev.some(l => l.id === line.id);
+                    return exists ? prev.map(l => l.id === line.id ? line : l) : [...prev, line];
+                  })}
+                  onLineDeleted={id => setBankLines(prev => prev ? prev.filter(l => l.id !== id) : prev)}
+                  onLinesImported={lines => setBankLines(prev => [...(prev || []), ...lines])}
+                />
+              )}
             </>
           )}
         </main>
@@ -794,6 +842,395 @@ const ReportView: React.FC<{ report: ClientReport | null; loading: boolean; erro
               </li>
             ))}
           </ul>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const BANK_MONTH_NAMES = MONTH_NAMES;
+const bankYearOf = (iso: string) => Number(String(iso || '').slice(0, 4)) || 0;
+const bankMonthOf = (iso: string) => Number(String(iso || '').slice(5, 7)) || 0;
+
+/**
+ * Relevé bancaire — un vrai client lit toutes les colonnes mais n'en modifie
+ * qu'une : « Justif ». `JustifCell` sauvegarde au blur (une seule valeur à
+ * confirmer ne justifie pas un mode édition avec boutons Enregistrer/
+ * Annuler comme le reste de l'app) et redescend le `statut` recalculé par
+ * le serveur plutôt que de le dériver ici — une seconde implémentation de
+ * la même règle pourrait un jour diverger de celle du serveur.
+ *
+ * Un administrateur en « Espace client » (voir CLAUDE.md « Relevé
+ * bancaire ») en fait plus : créer, corriger n'importe quel champ, supprimer
+ * et importer un relevé Excel — `canManage` (= `isImpersonating`) bascule
+ * entre les deux, le serveur appliquant la même frontière de son côté.
+ */
+const JustifCell: React.FC<{ line: BankLine; onSaved: (id: string, justif: string, statut: 'OK' | 'SANS_JUSTIF') => void }> = ({ line, onSaved }) => {
+  const { token } = useAuth();
+  const [value, setValue] = useState(line.justif || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const save = async () => {
+    if (value === (line.justif || '')) return;
+    setSaving(true);
+    setErr('');
+    try {
+      const res = await fetch(`/api/portal/bank-statement/${line.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ justif: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Enregistrement impossible.');
+      onSaved(line.id, data.justif ?? value, data.statut);
+    } catch (e: any) {
+      setErr(e.message || 'Enregistrement impossible.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="min-w-[160px]">
+      <input
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={save}
+        disabled={saving}
+        placeholder="Ajouter un justificatif…"
+        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12.5px] focus:outline-none focus:border-navy disabled:opacity-60"
+      />
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+    </div>
+  );
+};
+
+interface BankLineDraft { date: string; libelle: string; dateValeur: string; debit: string; credit: string; justif: string }
+
+const emptyBankDraft = (): BankLineDraft => ({ date: '', libelle: '', dateValeur: '', debit: '', credit: '', justif: '' });
+const draftFromLine = (l: BankLine): BankLineDraft => ({
+  date: l.date || '', libelle: l.libelle || '', dateValeur: l.dateValeur || '',
+  debit: l.debit ? String(l.debit) : '', credit: l.credit ? String(l.credit) : '', justif: l.justif || '',
+});
+
+/** Ligne éditable — création (`lineId` absent) ou correction complète d'une
+ *  ligne existante, réservée à une session élevée. Même teinte turquoise que
+ *  les éditeurs de ligne de Cash (Brouillard de caisse, Règlements clients) :
+ *  une cellule blanche de plus dans un tableau déjà blanc ne se lit pas comme
+ *  éditable. */
+const BankLineEditRow: React.FC<{
+  initial: BankLineDraft;
+  lineId?: string;
+  onSaved: (line: BankLine) => void;
+  onCancel: () => void;
+}> = ({ initial, lineId, onSaved, onCancel }) => {
+  const { token } = useAuth();
+  const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const field = (k: keyof BankLineDraft) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setDraft(d => ({ ...d, [k]: e.target.value }));
+
+  const inputCls = 'w-full px-2 py-1.5 border border-turquoise/30 rounded-lg text-[12.5px] bg-turquoise/10 focus:outline-none focus:border-navy';
+
+  const save = async () => {
+    if (!draft.date || !draft.libelle.trim()) { setErr('Date et libellé sont obligatoires.'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const body = {
+        date: draft.date, libelle: draft.libelle, dateValeur: draft.dateValeur,
+        debit: Number(draft.debit) || 0, credit: Number(draft.credit) || 0, justif: draft.justif,
+      };
+      const res = await fetch(lineId ? `/api/portal/bank-statement/${lineId}` : '/api/portal/bank-statement', {
+        method: lineId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Enregistrement impossible.');
+      onSaved(data);
+    } catch (e: any) {
+      setErr(e.message || 'Enregistrement impossible.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <tr className="border-b border-gray-100">
+      <td className="px-3 py-2"><input type="date" value={draft.date} onChange={field('date')} className={inputCls} /></td>
+      <td className="px-3 py-2"><input value={draft.libelle} onChange={field('libelle')} placeholder="Libellé de l'opération" className={inputCls} /></td>
+      <td className="px-3 py-2"><input type="date" value={draft.dateValeur} onChange={field('dateValeur')} className={inputCls} /></td>
+      <td className="px-3 py-2"><input value={draft.debit} onChange={field('debit')} placeholder="0,000" className={`${inputCls} text-right`} /></td>
+      <td className="px-3 py-2"><input value={draft.credit} onChange={field('credit')} placeholder="0,000" className={`${inputCls} text-right`} /></td>
+      <td className="px-3 py-2"><input value={draft.justif} onChange={field('justif')} placeholder="Justificatif" className={inputCls} /></td>
+      <td className="px-3 py-2 text-gray-300 text-[11px]">—</td>
+      <td className="px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <button onClick={save} disabled={saving} title="Enregistrer"
+            className="p-1.5 rounded-lg bg-navy text-white hover:bg-navy-hover disabled:opacity-60">
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+          </button>
+          <button onClick={onCancel} disabled={saving} title="Annuler"
+            className="p-1.5 rounded-lg bg-gray-100 border border-gray-300 hover:bg-gray-200">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {err && <p className="text-[11px] text-red-600 mt-1 whitespace-normal max-w-[160px]">{err}</p>}
+      </td>
+    </tr>
+  );
+};
+
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+/** `DD/MM/YYYY` (ou `DD-MM-YYYY`) -> ISO, sinon passe tel quel — un relevé de
+ *  banque exporté depuis Excel affiche ses dates au format français, jamais
+ *  en ISO. */
+const parseBankDateToIso = (raw: any): string => {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  return s;
+};
+
+const BANK_HEADER_CANDIDATES = {
+  date: ['date'],
+  libelle: ["libelle de l'operation", 'libelle operation', 'libelle', 'operation'],
+  dateValeur: ['date de valeur', 'date valeur'],
+  debit: ['debit'],
+  credit: ['credit'],
+} as const;
+
+/**
+ * Lit la même structure que le modèle attaché (Date, Libellé de l'opération,
+ * Date de valeur, Débit, Crédit) — le fichier est analysé entièrement dans le
+ * navigateur (SheetJS, même idiome que l'import de clients), le serveur ne
+ * voit jamais le fichier, seulement le tableau déjà mappé.
+ */
+async function parseBankStatementExcel(file: File) {
+  const XLSX = await import('xlsx');
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error('Le fichier ne contient aucune feuille.');
+  const raw = XLSX.utils.sheet_to_json<Record<string, any>>(workbook.Sheets[sheetName], { defval: '', raw: false });
+  if (raw.length === 0) throw new Error('La feuille est vide.');
+
+  const keys = Object.keys(raw[0]);
+  const keyFor = (candidates: readonly string[]) => keys.find(k => candidates.includes(fold(k)));
+  const dateKey = keyFor(BANK_HEADER_CANDIDATES.date);
+  const libelleKey = keyFor(BANK_HEADER_CANDIDATES.libelle);
+  const dateValeurKey = keyFor(BANK_HEADER_CANDIDATES.dateValeur);
+  const debitKey = keyFor(BANK_HEADER_CANDIDATES.debit);
+  const creditKey = keyFor(BANK_HEADER_CANDIDATES.credit);
+  if (!dateKey) throw new Error('Colonne « Date » introuvable dans le fichier.');
+
+  const toNumber = (v: any): number => {
+    const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  return raw
+    .map(r => ({
+      date: parseBankDateToIso(r[dateKey]),
+      libelle: String(libelleKey ? r[libelleKey] : '').trim(),
+      dateValeur: parseBankDateToIso(dateValeurKey ? r[dateValeurKey] : ''),
+      debit: toNumber(debitKey ? r[debitKey] : ''),
+      credit: toNumber(creditKey ? r[creditKey] : ''),
+    }))
+    .filter(row => row.date); // une ligne sans date n'a rien d'une transaction
+}
+
+const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => void }> = ({ onImported }) => {
+  const { token } = useAuth();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const handleFile = async (file: File) => {
+    setBusy(true);
+    setErr('');
+    try {
+      const rows = await parseBankStatementExcel(file);
+      if (!rows.length) throw new Error('Aucune ligne exploitable dans ce fichier.');
+      const res = await fetch('/api/portal/bank-statement/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Import impossible.');
+      onImported(data.rows || []);
+    } catch (e: any) {
+      setErr(e.message || 'Import impossible.');
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+      <button onClick={() => inputRef.current?.click()} disabled={busy}
+        className="flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60">
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+        Importer Excel
+      </button>
+      {err && <p className="text-[11.5px] text-red-600">{err}</p>}
+    </div>
+  );
+};
+
+const BankStatementView: React.FC<{
+  lines: BankLine[] | null;
+  loading: boolean;
+  error: string;
+  canManage: boolean;
+  onJustifSaved: (id: string, justif: string, statut: 'OK' | 'SANS_JUSTIF') => void;
+  onLineSaved: (line: BankLine) => void;
+  onLineDeleted: (id: string) => void;
+  onLinesImported: (lines: BankLine[]) => void;
+}> = ({ lines, loading, error, canManage, onJustifSaved, onLineSaved, onLineDeleted, onLinesImported }) => {
+  const { token } = useAuth();
+  const [year, setYear] = useState(0);
+  const [month, setMonth] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const years = useMemo(() => {
+    const set = new Set<number>((lines || []).map(l => bankYearOf(l.date)).filter(Boolean));
+    set.add(new Date().getFullYear());
+    return [...set].sort((a, b) => b - a);
+  }, [lines]);
+
+  const filtered = useMemo(() => (lines || []).filter(l =>
+    (!year || bankYearOf(l.date) === year) && (!month || bankMonthOf(l.date) === month)), [lines, year, month]);
+
+  const deleteLine = async (id: string) => {
+    if (!window.confirm('Supprimer cette ligne du relevé bancaire ?')) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/portal/bank-statement/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || 'Suppression impossible.'); }
+      onLineDeleted(id);
+    } catch (e: any) {
+      window.alert(e.message || 'Suppression impossible.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl py-16 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+  if (error) {
+    return <div className="bg-white border border-gray-200 rounded-xl"><Empty>{error}</Empty></div>;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={year} onChange={e => setYear(Number(e.target.value))}
+            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
+            <option value={0}>Toutes les années</option>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <select value={month} onChange={e => setMonth(Number(e.target.value))}
+            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
+            <option value={0}>Tous les mois</option>
+            {BANK_MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+          </select>
+        </div>
+        {canManage && (
+          <div className="flex items-center gap-2">
+            <ImportBankStatementButton onImported={onLinesImported} />
+            <button onClick={() => { setCreating(true); setEditingId(null); }}
+              className="flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium bg-navy text-white rounded-lg hover:bg-navy-hover">
+              <Plus className="w-3.5 h-3.5" /> Nouvelle ligne
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        {filtered.length === 0 && !creating ? (
+          <Empty>Aucune ligne pour cette période.</Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left whitespace-nowrap">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  {['Date', "Libellé de l'opération", 'Date de valeur'].map(h => (
+                    <th key={h} className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">{h}</th>
+                  ))}
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Débit</th>
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Crédit</th>
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Justif</th>
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Statut</th>
+                  {canManage && <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="text-[12.5px]">
+                {creating && (
+                  <BankLineEditRow initial={emptyBankDraft()} onCancel={() => setCreating(false)}
+                    onSaved={line => { onLineSaved(line); setCreating(false); }} />
+                )}
+                {filtered.map(l => editingId === l.id ? (
+                  <BankLineEditRow key={l.id} initial={draftFromLine(l)} lineId={l.id} onCancel={() => setEditingId(null)}
+                    onSaved={line => { onLineSaved(line); setEditingId(null); }} />
+                ) : (
+                  <tr key={l.id} className={`border-b border-gray-100 last:border-b-0 ${l.statut === 'SANS_JUSTIF' ? 'bg-amber-50/50' : 'bg-done-bg/40'}`}>
+                    <td className="px-3 py-2 text-gray-600">{fdate(l.date)}</td>
+                    <td className="px-3 py-2 text-gray-800">{l.libelle || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2 text-gray-600">{l.dateValeur ? fdate(l.dateValeur) : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2 text-right font-mono text-late-fg">{l.debit ? formatCostTND(l.debit) : ''}</td>
+                    <td className="px-3 py-2 text-right font-mono text-done-fg">{l.credit ? formatCostTND(l.credit) : ''}</td>
+                    <td className="px-3 py-2">
+                      {canManage ? (l.justif || <span className="text-gray-300">—</span>) : <JustifCell line={l} onSaved={onJustifSaved} />}
+                    </td>
+                    <td className="px-3 py-2">
+                      {l.statut === 'OK' ? (
+                        <span className="px-2 py-0.5 rounded-full bg-done-bg text-done-fg text-[11px] font-bold">OK</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold">Sans justif</span>
+                      )}
+                    </td>
+                    {canManage && (
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => { setEditingId(l.id); setCreating(false); }} title="Modifier"
+                            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => deleteLine(l.id)} disabled={deletingId === l.id} title="Supprimer"
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 disabled:opacity-60">
+                            {deletingId === l.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

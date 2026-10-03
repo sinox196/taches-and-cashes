@@ -47,6 +47,13 @@ const PERMISSIONS_GROUPED = [
     ]
   },
   {
+    group: 'Relevé bancaire',
+    permissions: [
+      { id: 'VIEW_BANK_STATEMENT', label: 'Voir Relevé bancaire', desc: "Peut consulter le relevé bancaire d'un client — les lignes de transaction et leur justificatif." },
+      { id: 'MANAGE_BANK_STATEMENT', label: 'Gérer Relevé bancaire', desc: "Peut ajouter, modifier et supprimer les lignes du relevé bancaire d'un client, et gérer ses colonnes personnalisées." },
+    ]
+  },
+  {
     group: 'Ressources Humaines (HR)',
     permissions: [
       { id: 'VIEW_HR', label: 'Voir RH', desc: 'Peut accéder au module RH' },
