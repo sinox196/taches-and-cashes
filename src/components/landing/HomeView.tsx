@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Building2, CalendarCheck, Check, ChevronDown, FileText, FolderKanban, Gift, Globe, LayoutDashboard, ListChecks, MessageSquare, Pause, Play, RotateCcw, Timer, Users, Wallet } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpRight, Building2, CalendarCheck, Check, ChevronDown, FileText, FolderKanban, Gift, Globe, LayoutDashboard, ListChecks, MessageSquare, Pause, Play, Rocket, RotateCcw, Timer, Users, Wallet } from 'lucide-react';
 import { Reveal } from './Reveal';
 import '../../styles/home.css';
 
@@ -51,7 +51,7 @@ function TimerDemo() {
   </div>;
 }
 
-export function HomeView({ onStart, onFeatures, onContact }: { onStart: () => void; onFeatures: () => void; onContact: () => void }) {
+export function HomeView({ onStart, onFeatures, onContact, onQuickStart }: { onStart: () => void; onFeatures: () => void; onContact: () => void; onQuickStart: () => void }) {
   const [active, setActive] = useState(0);
   const selected = previews[active];
   const hero = useRef<HTMLElement>(null);
@@ -82,8 +82,7 @@ export function HomeView({ onStart, onFeatures, onContact }: { onStart: () => vo
           <p>Gérez mieux, facturez plus, gagnez en rentabilité</p>
           <p className="home-hero-description">Pour les comptables, auditeurs, fiscalistes, avocats, consultants, architectes, ingénieurs-conseils et autres professionnels des services.
 Centralisez vos missions, pilotez vos équipes, suivez le temps consacré à chaque client et transformez votre travail en valeur, en facturation et en rentabilité.</p>
-          <div className="home-actions"><button className="home-btn home-btn-mint" onClick={onStart}>Commencer gratuitement <ArrowUpRight size={19} /></button><button className="home-watch" onClick={explore}><span><Play size={14} fill="currentColor" /></span>Découvrir la plateforme</button></div>
-          <div className="home-trial-note"><Check size={14} /> Essai gratuit <span /> Sans carte bancaire</div>
+          <div className="home-actions"><button className="home-btn home-btn-mint" onClick={onStart}>Commencer gratuitement <ArrowUpRight size={19} /></button><button className="home-watch" onClick={onQuickStart}><span><Rocket size={14} /></span>Guide démarrage rapide</button></div>
         </div>
         <div className="home-value-motion" aria-hidden="true">
           <svg className="home-value-track" viewBox="0 0 420 80" fill="none"><path d="M45 40H375" stroke="rgba(150,234,210,.25)" strokeWidth="1" /><path className="home-value-current" d="M45 40H375" stroke="#96ead2" strokeWidth="2" strokeLinecap="round" strokeDasharray="35 295" /></svg>

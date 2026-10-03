@@ -326,10 +326,21 @@ interface SupportViewProps {
   contactPhone: string;
   whatsappUrl: string;
   guideHref: string;
+  /** Ouvre la modale « Démarrage rapide » dès l'arrivée sur la page — pour
+   *  le bouton « Guide démarrage rapide » du hero public, qui amène ici
+   *  directement sur le guide plutôt que sur la page nue. */
+  openQuickStart?: boolean;
+  /** Montée à l'intérieur de l'app authentifiée (entrée de nav « Support »)
+   *  plutôt que sur le site public : le hero n'a alors plus besoin de
+   *  réserver la hauteur de la barre de navigation publique fixe — la même
+   *  idée que le `embedded` de `PayrollManagement.tsx` (voir CLAUDE.md,
+   *  « GRH & Paie merges RH and Payroll »). Rien d'autre ne change : c'est le
+   *  même guide, la même FAQ, le même contenu des deux côtés. */
+  embedded?: boolean;
 }
 
 export const SupportView: React.FC<SupportViewProps> = ({
-  contactEmail, contactPhone, whatsappUrl, guideHref,
+  contactEmail, contactPhone, whatsappUrl, guideHref, openQuickStart, embedded,
 }) => {
   const reduced = useReducedMotion();
 
@@ -347,7 +358,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
    *  l'agrandissement à lire (ou, pour une vidéo, à la regarder en entier). */
   const [zoom, setZoom] = useState<{ src: string; title: string; kind: 'image' | 'video'; poster?: string } | null>(null);
   /** Le parcours « Démarrage rapide », ouvert depuis son propre bouton dans le hero. */
-  const [quickStartOpen, setQuickStartOpen] = useState(false);
+  const [quickStartOpen, setQuickStartOpen] = useState(!!openQuickStart);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
@@ -497,7 +508,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
       {/* HERO — une surface de travail, pas une bannière : la barre occupe le
           centre optique et répond sur place. Pas d'`overflow-hidden` ici, le
           panneau de résultats en déborde volontairement. */}
-      <section className="support-intro support-redesign-intro pt-[88px] px-6 sm:px-10 pb-16 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]">
+      <section className={`support-intro support-redesign-intro ${embedded ? 'pt-6 sm:pt-8' : 'pt-[88px]'} px-6 sm:px-10 pb-16 bg-[linear-gradient(180deg,#FBFCFD_0%,#F2F4F7_100%)]`}>
         <div className="max-w-[1200px] mx-auto flex gap-14 items-center flex-wrap">
           <div style={{ flex: '1 1 480px', minWidth: 0 }} className="relative z-20">
             <Reveal>

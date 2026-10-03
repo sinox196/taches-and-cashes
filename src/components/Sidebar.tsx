@@ -14,7 +14,8 @@ import {
   MessageCircle,
   FileCheck2,
   Building2,
-  Gift
+  Gift,
+  HelpCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { planAllowsModule, planModules, type PlanModule } from '../constants/plans';
@@ -122,6 +123,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         // filtre d'offre (module « Parrainage ») s'applique toujours plus
         // bas, indépendamment de cette permission qui n'en est plus une ici.
         { id: 'Parrainage', label: 'Parrainage', icon: Gift, hasChevron: false },
+        // Support : le guide et la FAQ du site public, repris tels quels à
+        // l'intérieur de l'app — même contenu, même composant, pas une
+        // seconde copie à tenir à jour. Aucune permission : l'aide n'est pas
+        // une fonctionnalité métier à restreindre, juste comme Dashboard,
+        // Messages et Parrainage juste au-dessus.
+        { id: 'Support', label: 'Support', icon: HelpCircle, hasChevron: false },
       ],
     },
   ];

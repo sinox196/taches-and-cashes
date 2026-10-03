@@ -14,6 +14,7 @@ import { MyDashboard } from './components/dashboard/MyDashboard';
 import { ChatPage } from './components/chat/ChatPage';
 import { UsersManagement } from './components/UsersManagement';
 import { ReferralPage } from './components/ReferralPage';
+import { SupportPage } from './components/SupportPage';
 import { ClientsManagement } from './components/clients/ClientsManagement';
 import { HRManagement } from './components/hr/HRManagement';
 import { TaskSubviews } from './components/TaskSubviews';
@@ -75,7 +76,7 @@ export default function App() {
   // dans 'HR' (« GRH & Paie », un seul lien de nav pour les deux) — un
   // `active_nav`/`?nav=` déjà stocké à 'Payroll' échoue simplement ce test et
   // retombe sur le repli plus bas, aucune route n'y a jamais pointé.
-  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Parrainage', 'Plateforme'];
+  const NAV_IDS = ['Dashboard', 'Clients', 'Time Tracking', 'Messages', 'Missions', 'Ressources', 'Cash', 'HR', 'Users', 'Parrainage', 'Support', 'Plateforme'];
   const [activeSidebarItem, setActiveSidebarItem] = useState(() => {
     // Clicking a pushed notification with no tab open makes the service
     // worker open the app at `/?nav=<section>` — there's no router to read a
@@ -881,7 +882,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         <Header
-          section={({ 'Time Tracking': 'Mes tâches & chrono', Dashboard: 'Tableau de bord', Clients: 'Clients', Missions: 'Missions', Cash: 'Facturation & Trésorerie', HR: 'GRH & Paie', Users: 'Équipe', Ressources: 'Outils de travail', Messages: 'Messages', Parrainage: 'Parrainage', Plateforme: 'Plateforme' } as Record<string, string>)[activeNav]}
+          section={({ 'Time Tracking': 'Mes tâches & chrono', Dashboard: 'Tableau de bord', Clients: 'Clients', Missions: 'Missions', Cash: 'Facturation & Trésorerie', HR: 'GRH & Paie', Users: 'Équipe', Ressources: 'Outils de travail', Messages: 'Messages', Parrainage: 'Parrainage', Support: 'Support', Plateforme: 'Plateforme' } as Record<string, string>)[activeNav]}
           userCode="ABA01"
           userName="Alexandre Dupont"
           onNavigate={setActiveSidebarItem}
@@ -902,6 +903,10 @@ export default function App() {
           // chacun a désormais son propre code de parrainage. Voir CLAUDE.md
           // « Parrainage ».
           <ReferralPage />
+        ) : activeNav === 'Support' ? (
+          // Le guide et la FAQ du site public, repris tels quels — voir
+          // CLAUDE.md « Navigation has no router » / SupportPage.tsx.
+          <SupportPage />
         ) : activeNav === 'Users' && hasPermission('MANAGE_USERS') ? (
 
           <UsersManagement />

@@ -252,6 +252,22 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  /** Même route que `goToSupport`, mais qui ouvre la modale « Démarrage
+   *  rapide » dès l'arrivée — pour le bouton du hero qui promet le guide
+   *  directement plutôt qu'une page de support nue. `openSupportQuickStart`
+   *  ne vaut que pour CE montage de `SupportView` : l'effet juste en dessous
+   *  le retombe à `false` sitôt consommé, pour qu'un retour ultérieur sur
+   *  Support par la nav normale ne rouvre pas la modale par surprise. */
+  const [openSupportQuickStart, setOpenSupportQuickStart] = useState(false);
+  useEffect(() => {
+    if (openSupportQuickStart) setOpenSupportQuickStart(false);
+  }, [openSupportQuickStart]);
+  const goToSupportQuickStart = () => {
+    setOpenSupportQuickStart(true);
+    setView('support');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const goHome = () => {
     setView('home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -267,7 +283,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       }} />
       <main id="public-content" tabIndex={-1}>
       {view === 'home' ? (
-        <HomeView onStart={goToTarifs} onFeatures={() => { setView('fonctionnalites'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onContact={() => { setView('contact'); window.scrollTo({ top: 0, behavior: 'instant' }); }} />
+        <HomeView onStart={goToTarifs} onFeatures={() => { setView('fonctionnalites'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onContact={() => { setView('contact'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onQuickStart={goToSupportQuickStart} />
       ) : view === 'fonctionnalites' ? (
         <FeaturesView onStart={goToTarifs} />
       ) : view === 'contact' ? (
@@ -440,6 +456,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
           contactPhone={CONTACT_PHONE}
           whatsappUrl={CONTACT_WHATSAPP_URL}
           guideHref="/guide/Guide-Taches-et-Cash.docx"
+          openQuickStart={openSupportQuickStart}
         />
       ) : (
         <>
