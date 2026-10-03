@@ -478,13 +478,15 @@ export const SupportView: React.FC<SupportViewProps> = ({
           <div style={{ flex: '1 1 480px', minWidth: 0 }} className="relative z-20">
             <Reveal>
               <div className="flex flex-wrap items-center gap-3">
-                <div className="inline-flex px-3.5 py-1.5 bg-white border border-[#E6E9EE] rounded-full text-[12px] font-bold tracking-[0.06em] uppercase text-[#00857C]">Centre d'assistance</div>
-                {/* Le seul CTA du hero à porter un mouvement qui lui est
-                    propre — un halo qui respire derrière l'icône, toujours
-                    actif plutôt qu'au survol seul — précisément pour qu'il se
-                    remarque avant même d'être lu. `landing-shine` ajoute le
-                    balayage déjà utilisé sur les autres CTA pleins de cette
-                    page (« Télécharger le guide complet », WhatsApp). */}
+                {/* Remplace l'eyebrow « Centre d'assistance », retiré à la
+                    demande de l'utilisateur — ce bouton tient désormais sa
+                    place en tête du hero. Le seul CTA du hero à porter un
+                    mouvement qui lui est propre — un halo qui respire
+                    derrière l'icône, toujours actif plutôt qu'au survol
+                    seul — précisément pour qu'il se remarque avant même
+                    d'être lu. `landing-shine` ajoute le balayage déjà
+                    utilisé sur les autres CTA pleins de cette page
+                    (« Télécharger le guide complet », WhatsApp). */}
                 <button
                   onClick={() => setQuickStartOpen(true)}
                   className="landing-shine group inline-flex items-center gap-2 pl-2.5 pr-4 py-1.5 rounded-full bg-navy text-white text-[12px] font-bold hover:bg-turquoise hover:text-navy transition-colors"
