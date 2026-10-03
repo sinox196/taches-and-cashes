@@ -3,7 +3,7 @@ import {
   Search, HelpCircle, Headphones, MessageCircle, Sparkles, Video, Download,
   ChevronDown, BookOpen, Mail, Clock, Users, LayoutDashboard, Building2, Timer,
   ListChecks, Wallet, CalendarCheck, FolderKanban, MessageSquare, Gift, Globe,
-  FileText, ArrowRight, CornerDownLeft, X, Maximize2, Rocket,
+  FileText, ArrowRight, CornerDownLeft, X, Maximize2, Rocket, Play,
 } from 'lucide-react';
 import { Reveal } from './Reveal';
 
@@ -51,6 +51,11 @@ const GROUPS = [
 
 type GroupId = typeof GROUPS[number]['id'];
 
+/** Vidéo de démonstration « Créer un compte & se connecter » — hébergée une
+ *  seule fois, référencée depuis le chapitre du guide *et* depuis l'étape 1
+ *  du Démarrage rapide, pour ne jamais risquer deux copies qui divergent. */
+const ACCOUNT_DEMO_VIDEO = '/support/compte-demo.mp4';
+
 /**
  * Chaque entrée reprend un chapitre réel du guide utilisateur (téléchargeable
  * plus bas), condensé en ce qu'il faut pour répondre vite plutôt qu'en la
@@ -61,12 +66,17 @@ const GUIDE_CHAPTERS: {
   id: string; title: string; summary: string; group: GroupId;
   icon: React.ReactNode;
   /** Capture réelle de l'écran concerné (public/support). Optionnelle : un
-   *  chapitre sans capture s'affiche simplement sans. */
+   *  chapitre sans capture s'affiche simplement sans. Sert aussi d'image
+   *  d'aperçu (poster) quand le chapitre porte une vidéo. */
   shot?: string;
+  /** Vidéo de démonstration du chapitre, si elle existe. La vignette reste
+   *  `shot` — seule la superposition « lecture » change entre les deux. */
+  video?: string;
 }[] = [
   {
     id: 'compte',
     shot: '/support/compte.webp',
+    video: ACCOUNT_DEMO_VIDEO,
     title: 'Créer un compte & se connecter',
     group: 'demarrer',
     summary: "Choisissez une offre (Freelancer, gratuite, ou Complet) depuis la page Tarifs, avec ou sans code de parrainage, puis validez le formulaire. L'essai est gratuit et sans carte bancaire — Freelancer, elle, est active immédiatement. La connexion se fait ensuite avec votre identifiant et votre mot de passe.",
@@ -231,7 +241,7 @@ const FAQ_ITEMS: { id: string; q: string; a: string }[] = [
  */
 const QUICK_START_INTRO = "Vous mettez en place Tâches & Cash pour votre cabinet ? Voici la feuille de route idéale pour opérationnaliser votre plateforme en quelques minutes.";
 
-const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; items: string[] }[] = [
+const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; items: string[]; video?: string }[] = [
   {
     title: "Création du compte & Paramétrage de l'équipe",
     sub: 'Équipe de travail',
@@ -241,6 +251,7 @@ const QUICK_START_STEPS: { title: string; sub?: string; icon: React.ReactNode; i
       "Ajoutez et paramétrez les comptes de vos collaborateurs (droits d'accès, régime horaire et éléments de paie).",
       "Transmettez à chaque membre de l'équipe son identifiant et son mot de passe pour qu'il puisse se connecter.",
     ],
+    video: ACCOUNT_DEMO_VIDEO,
   },
   {
     title: 'Base clients',
@@ -323,9 +334,10 @@ export const SupportView: React.FC<SupportViewProps> = ({
   const [found, setFound] = useState<string | null>(null);
   const [helpful, setHelpful] = useState<Record<string, 'oui' | 'non'>>({});
   const [parallax, setParallax] = useState({ x: 0, y: 0 });
-  /** La capture ouverte en grand. Une capture d'écran d'application se lit mal
-   *  à 500px de large : la vignette sert à situer, l'agrandissement à lire. */
-  const [zoom, setZoom] = useState<{ src: string; title: string } | null>(null);
+  /** La capture — ou la vidéo — ouverte en grand. Une capture d'écran
+   *  d'application se lit mal à 500px de large : la vignette sert à situer,
+   *  l'agrandissement à lire (ou, pour une vidéo, à la regarder en entier). */
+  const [zoom, setZoom] = useState<{ src: string; title: string; kind: 'image' | 'video'; poster?: string } | null>(null);
   /** Le parcours « Démarrage rapide », ouvert depuis son propre bouton dans le hero. */
   const [quickStartOpen, setQuickStartOpen] = useState(false);
 
@@ -410,10 +422,14 @@ export const SupportView: React.FC<SupportViewProps> = ({
     };
   }, [zoom]);
 
-  // Même geste qu'au-dessus pour la modale « Démarrage rapide ».
+  // Même geste qu'au-dessus pour la modale « Démarrage rapide ». La vidéo de
+  // l'étape 1 peut s'ouvrir par-dessus (même état `zoom` que le guide) : tant
+  // qu'elle est affichée, Échap ne doit fermer qu'elle — sans le `!zoom`, les
+  // deux écouteurs réagissaient au même appui et refermaient les deux modales
+  // d'un coup, perdant la place qu'on avait dans le parcours.
   useEffect(() => {
     if (!quickStartOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setQuickStartOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !zoom) setQuickStartOpen(false); };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -421,7 +437,7 @@ export const SupportView: React.FC<SupportViewProps> = ({
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [quickStartOpen]);
+  }, [quickStartOpen, zoom]);
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
@@ -765,14 +781,47 @@ export const SupportView: React.FC<SupportViewProps> = ({
                         <p className="md:flex-1 text-[13.5px] leading-[1.65] text-[#5B6472] max-w-[420px]">
                           {chapter.summary}
                         </p>
-                        {/* La capture de l'écran dont parle le chapitre.
-                            `loading="lazy"` + dimensions explicites : les
-                            treize vivent dans le DOM en permanence (repliées),
-                            donc rien ne doit être téléchargé avant d'être
-                            regardé, ni faire sauter la page en arrivant. */}
-                        {chapter.shot && (
+                        {/* La capture — ou la vidéo — de l'écran dont parle le
+                            chapitre. `loading="lazy"` + dimensions explicites :
+                            les treize vivent dans le DOM en permanence
+                            (repliées), donc rien ne doit être téléchargé avant
+                            d'être regardé, ni faire sauter la page en
+                            arrivant. Un chapitre avec vidéo n'ouvre jamais
+                            l'image seule au clic — la vignette promet une
+                            vidéo, donc le clic doit en lancer une. */}
+                        {chapter.video ? (
                           <button
-                            onClick={() => setZoom({ src: chapter.shot!, title: chapter.title })}
+                            onClick={() => setZoom({ src: chapter.video!, title: chapter.title, kind: 'video', poster: chapter.shot })}
+                            className="group/shot md:w-[52%] shrink-0 relative block rounded-xl overflow-hidden border border-[#E6E9EE] bg-navy hover:border-turquoise/50 transition-colors"
+                            aria-label={`Regarder la vidéo : ${chapter.title}`}
+                          >
+                            {chapter.shot && (
+                              <img
+                                src={chapter.shot}
+                                alt={`Aperçu de la vidéo — ${chapter.title}`}
+                                width={1400}
+                                height={875}
+                                loading="lazy"
+                                decoding="async"
+                                className="block w-full h-auto opacity-75 group-hover/shot:opacity-60 transition-opacity"
+                              />
+                            )}
+                            {/* Le bouton de lecture est le signal principal,
+                                visible au repos (pas seulement au survol) :
+                                c'est lui qui dit « ceci se regarde », avant
+                                même que le badge « Vidéo » ne soit lu. */}
+                            <span className="absolute inset-0 flex items-center justify-center">
+                              <span className="w-14 h-14 rounded-full bg-white shadow-[0_10px_28px_-10px_rgba(13,27,42,0.5)] flex items-center justify-center group-hover/shot:scale-110 transition-transform duration-300">
+                                <Play className="w-6 h-6 text-navy ml-0.5" fill="currentColor" />
+                              </span>
+                            </span>
+                            <span className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-navy/70 backdrop-blur-[1px] text-[10.5px] font-bold text-white">
+                              <Video className="w-3 h-3" /> Vidéo de démonstration
+                            </span>
+                          </button>
+                        ) : chapter.shot && (
+                          <button
+                            onClick={() => setZoom({ src: chapter.shot!, title: chapter.title, kind: 'image' })}
                             className="group/shot md:w-[52%] shrink-0 relative block rounded-xl overflow-hidden border border-[#E6E9EE] bg-[#F7F9FA] hover:border-turquoise/50 transition-colors"
                             aria-label={`Agrandir la capture : ${chapter.title}`}
                           >
@@ -803,10 +852,14 @@ export const SupportView: React.FC<SupportViewProps> = ({
             })}
           </div>
 
-          {/* Ce qui n'existe pas encore le dit une fois, discrètement, plutôt
-              que d'occuper deux cartes pleines dans la rangée principale. */}
+          {/* Le premier tutoriel vidéo existe désormais (chapitre « Créer un
+              compte & se connecter », ci-dessus) : cette ligne ne peut plus
+              dire que les tutoriels vidéo sont « pas encore disponibles » en
+              bloc — seule la suite du catalogue reste à venir. Ce qui n'existe
+              pas encore le dit une fois, discrètement, plutôt que d'occuper
+              une carte pleine dans la rangée principale. */}
           <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-[#8A93A0]">
-            <Video className="w-3.5 h-3.5" /> Tutoriels vidéo
+            <Video className="w-3.5 h-3.5" /> Un premier tutoriel vidéo est disponible ci-dessus — la suite arrive bientôt.
             <Sparkles className="w-3.5 h-3.5 ml-2" /> Nouveautés
             <span className="text-[#B6BCC6]">— en préparation, pas encore disponibles.</span>
           </p>
@@ -930,33 +983,58 @@ export const SupportView: React.FC<SupportViewProps> = ({
         </div>
       </section>
 
-      {/* L'agrandissement d'une capture. Le fond ferme au clic, Échap aussi,
-          et l'image elle-même ne ferme pas — on clique volontiers dessus pour
-          regarder un détail. */}
+      {/* L'agrandissement d'une capture — ou la lecture d'une vidéo. Le fond
+          ferme au clic, Échap aussi, et le contenu lui-même ne ferme pas — on
+          clique volontiers dessus pour regarder un détail ou piloter la
+          lecture. `z-[110]` (au-dessus du `z-[100]` de la modale « Démarrage
+          rapide ») : la vidéo de l'étape 1 s'ouvre par-dessus elle, et doit
+          rester lisible quel que soit l'ordre de montage des deux modales
+          dans le DOM — un simple partage de `z-[100]` aurait laissé l'ordre
+          du JSX trancher, et la modale Démarrage rapide, montée après,
+          l'aurait recouverte. */}
       {zoom && (
         <div
           onClick={() => setZoom(null)}
           role="dialog"
           aria-modal="true"
           aria-label={zoom.title}
-          className="fixed inset-0 z-[100] bg-navy/80 backdrop-blur-[2px] flex items-center justify-center p-4 sm:p-8 animate-[landingPanelIn_160ms_ease-out]"
+          className="fixed inset-0 z-[110] bg-navy/80 backdrop-blur-[2px] flex items-center justify-center p-4 sm:p-8 animate-[landingPanelIn_160ms_ease-out]"
         >
           <div className="w-full max-w-[1200px]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-4 mb-3">
               <p className="text-[14px] font-bold text-white">{zoom.title}</p>
               <button
                 onClick={() => setZoom(null)}
-                aria-label="Fermer l'agrandissement"
+                aria-label="Fermer"
                 className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <img
-              src={zoom.src}
-              alt={`L'écran ${zoom.title} dans Tâches & Cash`}
-              className="w-full h-auto max-h-[80vh] object-contain rounded-xl bg-white"
-            />
+            {zoom.kind === 'video' ? (
+              // `autoPlay` : déclenché par un clic explicite sur une vignette
+              // « lecture », donc dans le cas le plus permissif des politiques
+              // d'autoplay des navigateurs ; `controls` reste là si le
+              // navigateur le bloque malgré tout, pour que la lecture ne
+              // dépende jamais que d'un geste qui a pu échouer silencieusement.
+              <video
+                key={zoom.src}
+                src={zoom.src}
+                poster={zoom.poster}
+                controls
+                autoPlay
+                playsInline
+                className="w-full h-auto max-h-[80vh] rounded-xl bg-black"
+              >
+                Votre navigateur ne prend pas en charge la lecture vidéo.
+              </video>
+            ) : (
+              <img
+                src={zoom.src}
+                alt={`L'écran ${zoom.title} dans Tâches & Cash`}
+                className="w-full h-auto max-h-[80vh] object-contain rounded-xl bg-white"
+              />
+            )}
           </div>
         </div>
       )}
@@ -1028,6 +1106,39 @@ export const SupportView: React.FC<SupportViewProps> = ({
                           </li>
                         ))}
                       </ul>
+                      {/* La vidéo de cette étape, exposée ici plutôt que
+                          seulement dans le guide plus bas : c'est à ce moment
+                          précis du parcours qu'on en a besoin, pas après être
+                          retourné chercher le bon chapitre. Même état `zoom`
+                          que le guide — un seul lecteur vidéo dans toute la
+                          page, jamais deux implémentations qui pourraient
+                          diverger. */}
+                      {step.video && (
+                        <button
+                          onClick={() => setZoom({ src: step.video!, title: step.title, kind: 'video', poster: '/support/compte.webp' })}
+                          className="group/qsvid mt-3 flex items-center gap-3 w-full rounded-xl border border-[#E6E9EE] bg-[#FBFCFD] hover:border-turquoise/50 hover:bg-[#F2F9F8] transition-colors px-3 py-2.5 text-left"
+                        >
+                          <span className="relative w-16 h-11 rounded-lg overflow-hidden shrink-0 bg-navy">
+                            <img
+                              src="/support/compte.webp"
+                              alt=""
+                              aria-hidden
+                              loading="lazy"
+                              decoding="async"
+                              className="w-full h-full object-cover opacity-70"
+                            />
+                            <span className="absolute inset-0 flex items-center justify-center">
+                              <span className="w-7 h-7 rounded-full bg-white flex items-center justify-center group-hover/qsvid:scale-110 transition-transform duration-300">
+                                <Play className="w-3 h-3 text-navy ml-0.5" fill="currentColor" />
+                              </span>
+                            </span>
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-[12.5px] font-bold text-navy">Voir la vidéo de démonstration</span>
+                            <span className="block text-[11px] text-[#8A93A0]">Créer un compte & paramétrer l'équipe</span>
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
