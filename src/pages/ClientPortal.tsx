@@ -7,6 +7,8 @@ import { downloadClientReportPdf, ClientReport } from '../components/portal/clie
 import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { useAuth } from '../context/AuthContext';
 import { formatCostTND } from '../utils/formatters';
+import { ExportButton } from '../components/ExportButton';
+import { csvNumber, CsvColumn } from '../utils/exportCsv';
 import { paymentModeLabel, isCashMode } from '../constants/paymentModes';
 import { companyHasResourcesModule } from '../constants/secteurs';
 import {
@@ -1117,13 +1119,6 @@ async function parseBankStatementExcel(file: File) {
 }
 
 /**
- * Un relevé exporté depuis une banque ne porte presque jamais sa propre
- * colonne « Banque » — c'est tout le fichier qui vient d'un seul compte.
- * Le champ « Banque (pour cet import) » couvre ce cas courant : appliqué à
- * toute ligne que le fichier lui-même ne renseigne pas, jamais pour
- * écraser une colonne « Banque » réellement présente dans le classeur.
- */
-/**
  * Après l'import, combien de lignes n'ont ni date ni banque reconnues —
  * affiché tout de suite plutôt que découvert en dépliant un groupe
  * « Date inconnue »/« Banque non renseignée » au hasard. `bankYearOf` rend
@@ -1136,10 +1131,22 @@ const summarizeImportGaps = (rows: BankLine[]): string | null => {
   if (!noDate && !noBank) return null;
   const parts: string[] = [];
   if (noDate) parts.push(`${noDate} ligne${noDate > 1 ? 's' : ''} avec une date non reconnue (vérifiez le format du fichier)`);
-  if (noBank) parts.push(`${noBank} ligne${noBank > 1 ? 's' : ''} sans banque (remplissez « Banque pour cet import » ou ajoutez une colonne Banque au fichier)`);
+  if (noBank) parts.push(`${noBank} ligne${noBank > 1 ? 's' : ''} sans banque`);
   return parts.join(' · ');
 };
 
+/**
+ * Un relevé exporté depuis une banque ne porte presque jamais sa propre
+ * colonne « Banque » — c'est tout le fichier qui vient d'un seul compte.
+ * Le champ « Banque » couvre ce cas courant : appliqué à toute ligne que le
+ * fichier lui-même ne renseigne pas, jamais pour écraser une colonne
+ * « Banque » réellement présente dans le classeur. Désormais **obligatoire**
+ * avant même de pouvoir choisir un fichier — à la demande explicite : sans
+ * lui, un import dont le fichier ne porte pas sa propre colonne Banque
+ * atterrissait entièrement dans le compartiment « Banque non renseignée »,
+ * et corriger après coup ligne par ligne est plus de travail que de la
+ * saisir une fois avant d'importer.
+ */
 const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => void }> = ({ onImported }) => {
   const { token } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1174,19 +1181,26 @@ const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => v
     }
   };
 
+  const bankMissing = !bankFallback.trim();
+
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
-        <input value={bankFallback} onChange={e => setBankFallback(e.target.value)} placeholder="Banque (pour cet import)"
+        <input value={bankFallback} onChange={e => setBankFallback(e.target.value)} placeholder="Banque *"
+          title="Nom de la banque — obligatoire avant d'importer"
           className="w-[170px] px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400" />
         <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-        <button onClick={() => inputRef.current?.click()} disabled={busy}
-          className="flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60">
+        <button onClick={() => inputRef.current?.click()} disabled={busy || bankMissing}
+          title={bankMissing ? 'Indiquez la banque avant d\'importer' : undefined}
+          className="flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed">
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
           Importer Excel
         </button>
       </div>
+      {bankMissing && (
+        <p className="text-[11px] text-gray-400">Indiquez la banque avant d'importer.</p>
+      )}
       {err && <p className="text-[11.5px] text-red-600 max-w-[320px]">{err}</p>}
       {warning && (
         <p className="text-[11.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 max-w-[320px]">{warning}</p>
@@ -1201,6 +1215,25 @@ interface BankMonthGroup {
   lines: BankLine[];
   banks: { name: string; lines: BankLine[] }[];
 }
+
+/**
+ * Mêmes colonnes que le tableau à l'écran, dans le même ordre — même règle
+ * que partout ailleurs dans l'app (voir CLAUDE.md « Export CSV ») : ce que
+ * `filtered` retient (le filtre année), pas la seule page affichée ni le
+ * repli/dépli des groupes mois/banque, qui n'est qu'un état d'écran.
+ * Ouvert au client comme à l'admin — exporter ce qu'on voit déjà n'est pas
+ * une action de gestion.
+ */
+const BANK_STATEMENT_EXPORT_COLUMNS: CsvColumn<BankLine>[] = [
+  { header: 'Date', value: l => fdate(l.date) },
+  { header: 'Banque', value: l => l.banque || '' },
+  { header: "Libellé de l'opération", value: l => l.libelle },
+  { header: 'Date de valeur', value: l => (l.dateValeur ? fdate(l.dateValeur) : '') },
+  { header: 'Débit', value: l => csvNumber(l.debit) },
+  { header: 'Crédit', value: l => csvNumber(l.credit) },
+  { header: 'Justif', value: l => l.justif || '' },
+  { header: 'Statut', value: l => (l.statut === 'OK' ? 'OK' : 'Sans justif') },
+];
 
 /** « Sans banque » toujours en dernier, le reste par ordre alphabétique —
  *  une ligne créée avant ce champ, ou importée d'un relevé sans colonne
@@ -1372,11 +1405,18 @@ const BankStatementView: React.FC<{
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <select value={year} onChange={e => setYear(Number(e.target.value))}
-          className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
-          <option value={0}>Toutes les années</option>
-          {years.map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <select value={year} onChange={e => setYear(Number(e.target.value))}
+            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
+            <option value={0}>Toutes les années</option>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <ExportButton
+            fileName="releve-bancaire"
+            columns={BANK_STATEMENT_EXPORT_COLUMNS}
+            rows={filtered}
+          />
+        </div>
         {canManage && (
           <div className="flex items-start gap-2">
             <ImportBankStatementButton onImported={onLinesImported} />
