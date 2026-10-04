@@ -1028,22 +1028,25 @@ const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
 const parseBankDateToIso = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
 
-  // Une vraie cellule Excel de type Date (`cellDates: true` à la lecture du
-  // classeur) ressort ici en objet `Date` réel plutôt qu'en texte formaté —
-  // c'est la seule façon de lever l'ambiguïté jour/mois pour de bon : un «
-  // 08/11/2026 » tapé en France se lit différemment d'un « 08/11/2026 »
-  // généré par un tableur en réglage anglo-saxon, mais la cellule Excel,
-  // elle, connaît la vraie date sans avoir besoin de la reformater en texte.
-  // Lues en UTC, comme la conversion manuelle de numéro de série juste
-  // en-dessous — SheetJS construit cet objet par un calcul UTC, donc le lire
-  // en heure locale décalerait le jour selon le fuseau du navigateur.
-  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
-    return `${raw.getUTCFullYear()}-${String(raw.getUTCMonth() + 1).padStart(2, '0')}-${String(raw.getUTCDate()).padStart(2, '0')}`;
-  }
-
-  // Numérique brut (type number, ou chaîne purement numérique renvoyée pour
-  // une cellule que le classeur ne marque pas comme une date) — plage
-  // 1954-2064, largement au-delà de ce qu'un relevé bancaire peut porter.
+  // Numérique brut — le cas normal pour une vraie cellule Excel de type
+  // Date lue avec `raw: true` (voir `parseBankStatementExcel`, qui lit
+  // délibérément **sans** `cellDates`) : SheetJS rend alors le numéro de
+  // série brut plutôt qu'un texte formaté, ce qui lève l'ambiguïté jour/mois
+  // pour de bon — un « 08/11/2026 » tapé en France ne se distingue pas d'un
+  // « 08/11/2026 » généré par un tableur en réglage anglo-saxon une fois
+  // mis en texte, mais le numéro de série ne ment jamais. `cellDates: true`
+  // a été essayé puis abandonné : SheetJS construit alors l'objet `Date` en
+  // passant par l'heure *locale* de la machine qui exécute le code (pas une
+  // pure arithmétique UTC comme on pourrait le croire), et pour un fuseau en
+  // avance sur UTC — Africa/Tunis compris, vérifié en reproduisant le bug
+  // remonté avec `TZ=Africa/Tunis` — la conversion repart un jour trop tôt.
+  // Le numéro de série, lui, ne traverse jamais l'horloge locale de
+  // personne : `EXCEL_EPOCH_UTC_MS + jours × 86 400 000` est une simple
+  // multiplication, vraie quel que soit le fuseau de qui l'exécute. Plage
+  // 1954-2064, largement au-delà de ce qu'un relevé bancaire peut porter —
+  // une chaîne purement numérique est acceptée aussi, pour une cellule que
+  // le classeur ne marque pas comme une date mais dont le nombre brut a
+  // malgré tout été renvoyé en texte.
   const asNumericSerial = typeof raw === 'number' ? raw
     : (/^\d{4,6}(\.\d+)?$/.test(String(raw).trim()) ? Number(raw) : NaN);
   if (Number.isFinite(asNumericSerial) && asNumericSerial > 19700 && asNumericSerial < 60000) {
@@ -1109,17 +1112,17 @@ const BANK_HEADER_CANDIDATES = {
 async function parseBankStatementExcel(file: File) {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
-  // `cellDates: true` fait ressortir une vraie cellule Excel de type Date en
-  // objet `Date` plutôt qu'en nombre de série — et `raw: true` juste
-  // en-dessous demande alors sa valeur réelle (`.v`, l'objet `Date`) plutôt
-  // que son texte formaté (`.w`). C'est ce qui lève l'ambiguïté jour/mois
-  // pour de bon : un classeur dont le format numérique de la colonne Date
-  // est anglo-saxon (MM/DD/YYYY) rendait, en texte, un « 08/11/2026 »
-  // strictement identique à un « 08/11/2026 » français — mais signifiant le
-  // 11 août dans un cas et le 8 novembre dans l'autre — et `parseBankDateToIso`
-  // n'avait alors aucun moyen de les distinguer (le bug remonté). La cellule
-  // elle-même connaît la vraie date sans avoir besoin de passer par du texte.
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  // Lu **sans** `cellDates` : une vraie cellule Excel de type Date ressort
+  // alors en numéro de série brut (`raw: true` demande `.v`, pas le texte
+  // formaté `.w`) plutôt qu'en texte dont l'ordre jour/mois dépend du format
+  // numérique propre au classeur source — « 08/11/2026 » peut vouloir dire
+  // le 8 novembre ou le 11 août selon que ce format est français ou
+  // anglo-saxon, et rien dans le texte ne permet de trancher. `cellDates:
+  // true` a été essayé pour justement éviter ce texte, puis abandonné : voir
+  // le commentaire de `parseBankDateToIso`, qui fait le même calcul que
+  // SheetJS aurait dû faire mais sans jamais passer par l'heure locale de
+  // qui exécute le code.
+  const workbook = XLSX.read(buffer, { type: 'array' });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('Le fichier ne contient aucune feuille.');
   const raw = XLSX.utils.sheet_to_json<Record<string, any>>(workbook.Sheets[sheetName], { defval: '', raw: true });
