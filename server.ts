@@ -5594,6 +5594,52 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     }
   });
 
+  /**
+   * Supprime en bloc toutes les lignes d'un mois — le pendant en masse du
+   * DELETE ligne par ligne qui suit, pour le bouton « Supprimer le mois » du
+   * groupe mensuel côté portail. `unknown=1` vise le groupe « Date
+   * inconnue » (une date que l'import n'a pas su convertir), qui n'a pas de
+   * `year`/`month` à filtrer. **Doit rester enregistrée avant** la route
+   * `/:id` juste en dessous : Express fait correspondre `:id` à n'importe
+   * quel segment unique, « by-month » y compris — un chemin au nom distinct
+   * ne suffit pas à éviter la collision, seul l'ordre d'enregistrement le
+   * fait (vérifié : sans ce réordonnancement, la requête tombait dans la
+   * route `:id` avec `id = 'by-month'`, jamais trouvée, 404).
+   */
+  app.delete('/api/portal/bank-statement/by-month', authenticate, async (req: any, res: any) => {
+    try {
+      if (!req.user.clientId) return res.status(403).json({ error: 'Forbidden' });
+      if (!(await isElevatedBankStatementSession(req))) return res.status(403).json({ error: 'Forbidden' });
+
+      const unknown = req.query.unknown === '1' || req.query.unknown === 'true';
+      const year = Number(req.query.year);
+      const month = Number(req.query.month);
+      if (!unknown && (!year || !month)) return res.status(400).json({ error: 'year et month requis' });
+
+      const all = await db.getAllBankStatementLines(req.user.companyId);
+      const inScope = all.filter((l: any) => {
+        if (Number(l.clientId) !== Number(req.user.clientId)) return false;
+        const d = String(l.date || '');
+        const isIsoDate = /^\d{4}-\d{2}-\d{2}/.test(d);
+        if (unknown) return !isIsoDate;
+        return isIsoDate && Number(d.slice(0, 4)) === year && Number(d.slice(5, 7)) === month;
+      });
+
+      for (const l of inScope) {
+        await db.deleteBankStatementLine(req.user.companyId, l.id);
+      }
+      if (inScope.length) {
+        const label = unknown ? 'à date non reconnue' : `${String(month).padStart(2, '0')}/${year}`;
+        await notifyBankStatementToClient(req.user.companyId, req.user.clientId,
+          `${inScope.length} ligne(s) du mois ${label} ont été supprimées.`);
+      }
+      res.json({ deleted: inScope.length });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.delete('/api/portal/bank-statement/:id', authenticate, async (req: any, res: any) => {
     try {
       if (!req.user.clientId) return res.status(403).json({ error: 'Forbidden' });

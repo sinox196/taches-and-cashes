@@ -380,6 +380,7 @@ export const ClientPortal: React.FC = () => {
                     return exists ? prev.map(l => l.id === line.id ? line : l) : [...prev, line];
                   })}
                   onLineDeleted={id => setBankLines(prev => prev ? prev.filter(l => l.id !== id) : prev)}
+                  onLinesDeleted={ids => setBankLines(prev => prev ? prev.filter(l => !ids.includes(l.id)) : prev)}
                   onLinesImported={lines => setBankLines(prev => [...(prev || []), ...lines])}
                 />
               )}
@@ -1208,13 +1209,15 @@ const BankStatementView: React.FC<{
   onJustifSaved: (id: string, justif: string, statut: 'OK' | 'SANS_JUSTIF') => void;
   onLineSaved: (line: BankLine) => void;
   onLineDeleted: (id: string) => void;
+  onLinesDeleted: (ids: string[]) => void;
   onLinesImported: (lines: BankLine[]) => void;
-}> = ({ lines, loading, error, canManage, onJustifSaved, onLineSaved, onLineDeleted, onLinesImported }) => {
+}> = ({ lines, loading, error, canManage, onJustifSaved, onLineSaved, onLineDeleted, onLinesDeleted, onLinesImported }) => {
   const { token } = useAuth();
   const [year, setYear] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingMonth, setDeletingMonth] = useState<string | null>(null);
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
   const didInitCollapse = useRef(false);
 
@@ -1281,6 +1284,25 @@ const BankStatementView: React.FC<{
       window.alert(e.message || 'Suppression impossible.');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  /** Pendant en masse de `deleteLine`, pour le bouton « Supprimer le mois »
+   *  du groupe — une seule confirmation, un seul appel réseau. */
+  const deleteMonthGroup = async (group: BankMonthGroup) => {
+    const n = group.lines.length;
+    if (!window.confirm(`Supprimer les ${n} ligne${n > 1 ? 's' : ''} de ${group.label} ? Cette action est irréversible.`)) return;
+    setDeletingMonth(group.monthKey);
+    try {
+      const [yStr, mStr] = group.monthKey.split('-');
+      const params = group.monthKey === '0000-00' ? 'unknown=1' : `year=${yStr}&month=${mStr}`;
+      const res = await fetch(`/api/portal/bank-statement/by-month?${params}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || 'Suppression impossible.'); }
+      onLinesDeleted(group.lines.map(l => l.id));
+    } catch (e: any) {
+      window.alert(e.message || 'Suppression impossible.');
+    } finally {
+      setDeletingMonth(null);
     }
   };
 
@@ -1386,10 +1408,23 @@ const BankStatementView: React.FC<{
                     <tr className="bg-gray-100 border-b border-gray-200 cursor-pointer hover:bg-gray-200/60 select-none"
                       onClick={() => toggleMonth(group.monthKey)}>
                       <td colSpan={colSpan} className="px-3 py-2">
-                        <div className="flex items-center gap-2 font-bold text-gray-700 text-[12.5px]">
-                          {isCollapsed ? <ChevronRight className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
-                          {group.label}
-                          <span className="text-gray-400 font-normal text-[11.5px]">· {group.lines.length} ligne{group.lines.length > 1 ? 's' : ''}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 font-bold text-gray-700 text-[12.5px]">
+                            {isCollapsed ? <ChevronRight className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+                            {group.label}
+                            <span className="text-gray-400 font-normal text-[11.5px]">· {group.lines.length} ligne{group.lines.length > 1 ? 's' : ''}</span>
+                          </div>
+                          {canManage && (
+                            <button
+                              onClick={e => { e.stopPropagation(); deleteMonthGroup(group); }}
+                              disabled={deletingMonth === group.monthKey}
+                              title="Supprimer toutes les lignes de ce mois"
+                              className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              {deletingMonth === group.monthKey ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                              Supprimer le mois
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
