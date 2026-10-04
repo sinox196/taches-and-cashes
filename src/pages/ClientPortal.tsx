@@ -12,7 +12,7 @@ import { companyHasResourcesModule } from '../constants/secteurs';
 import {
   LogOut, FileText, ClipboardCheck, FolderCheck, CalendarClock, MessageCircle,
   AlertTriangle, CheckCircle2, Loader2, Menu, X, Wallet, BarChart3, Download, Landmark,
-  Plus, Pencil, Trash2, Upload,
+  Plus, Pencil, Trash2, Upload, ChevronRight, ChevronDown, Building2,
 } from 'lucide-react';
 
 /**
@@ -83,6 +83,9 @@ interface BankLine {
   debit: number;
   credit: number;
   justif: string;
+  /** Saisie par le cabinet, jamais par le client — voir CLAUDE.md « Relevé
+   *  bancaire ». Sert à regrouper le relevé par banque dans le portail. */
+  banque: string;
   statut: 'OK' | 'SANS_JUSTIF';
 }
 
@@ -906,12 +909,12 @@ const JustifCell: React.FC<{ line: BankLine; onSaved: (id: string, justif: strin
   );
 };
 
-interface BankLineDraft { date: string; libelle: string; dateValeur: string; debit: string; credit: string; justif: string }
+interface BankLineDraft { date: string; libelle: string; dateValeur: string; debit: string; credit: string; justif: string; banque: string }
 
-const emptyBankDraft = (): BankLineDraft => ({ date: '', libelle: '', dateValeur: '', debit: '', credit: '', justif: '' });
+const emptyBankDraft = (): BankLineDraft => ({ date: '', libelle: '', dateValeur: '', debit: '', credit: '', justif: '', banque: '' });
 const draftFromLine = (l: BankLine): BankLineDraft => ({
   date: l.date || '', libelle: l.libelle || '', dateValeur: l.dateValeur || '',
-  debit: l.debit ? String(l.debit) : '', credit: l.credit ? String(l.credit) : '', justif: l.justif || '',
+  debit: l.debit ? String(l.debit) : '', credit: l.credit ? String(l.credit) : '', justif: l.justif || '', banque: l.banque || '',
 });
 
 /** Ligne éditable — création (`lineId` absent) ou correction complète d'une
@@ -942,7 +945,7 @@ const BankLineEditRow: React.FC<{
     try {
       const body = {
         date: draft.date, libelle: draft.libelle, dateValeur: draft.dateValeur,
-        debit: Number(draft.debit) || 0, credit: Number(draft.credit) || 0, justif: draft.justif,
+        debit: Number(draft.debit) || 0, credit: Number(draft.credit) || 0, justif: draft.justif, banque: draft.banque,
       };
       const res = await fetch(lineId ? `/api/portal/bank-statement/${lineId}` : '/api/portal/bank-statement', {
         method: lineId ? 'PUT' : 'POST',
@@ -962,6 +965,7 @@ const BankLineEditRow: React.FC<{
   return (
     <tr className="border-b border-gray-100">
       <td className="px-3 py-2"><input type="date" value={draft.date} onChange={field('date')} className={inputCls} /></td>
+      <td className="px-3 py-2"><input value={draft.banque} onChange={field('banque')} placeholder="Banque" className={inputCls} /></td>
       <td className="px-3 py-2"><input value={draft.libelle} onChange={field('libelle')} placeholder="Libellé de l'opération" className={inputCls} /></td>
       <td className="px-3 py-2"><input type="date" value={draft.dateValeur} onChange={field('dateValeur')} className={inputCls} /></td>
       <td className="px-3 py-2"><input value={draft.debit} onChange={field('debit')} placeholder="0,000" className={`${inputCls} text-right`} /></td>
@@ -1008,6 +1012,7 @@ const BANK_HEADER_CANDIDATES = {
   dateValeur: ['date de valeur', 'date valeur'],
   debit: ['debit'],
   credit: ['credit'],
+  banque: ['banque', 'nom de la banque', 'bank'],
 } as const;
 
 /**
@@ -1032,6 +1037,7 @@ async function parseBankStatementExcel(file: File) {
   const dateValeurKey = keyFor(BANK_HEADER_CANDIDATES.dateValeur);
   const debitKey = keyFor(BANK_HEADER_CANDIDATES.debit);
   const creditKey = keyFor(BANK_HEADER_CANDIDATES.credit);
+  const banqueKey = keyFor(BANK_HEADER_CANDIDATES.banque);
   if (!dateKey) throw new Error('Colonne « Date » introuvable dans le fichier.');
 
   const toNumber = (v: any): number => {
@@ -1046,13 +1052,22 @@ async function parseBankStatementExcel(file: File) {
       dateValeur: parseBankDateToIso(dateValeurKey ? r[dateValeurKey] : ''),
       debit: toNumber(debitKey ? r[debitKey] : ''),
       credit: toNumber(creditKey ? r[creditKey] : ''),
+      banque: String(banqueKey ? r[banqueKey] : '').trim(),
     }))
     .filter(row => row.date); // une ligne sans date n'a rien d'une transaction
 }
 
+/**
+ * Un relevé exporté depuis une banque ne porte presque jamais sa propre
+ * colonne « Banque » — c'est tout le fichier qui vient d'un seul compte.
+ * Le champ « Banque (pour cet import) » couvre ce cas courant : appliqué à
+ * toute ligne que le fichier lui-même ne renseigne pas, jamais pour
+ * écraser une colonne « Banque » réellement présente dans le classeur.
+ */
 const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => void }> = ({ onImported }) => {
   const { token } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [bankFallback, setBankFallback] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -1060,8 +1075,9 @@ const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => v
     setBusy(true);
     setErr('');
     try {
-      const rows = await parseBankStatementExcel(file);
-      if (!rows.length) throw new Error('Aucune ligne exploitable dans ce fichier.');
+      const parsed = await parseBankStatementExcel(file);
+      if (!parsed.length) throw new Error('Aucune ligne exploitable dans ce fichier.');
+      const rows = parsed.map(r => ({ ...r, banque: r.banque || bankFallback.trim() }));
       const res = await fetch('/api/portal/bank-statement/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1080,6 +1096,8 @@ const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => v
 
   return (
     <div className="flex items-center gap-2">
+      <input value={bankFallback} onChange={e => setBankFallback(e.target.value)} placeholder="Banque (pour cet import)"
+        className="w-[170px] px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400" />
       <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
       <button onClick={() => inputRef.current?.click()} disabled={busy}
@@ -1090,6 +1108,24 @@ const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => v
       {err && <p className="text-[11.5px] text-red-600">{err}</p>}
     </div>
   );
+};
+
+interface BankMonthGroup {
+  monthKey: string;
+  label: string;
+  lines: BankLine[];
+  banks: { name: string; lines: BankLine[] }[];
+}
+
+/** « Sans banque » toujours en dernier, le reste par ordre alphabétique —
+ *  une ligne créée avant ce champ, ou importée d'un relevé sans colonne
+ *  Banque et sans « Banque (pour cet import) », n'a pas de quoi se classer
+ *  ailleurs. */
+const BANK_NO_NAME = '—';
+const sortBankNames = (a: string, b: string) => {
+  if (a === BANK_NO_NAME) return 1;
+  if (b === BANK_NO_NAME) return -1;
+  return a.localeCompare(b, 'fr');
 };
 
 const BankStatementView: React.FC<{
@@ -1104,10 +1140,11 @@ const BankStatementView: React.FC<{
 }> = ({ lines, loading, error, canManage, onJustifSaved, onLineSaved, onLineDeleted, onLinesImported }) => {
   const { token } = useAuth();
   const [year, setYear] = useState(0);
-  const [month, setMonth] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
+  const didInitCollapse = useRef(false);
 
   const years = useMemo(() => {
     const set = new Set<number>((lines || []).map(l => bankYearOf(l.date)).filter(Boolean));
@@ -1115,8 +1152,51 @@ const BankStatementView: React.FC<{
     return [...set].sort((a, b) => b - a);
   }, [lines]);
 
-  const filtered = useMemo(() => (lines || []).filter(l =>
-    (!year || bankYearOf(l.date) === year) && (!month || bankMonthOf(l.date) === month)), [lines, year, month]);
+  const filtered = useMemo(() => (lines || []).filter(l => !year || bankYearOf(l.date) === year), [lines, year]);
+
+  /** Regroupé mois d'abord (le plus récent en tête, bascule pliée/dépliée),
+   *  banque ensuite à l'intérieur de chaque mois — la banque est saisie par
+   *  le cabinet, jamais par le client, voir CLAUDE.md « Relevé bancaire ». */
+  const grouped = useMemo<BankMonthGroup[]>(() => {
+    const byMonth = new Map<string, BankLine[]>();
+    for (const l of filtered) {
+      const y = bankYearOf(l.date), m = bankMonthOf(l.date);
+      const key = y && m ? `${y}-${String(m).padStart(2, '0')}` : '0000-00';
+      (byMonth.get(key) ?? byMonth.set(key, []).get(key)!).push(l);
+    }
+    return [...byMonth.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([monthKey, monthLines]) => {
+        const [yStr, mStr] = monthKey.split('-');
+        const y = Number(yStr), m = Number(mStr);
+        const label = y && m
+          ? `${BANK_MONTH_NAMES[m - 1].charAt(0).toUpperCase()}${BANK_MONTH_NAMES[m - 1].slice(1)} ${y}`
+          : 'Date inconnue';
+        const byBank = new Map<string, BankLine[]>();
+        for (const l of monthLines) {
+          const key = (l.banque || '').trim() || BANK_NO_NAME;
+          (byBank.get(key) ?? byBank.set(key, []).get(key)!).push(l);
+        }
+        const banks = [...byBank.entries()].sort((a, b) => sortBankNames(a[0], b[0])).map(([name, bankLines]) => ({ name, lines: bankLines }));
+        return { monthKey, label, lines: monthLines, banks };
+      });
+  }, [filtered]);
+
+  // Le mois le plus récent s'ouvre déplié, les autres partent pliés — sinon
+  // un relevé de plusieurs années s'afficherait d'un bloc. Posé une seule
+  // fois, au premier chargement des lignes : un repli choisi par la suite ne
+  // doit pas revenir au rechargement d'une ligne ailleurs dans la liste.
+  useEffect(() => {
+    if (didInitCollapse.current || grouped.length === 0) return;
+    didInitCollapse.current = true;
+    setCollapsedMonths(new Set(grouped.slice(1).map(g => g.monthKey)));
+  }, [grouped]);
+
+  const toggleMonth = (key: string) => setCollapsedMonths(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   const deleteLine = async (id: string) => {
     if (!window.confirm('Supprimer cette ligne du relevé bancaire ?')) return;
@@ -1143,21 +1223,54 @@ const BankStatementView: React.FC<{
     return <div className="bg-white border border-gray-200 rounded-xl"><Empty>{error}</Empty></div>;
   }
 
+  const colSpan = canManage ? 9 : 8;
+
+  const renderRow = (l: BankLine) => editingId === l.id ? (
+    <BankLineEditRow key={l.id} initial={draftFromLine(l)} lineId={l.id} onCancel={() => setEditingId(null)}
+      onSaved={line => { onLineSaved(line); setEditingId(null); }} />
+  ) : (
+    <tr key={l.id} className={`border-b border-gray-100 last:border-b-0 ${l.statut === 'SANS_JUSTIF' ? 'bg-amber-50/50' : 'bg-done-bg/40'}`}>
+      <td className="px-3 py-2 text-gray-600">{fdate(l.date)}</td>
+      <td className="px-3 py-2 text-gray-600">{l.banque || <span className="text-gray-300">—</span>}</td>
+      <td className="px-3 py-2 text-gray-800">{l.libelle || <span className="text-gray-300">—</span>}</td>
+      <td className="px-3 py-2 text-gray-600">{l.dateValeur ? fdate(l.dateValeur) : <span className="text-gray-300">—</span>}</td>
+      <td className="px-3 py-2 text-right font-mono text-late-fg">{l.debit ? formatCostTND(l.debit) : ''}</td>
+      <td className="px-3 py-2 text-right font-mono text-done-fg">{l.credit ? formatCostTND(l.credit) : ''}</td>
+      <td className="px-3 py-2">
+        {canManage ? (l.justif || <span className="text-gray-300">—</span>) : <JustifCell line={l} onSaved={onJustifSaved} />}
+      </td>
+      <td className="px-3 py-2">
+        {l.statut === 'OK' ? (
+          <span className="px-2 py-0.5 rounded-full bg-done-bg text-done-fg text-[11px] font-bold">OK</span>
+        ) : (
+          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold">Sans justif</span>
+        )}
+      </td>
+      {canManage && (
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => { setEditingId(l.id); setCreating(false); }} title="Modifier"
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => deleteLine(l.id)} disabled={deletingId === l.id} title="Supprimer"
+              className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 disabled:opacity-60">
+              {deletingId === l.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </td>
+      )}
+    </tr>
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <select value={year} onChange={e => setYear(Number(e.target.value))}
-            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
-            <option value={0}>Toutes les années</option>
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <select value={month} onChange={e => setMonth(Number(e.target.value))}
-            className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
-            <option value={0}>Tous les mois</option>
-            {BANK_MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
-          </select>
-        </div>
+        <select value={year} onChange={e => setYear(Number(e.target.value))}
+          className="px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400">
+          <option value={0}>Toutes les années</option>
+          {years.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
         {canManage && (
           <div className="flex items-center gap-2">
             <ImportBankStatementButton onImported={onLinesImported} />
@@ -1177,9 +1290,10 @@ const BankStatementView: React.FC<{
             <table className="w-full text-left whitespace-nowrap">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {['Date', "Libellé de l'opération", 'Date de valeur'].map(h => (
-                    <th key={h} className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">{h}</th>
-                  ))}
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Date</th>
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Banque</th>
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Libellé de l'opération</th>
+                  <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Date de valeur</th>
                   <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Débit</th>
                   <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider text-right">Crédit</th>
                   <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Justif</th>
@@ -1187,48 +1301,42 @@ const BankStatementView: React.FC<{
                   {canManage && <th className="px-3 py-2.5 font-bold text-gray-500 uppercase text-[10.5px] tracking-wider">Actions</th>}
                 </tr>
               </thead>
-              <tbody className="text-[12.5px]">
-                {creating && (
+              {creating && (
+                <tbody className="text-[12.5px]">
                   <BankLineEditRow initial={emptyBankDraft()} onCancel={() => setCreating(false)}
                     onSaved={line => { onLineSaved(line); setCreating(false); }} />
-                )}
-                {filtered.map(l => editingId === l.id ? (
-                  <BankLineEditRow key={l.id} initial={draftFromLine(l)} lineId={l.id} onCancel={() => setEditingId(null)}
-                    onSaved={line => { onLineSaved(line); setEditingId(null); }} />
-                ) : (
-                  <tr key={l.id} className={`border-b border-gray-100 last:border-b-0 ${l.statut === 'SANS_JUSTIF' ? 'bg-amber-50/50' : 'bg-done-bg/40'}`}>
-                    <td className="px-3 py-2 text-gray-600">{fdate(l.date)}</td>
-                    <td className="px-3 py-2 text-gray-800">{l.libelle || <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2 text-gray-600">{l.dateValeur ? fdate(l.dateValeur) : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2 text-right font-mono text-late-fg">{l.debit ? formatCostTND(l.debit) : ''}</td>
-                    <td className="px-3 py-2 text-right font-mono text-done-fg">{l.credit ? formatCostTND(l.credit) : ''}</td>
-                    <td className="px-3 py-2">
-                      {canManage ? (l.justif || <span className="text-gray-300">—</span>) : <JustifCell line={l} onSaved={onJustifSaved} />}
-                    </td>
-                    <td className="px-3 py-2">
-                      {l.statut === 'OK' ? (
-                        <span className="px-2 py-0.5 rounded-full bg-done-bg text-done-fg text-[11px] font-bold">OK</span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold">Sans justif</span>
-                      )}
-                    </td>
-                    {canManage && (
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => { setEditingId(l.id); setCreating(false); }} title="Modifier"
-                            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => deleteLine(l.id)} disabled={deletingId === l.id} title="Supprimer"
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 disabled:opacity-60">
-                            {deletingId === l.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                          </button>
+                </tbody>
+              )}
+              {grouped.map(group => {
+                const isCollapsed = collapsedMonths.has(group.monthKey);
+                return (
+                  <tbody key={group.monthKey} className="text-[12.5px]">
+                    <tr className="bg-gray-100 border-b border-gray-200 cursor-pointer hover:bg-gray-200/60 select-none"
+                      onClick={() => toggleMonth(group.monthKey)}>
+                      <td colSpan={colSpan} className="px-3 py-2">
+                        <div className="flex items-center gap-2 font-bold text-gray-700 text-[12.5px]">
+                          {isCollapsed ? <ChevronRight className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+                          {group.label}
+                          <span className="text-gray-400 font-normal text-[11.5px]">· {group.lines.length} ligne{group.lines.length > 1 ? 's' : ''}</span>
                         </div>
                       </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
+                    </tr>
+                    {!isCollapsed && group.banks.map(bank => (
+                      <React.Fragment key={bank.name}>
+                        <tr className="bg-gray-50/80 border-b border-gray-100">
+                          <td colSpan={colSpan} className="px-3 py-1.5">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
+                              <Building2 className="w-3 h-3" />
+                              {bank.name === BANK_NO_NAME ? 'Banque non renseignée' : bank.name}
+                            </div>
+                          </td>
+                        </tr>
+                        {bank.lines.map(renderRow)}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                );
+              })}
             </table>
           </div>
         )}

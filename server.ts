@@ -5396,6 +5396,9 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       debit: round3(num(Number(body?.debit), 0)),
       credit: round3(num(Number(body?.credit), 0)),
       justif: text(body?.justif, 300),
+      // Saisie par le cabinet, jamais par le client — voir CLAUDE.md « Relevé
+      // bancaire ». Sert à regrouper le relevé par banque dans le portail.
+      banque: text(body?.banque, 100),
       customFields,
     };
   };
