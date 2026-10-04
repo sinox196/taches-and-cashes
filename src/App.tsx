@@ -57,6 +57,19 @@ type TaskModalInitial = {
 export default function App() {
   const { user, token, isLoading, hasPermission, isImpersonating, stopImpersonating } = useAuth();
 
+  // Le lien de la page publique (`#support`, `#tarifs`…) survivait à la
+  // connexion : Landing.tsx l'écrit dans l'URL en navigant sur ses propres
+  // vues, et rien ne l'effaçait au passage au back-office/portail, qui n'a
+  // lui-même aucun routeur (voir « Navigation has no router ») et ne touche
+  // donc jamais plus l'URL — la barre d'adresse restait figée sur
+  // « …/#support » pour le reste de la session, comme si l'app y pointait
+  // encore. Effacé une seule fois, dès qu'un utilisateur réel est connu.
+  useEffect(() => {
+    if (user && window.location.hash) {
+      window.history.replaceState({}, '', window.location.pathname + window.location.search);
+    }
+  }, [user]);
+
   // Shown only while logged out — the public marketing/pricing page, or the
   // login form reached from it via "Se connecter". Distinct from
   // activeSidebarItem, which only ever applies to the authenticated shell.
