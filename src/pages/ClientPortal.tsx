@@ -1004,7 +1004,7 @@ const BankLineEditRow: React.FC<{
   );
 };
 
-const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 /** Jour 0 d'Excel (30/12/1899 — le décalage qui compense le faux 29 février
  *  1900 qu'Excel modélise) : une colonne de date dont le format numérique
@@ -1027,6 +1027,19 @@ const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
  */
 const parseBankDateToIso = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
+
+  // Une vraie cellule Excel de type Date (`cellDates: true` à la lecture du
+  // classeur) ressort ici en objet `Date` réel plutôt qu'en texte formaté —
+  // c'est la seule façon de lever l'ambiguïté jour/mois pour de bon : un «
+  // 08/11/2026 » tapé en France se lit différemment d'un « 08/11/2026 »
+  // généré par un tableur en réglage anglo-saxon, mais la cellule Excel,
+  // elle, connaît la vraie date sans avoir besoin de la reformater en texte.
+  // Lues en UTC, comme la conversion manuelle de numéro de série juste
+  // en-dessous — SheetJS construit cet objet par un calcul UTC, donc le lire
+  // en heure locale décalerait le jour selon le fuseau du navigateur.
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    return `${raw.getUTCFullYear()}-${String(raw.getUTCMonth() + 1).padStart(2, '0')}-${String(raw.getUTCDate()).padStart(2, '0')}`;
+  }
 
   // Numérique brut (type number, ou chaîne purement numérique renvoyée pour
   // une cellule que le classeur ne marque pas comme une date) — plage
@@ -1073,6 +1086,7 @@ const BANK_HEADER_CANDIDATES = {
   dateValeur: ['date de valeur', 'date valeur'],
   debit: ['debit'],
   credit: ['credit'],
+  montant: ['montant'],
   banque: ['banque', 'nom de la banque', 'nom banque', 'bank', 'etablissement', 'etablissement bancaire', 'banque emettrice'],
 } as const;
 
@@ -1081,24 +1095,55 @@ const BANK_HEADER_CANDIDATES = {
  * Date de valeur, Débit, Crédit) — le fichier est analysé entièrement dans le
  * navigateur (SheetJS, même idiome que l'import de clients), le serveur ne
  * voit jamais le fichier, seulement le tableau déjà mappé.
+ *
+ * `keyFor` cherchait d'abord une correspondance **exacte** avec la liste de
+ * candidats, et rien d'autre — un intitulé réel qui porte un mot de plus
+ * (« Débit (TND) », « Montant débit », un en-tête éclaté sur deux lignes
+ * dans Excel) ne correspondait à rien du tout, et Date de valeur/Débit/
+ * Crédit arrivaient vides ou à zéro sans qu'aucune erreur ne le signale —
+ * le bug remonté. L'exact reste tenté en premier (le plus sûr), puis un
+ * repli cherche une colonne dont l'intitulé *contient* le ou les mots du
+ * candidat, en excluant au besoin un autre mot pour ne pas confondre deux
+ * colonnes voisines (« Date » ne doit pas attraper « Date de valeur »).
  */
 async function parseBankStatementExcel(file: File) {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: 'array' });
+  // `cellDates: true` fait ressortir une vraie cellule Excel de type Date en
+  // objet `Date` plutôt qu'en nombre de série — et `raw: true` juste
+  // en-dessous demande alors sa valeur réelle (`.v`, l'objet `Date`) plutôt
+  // que son texte formaté (`.w`). C'est ce qui lève l'ambiguïté jour/mois
+  // pour de bon : un classeur dont le format numérique de la colonne Date
+  // est anglo-saxon (MM/DD/YYYY) rendait, en texte, un « 08/11/2026 »
+  // strictement identique à un « 08/11/2026 » français — mais signifiant le
+  // 11 août dans un cas et le 8 novembre dans l'autre — et `parseBankDateToIso`
+  // n'avait alors aucun moyen de les distinguer (le bug remonté). La cellule
+  // elle-même connaît la vraie date sans avoir besoin de passer par du texte.
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('Le fichier ne contient aucune feuille.');
-  const raw = XLSX.utils.sheet_to_json<Record<string, any>>(workbook.Sheets[sheetName], { defval: '', raw: false });
+  const raw = XLSX.utils.sheet_to_json<Record<string, any>>(workbook.Sheets[sheetName], { defval: '', raw: true });
   if (raw.length === 0) throw new Error('La feuille est vide.');
 
   const keys = Object.keys(raw[0]);
-  const keyFor = (candidates: readonly string[]) => keys.find(k => candidates.includes(fold(k)));
-  const dateKey = keyFor(BANK_HEADER_CANDIDATES.date);
+  const keyFor = (exactCandidates: readonly string[], contains?: string[], excludes?: string[]) => {
+    const exact = keys.find(k => exactCandidates.includes(fold(k)));
+    if (exact || !contains) return exact;
+    return keys.find(k => {
+      const f = fold(k);
+      return contains.every(c => f.includes(c)) && !(excludes || []).some(e => f.includes(e));
+    });
+  };
+  const dateKey = keyFor(BANK_HEADER_CANDIDATES.date, ['date'], ['valeur']);
   const libelleKey = keyFor(BANK_HEADER_CANDIDATES.libelle);
-  const dateValeurKey = keyFor(BANK_HEADER_CANDIDATES.dateValeur);
-  const debitKey = keyFor(BANK_HEADER_CANDIDATES.debit);
-  const creditKey = keyFor(BANK_HEADER_CANDIDATES.credit);
-  const banqueKey = keyFor(BANK_HEADER_CANDIDATES.banque);
+  const dateValeurKey = keyFor(BANK_HEADER_CANDIDATES.dateValeur, ['valeur']);
+  const debitKey = keyFor(BANK_HEADER_CANDIDATES.debit, ['debit']);
+  const creditKey = keyFor(BANK_HEADER_CANDIDATES.credit, ['credit']);
+  const banqueKey = keyFor(BANK_HEADER_CANDIDATES.banque, ['banque']);
+  // Un relevé peut porter un seul montant signé plutôt que deux colonnes
+  // Débit/Crédit — n'est cherché que si ni l'une ni l'autre n'existe,
+  // jamais au détriment d'un fichier qui les porte déjà séparément.
+  const montantKey = (!debitKey && !creditKey) ? keyFor(BANK_HEADER_CANDIDATES.montant, ['montant']) : undefined;
   if (!dateKey) throw new Error('Colonne « Date » introuvable dans le fichier.');
 
   const toNumber = (v: any): number => {
@@ -1107,14 +1152,23 @@ async function parseBankStatementExcel(file: File) {
   };
 
   return raw
-    .map(r => ({
-      date: parseBankDateToIso(r[dateKey]),
-      libelle: String(libelleKey ? r[libelleKey] : '').trim(),
-      dateValeur: parseBankDateToIso(dateValeurKey ? r[dateValeurKey] : ''),
-      debit: toNumber(debitKey ? r[debitKey] : ''),
-      credit: toNumber(creditKey ? r[creditKey] : ''),
-      banque: String(banqueKey ? r[banqueKey] : '').trim(),
-    }))
+    .map(r => {
+      let debit = toNumber(debitKey ? r[debitKey] : '');
+      let credit = toNumber(creditKey ? r[creditKey] : '');
+      if (montantKey) {
+        const montant = toNumber(r[montantKey]);
+        debit = montant < 0 ? Math.abs(montant) : 0;
+        credit = montant > 0 ? montant : 0;
+      }
+      return {
+        date: parseBankDateToIso(r[dateKey]),
+        libelle: String(libelleKey ? r[libelleKey] : '').trim(),
+        dateValeur: parseBankDateToIso(dateValeurKey ? r[dateValeurKey] : ''),
+        debit,
+        credit,
+        banque: String(banqueKey ? r[banqueKey] : '').trim(),
+      };
+    })
     .filter(row => row.date); // une ligne sans date n'a rien d'une transaction
 }
 
