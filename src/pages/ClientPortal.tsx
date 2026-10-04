@@ -991,28 +991,74 @@ const BankLineEditRow: React.FC<{
 
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
-/** `DD/MM/YYYY` (ou `DD-MM-YYYY`) -> ISO, sinon passe tel quel — un relevé de
- *  banque exporté depuis Excel affiche ses dates au format français, jamais
- *  en ISO. */
+/** Jour 0 d'Excel (30/12/1899 — le décalage qui compense le faux 29 février
+ *  1900 qu'Excel modélise) : une colonne de date dont le format numérique
+ *  n'est pas reconnu comme tel par le classeur source ressort de SheetJS en
+ *  simple nombre de série plutôt qu'en texte formaté, même avec `raw: false`
+ *  — `raw: false` ne reformate que ce que le classeur a lui-même marqué
+ *  comme une date. */
+const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
+
+/**
+ * Un relevé bancaire réel ne tient à aucun format unique : `DD/MM/YYYY`,
+ * `DD-MM-YYYY`, `DD.MM.YYYY`, une année sur deux chiffres, une heure
+ * accolée (« 15/01/2026 00:00:00 »), ou un nombre de série Excel brut quand
+ * la colonne n'est pas typée Date dans le fichier source — tous rencontrés
+ * en pratique, d'où une ligne qui atterrissait sous « Date inconnue » sans
+ * que rien n'explique pourquoi. Le seul format volontairement **non**
+ * couvert est `MM/DD/YYYY` (anglo-saxon) : sur une plage 1-12/1-12 il est
+ * indiscernable du format français, et le prendre en charge romprait
+ * silencieusement l'autre.
+ */
 const parseBankDateToIso = (raw: any): string => {
-  const s = String(raw ?? '').trim();
+  if (raw === null || raw === undefined) return '';
+
+  // Numérique brut (type number, ou chaîne purement numérique renvoyée pour
+  // une cellule que le classeur ne marque pas comme une date) — plage
+  // 1954-2064, largement au-delà de ce qu'un relevé bancaire peut porter.
+  const asNumericSerial = typeof raw === 'number' ? raw
+    : (/^\d{4,6}(\.\d+)?$/.test(String(raw).trim()) ? Number(raw) : NaN);
+  if (Number.isFinite(asNumericSerial) && asNumericSerial > 19700 && asNumericSerial < 60000) {
+    const d = new Date(EXCEL_EPOCH_UTC_MS + Math.round(asNumericSerial) * 86400000);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  let s = String(raw).trim();
   if (!s) return '';
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  // Une heure accolée ne change rien au jour civil — mais seule une heure
+  // reconnaissable (chiffres et deux-points) est coupée : un « 15 Jan 2026 »
+  // a aussi un espace, et le couper au premier espace aurait tronqué le mois
+  // en toutes lettres plus bas.
+  s = s.replace(/T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/, '').replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*$/, '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  const m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})$/);
   if (m) {
-    const [, d, mo, y] = m;
+    const [, d, mo, yRaw] = m;
+    const y = yRaw.length === 2 ? (Number(yRaw) > 50 ? `19${yRaw}` : `20${yRaw}`) : yRaw;
     return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  // Dernier recours : un format avec un nom de mois en toutes lettres
+  // (« 15 Jan 2026 », « Jan 15, 2026 ») — jamais tenté sur un format tout en
+  // chiffres, où le navigateur résoudrait jour/mois à sa propre façon
+  // plutôt qu'à la française.
+  if (/[a-zA-ZéûîôâêÉÛÎÔÂÊ]/.test(s)) {
+    const parsed = new Date(s);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
   }
   return s;
 };
 
 const BANK_HEADER_CANDIDATES = {
-  date: ['date'],
-  libelle: ["libelle de l'operation", 'libelle operation', 'libelle', 'operation'],
+  date: ['date', "date de l'operation", 'date operation', 'date transaction', 'date txn'],
+  libelle: ["libelle de l'operation", 'libelle operation', 'libelle', 'operation', 'description', 'intitule'],
   dateValeur: ['date de valeur', 'date valeur'],
   debit: ['debit'],
   credit: ['credit'],
-  banque: ['banque', 'nom de la banque', 'bank'],
+  banque: ['banque', 'nom de la banque', 'nom banque', 'bank', 'etablissement', 'etablissement bancaire', 'banque emettrice'],
 } as const;
 
 /**
@@ -1064,16 +1110,35 @@ async function parseBankStatementExcel(file: File) {
  * toute ligne que le fichier lui-même ne renseigne pas, jamais pour
  * écraser une colonne « Banque » réellement présente dans le classeur.
  */
+/**
+ * Après l'import, combien de lignes n'ont ni date ni banque reconnues —
+ * affiché tout de suite plutôt que découvert en dépliant un groupe
+ * « Date inconnue »/« Banque non renseignée » au hasard. `bankYearOf` rend
+ * 0 pour une date que `parseBankDateToIso` n'a pas su convertir — c'est ce
+ * qui dit qu'un format du fichier source n'a pas été reconnu.
+ */
+const summarizeImportGaps = (rows: BankLine[]): string | null => {
+  const noDate = rows.filter(r => !bankYearOf(r.date)).length;
+  const noBank = rows.filter(r => !String(r.banque ?? '').trim()).length;
+  if (!noDate && !noBank) return null;
+  const parts: string[] = [];
+  if (noDate) parts.push(`${noDate} ligne${noDate > 1 ? 's' : ''} avec une date non reconnue (vérifiez le format du fichier)`);
+  if (noBank) parts.push(`${noBank} ligne${noBank > 1 ? 's' : ''} sans banque (remplissez « Banque pour cet import » ou ajoutez une colonne Banque au fichier)`);
+  return parts.join(' · ');
+};
+
 const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => void }> = ({ onImported }) => {
   const { token } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
   const [bankFallback, setBankFallback] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [warning, setWarning] = useState<string | null>(null);
 
   const handleFile = async (file: File) => {
     setBusy(true);
     setErr('');
+    setWarning(null);
     try {
       const parsed = await parseBankStatementExcel(file);
       if (!parsed.length) throw new Error('Aucune ligne exploitable dans ce fichier.');
@@ -1085,7 +1150,9 @@ const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => v
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Import impossible.');
-      onImported(data.rows || []);
+      const imported: BankLine[] = data.rows || [];
+      onImported(imported);
+      setWarning(summarizeImportGaps(imported));
     } catch (e: any) {
       setErr(e.message || 'Import impossible.');
     } finally {
@@ -1095,17 +1162,22 @@ const ImportBankStatementButton: React.FC<{ onImported: (lines: BankLine[]) => v
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <input value={bankFallback} onChange={e => setBankFallback(e.target.value)} placeholder="Banque (pour cet import)"
-        className="w-[170px] px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400" />
-      <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-      <button onClick={() => inputRef.current?.click()} disabled={busy}
-        className="flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60">
-        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-        Importer Excel
-      </button>
-      {err && <p className="text-[11.5px] text-red-600">{err}</p>}
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <input value={bankFallback} onChange={e => setBankFallback(e.target.value)} placeholder="Banque (pour cet import)"
+          className="w-[170px] px-2.5 py-2 text-[12px] border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-gray-400" />
+        <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+        <button onClick={() => inputRef.current?.click()} disabled={busy}
+          className="flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60">
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+          Importer Excel
+        </button>
+      </div>
+      {err && <p className="text-[11.5px] text-red-600 max-w-[320px]">{err}</p>}
+      {warning && (
+        <p className="text-[11.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 max-w-[320px]">{warning}</p>
+      )}
     </div>
   );
 };
@@ -1272,7 +1344,7 @@ const BankStatementView: React.FC<{
           {years.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
         {canManage && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             <ImportBankStatementButton onImported={onLinesImported} />
             <button onClick={() => { setCreating(true); setEditingId(null); }}
               className="flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium bg-navy text-white rounded-lg hover:bg-navy-hover">
