@@ -855,6 +855,18 @@ const ReportView: React.FC<{ report: ClientReport | null; loading: boolean; erro
 const BANK_MONTH_NAMES = MONTH_NAMES;
 const bankYearOf = (iso: string) => Number(String(iso || '').slice(0, 4)) || 0;
 const bankMonthOf = (iso: string) => Number(String(iso || '').slice(5, 7)) || 0;
+/**
+ * `bankYearOf`/`bankMonthOf` slice fixed character positions assuming an
+ * ISO `YYYY-MM-DD` string — correct for anything `parseBankDateToIso`
+ * actually recognised, but that function falls back to returning the raw
+ * text unchanged for a date it couldn't parse (see its own comment). Slicing
+ * arbitrary text at those positions can yield a non-zero, truthy, but
+ * out-of-range "month" (14, 67…) — truthy was the only check this used to
+ * make, and `BANK_MONTH_NAMES[m - 1]` for such a value is `undefined`,
+ * which crashed the whole portal page on `.charAt(0)`. A date only counts
+ * as known when its month actually falls in 1-12.
+ */
+const isValidBankMonth = (m: number) => m >= 1 && m <= 12;
 
 /**
  * Relevé bancaire — un vrai client lit toutes les colonnes mais n'en modifie
@@ -1236,7 +1248,7 @@ const BankStatementView: React.FC<{
     const byMonth = new Map<string, BankLine[]>();
     for (const l of filtered) {
       const y = bankYearOf(l.date), m = bankMonthOf(l.date);
-      const key = y && m ? `${y}-${String(m).padStart(2, '0')}` : '0000-00';
+      const key = y && isValidBankMonth(m) ? `${y}-${String(m).padStart(2, '0')}` : '0000-00';
       (byMonth.get(key) ?? byMonth.set(key, []).get(key)!).push(l);
     }
     return [...byMonth.entries()]
@@ -1244,7 +1256,7 @@ const BankStatementView: React.FC<{
       .map(([monthKey, monthLines]) => {
         const [yStr, mStr] = monthKey.split('-');
         const y = Number(yStr), m = Number(mStr);
-        const label = y && m
+        const label = y && isValidBankMonth(m)
           ? `${BANK_MONTH_NAMES[m - 1].charAt(0).toUpperCase()}${BANK_MONTH_NAMES[m - 1].slice(1)} ${y}`
           : 'Date inconnue';
         const byBank = new Map<string, BankLine[]>();
