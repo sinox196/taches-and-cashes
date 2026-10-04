@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
-interface State { hasError: boolean }
+interface State { hasError: boolean; message: string | null }
 
 /**
  * Filet de sécurité unique, posé une fois à la racine — cette app n'en avait
@@ -27,11 +27,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, message: null };
   }
 
-  static getDerivedStateFromError(): State {
-    return { hasError: true };
+  static getDerivedStateFromError(error: unknown): State {
+    return { hasError: true, message: error instanceof Error ? error.message : String(error) };
   }
 
   componentDidCatch(error: unknown, info: React.ErrorInfo) {
@@ -54,6 +54,18 @@ export class ErrorBoundary extends React.Component<Props, State> {
             >
               Recharger la page
             </button>
+            {/* Repliée par défaut — ce n'est pas pour un utilisateur ordinaire,
+                mais sans elle le seul détail de ce qui a cassé reste coincé
+                dans la console du navigateur, hors d'atteinte de qui signale
+                le problème par message plutôt qu'en partageant un écran. */}
+            {this.state.message && (
+              <details className="mt-4 text-left">
+                <summary className="text-[11px] text-gray-400 cursor-pointer hover:text-gray-600">Détails techniques</summary>
+                <p className="mt-1.5 text-[11px] text-gray-500 font-mono break-words bg-gray-50 border border-gray-200 rounded-lg p-2">
+                  {this.state.message}
+                </p>
+              </details>
+            )}
           </div>
         </div>
       );
