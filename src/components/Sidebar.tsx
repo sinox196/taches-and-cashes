@@ -34,6 +34,20 @@ interface SidebarProps {
 
 type NavItem = { id: string; label: string; icon: any; hasChevron: boolean; badge?: number };
 
+/**
+ * One colour per group header, so a glance at the sidebar says which
+ * section you're in without reading the label — the same idiom Cash's,
+ * Tâches' and RH's own sub-tabs already use for their tab bars. Picked
+ * light enough to read on the dark navy rail, and distinct from the
+ * turquoise `#00B3A6` used for the active-item highlight so a header
+ * colour is never mistaken for "this page is selected".
+ */
+const GROUP_COLOR: Record<string, string> = {
+  'Pilotage & Production': 'text-sky-300',
+  'Finance & RH': 'text-amber-300',
+  'Outils & Collaboration': 'text-violet-300',
+};
+
 /** One nav rail button — extracted so the grouped list and the ungrouped Plateforme entry share the exact same markup. */
 const NavButton: React.FC<{ item: NavItem; isActive: boolean; onSelect: () => void }> = ({ item, isActive, onSelect }) => {
   const Icon = item.icon;
@@ -231,7 +245,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {navGroups.map((group, i) => (
             <div key={group.header} className={`flex flex-col gap-px ${i === 0 ? 'pt-1' : 'pt-4'}`}>
               {showGroupHeaders && (
-                <div className="flex items-center gap-1.5 px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/45">
+                <div className={`flex items-center gap-1.5 px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] ${GROUP_COLOR[group.header] ?? 'text-white/45'}`}>
                   <span>•</span> {group.header}
                 </div>
               )}
