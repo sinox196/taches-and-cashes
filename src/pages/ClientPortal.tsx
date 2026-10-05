@@ -910,14 +910,15 @@ const JustifCell: React.FC<{ line: BankLine; onSaved: (id: string, justif: strin
   };
 
   return (
-    <div className="min-w-[160px]">
-      <input
+    <div className="min-w-[200px]">
+      <textarea
         value={value}
         onChange={e => setValue(e.target.value)}
         onBlur={save}
         disabled={saving}
         placeholder="Ajouter un justificatif…"
-        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12.5px] focus:outline-none focus:border-navy disabled:opacity-60"
+        rows={2}
+        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-[12.5px] resize-y focus:outline-none focus:border-navy disabled:opacity-60"
       />
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
     </div>
@@ -948,7 +949,7 @@ const BankLineEditRow: React.FC<{
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
-  const field = (k: keyof BankLineDraft) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const field = (k: keyof BankLineDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setDraft(d => ({ ...d, [k]: e.target.value }));
 
   const inputCls = 'w-full px-2 py-1.5 border border-turquoise/30 rounded-lg text-[12.5px] bg-turquoise/10 focus:outline-none focus:border-navy';
@@ -985,7 +986,7 @@ const BankLineEditRow: React.FC<{
       <td className="px-3 py-2"><input type="date" value={draft.dateValeur} onChange={field('dateValeur')} className={inputCls} /></td>
       <td className="px-3 py-2"><input value={draft.debit} onChange={field('debit')} placeholder="0,000" className={`${inputCls} text-right`} /></td>
       <td className="px-3 py-2"><input value={draft.credit} onChange={field('credit')} placeholder="0,000" className={`${inputCls} text-right`} /></td>
-      <td className="px-3 py-2"><input value={draft.justif} onChange={field('justif')} placeholder="Justificatif" className={inputCls} /></td>
+      <td className="px-3 py-2"><textarea value={draft.justif} onChange={field('justif')} placeholder="Justificatif" rows={2} className={`${inputCls} resize-y`} /></td>
       <td className="px-3 py-2 text-gray-300 text-[11px]">—</td>
       <td className="px-3 py-2">
         <div className="flex items-center gap-1.5">

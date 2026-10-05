@@ -783,7 +783,7 @@ const NotesList: React.FC<{
                     <td className="px-3 py-2 text-gray-700">{note.client || <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2 text-gray-700">{note.pole || <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2 text-gray-700">{note.taskType || <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2 text-gray-600 italic max-w-[260px] truncate" title={note.description}>
+                    <td className="px-3 py-2 text-gray-600 italic max-w-[260px] break-words">
                       {note.description}
                     </td>
                     <td className="px-3 py-2">
