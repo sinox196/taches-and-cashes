@@ -6,13 +6,20 @@ interface AppointmentModalProps {
   onClose: () => void;
 }
 
+/** Business hours the widget opens — must match APPOINTMENT_OPEN/CLOSE in server.ts. */
+const OPEN = '08:00';
+const CLOSE = '19:00';
+
 /**
- * "Prendre rendez-vous" — a visitor picks a date and a time, leaves their
- * contact details, and POSTs to /api/appointments, which persists the
- * request and notifies contact@taches-and-cash.com. Same dialog chrome,
- * honeypot and success-state pattern as RequestAccessModal — a second,
- * simpler flow rather than a third branch bolted onto that one, since this
- * form has no plan/seat logic to share with it.
+ * "Prendre rendez-vous" — a visitor picks a date and a free time range
+ * (heureDebut–heureFin, anywhere inside OPEN–CLOSE, no fixed grid: 08:15 to
+ * 11:45 is as valid as 09:00 to 10:00), leaves their contact details, and
+ * POSTs to /api/appointments, which persists the request, refuses a range
+ * that overlaps a slot already taken that same day, and notifies
+ * contact@taches-and-cash.com. Same dialog chrome, honeypot and
+ * success-state pattern as RequestAccessModal — a second, simpler flow
+ * rather than a third branch bolted onto that one, since this form has no
+ * plan/seat logic to share with it.
  */
 export const AppointmentModal: React.FC<AppointmentModalProps> = ({ onClose }) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -31,21 +38,45 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({ onClose }) =
   const [email, setEmail] = useState('');
   const [telephone, setTelephone] = useState('');
   const [date, setDate] = useState('');
-  const [heure, setHeure] = useState('');
+  const [heureDebut, setHeureDebut] = useState('');
+  const [heureFin, setHeureFin] = useState('');
   const [website, setWebsite] = useState(''); // honeypot — real visitors never see this field
   const [sending, setSending] = useState(false);
   const [reference, setReference] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [bookedSlots, setBookedSlots] = useState<{ heureDebut: string; heureFin: string }[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+
+  // A courtesy preview, not the authority — the server re-checks for a
+  // conflict on submit regardless (a second visitor could book the exact
+  // same gap between this fetch and that submit).
+  useEffect(() => {
+    if (!date) { setBookedSlots([]); return; }
+    let cancelled = false;
+    setSlotsLoading(true);
+    fetch(`/api/appointments/slots?date=${encodeURIComponent(date)}`)
+      .then(res => res.json())
+      .then(data => { if (!cancelled) setBookedSlots(Array.isArray(data?.slots) ? data.slots : []); })
+      .catch(() => { if (!cancelled) setBookedSlots([]); })
+      .finally(() => { if (!cancelled) setSlotsLoading(false); });
+    return () => { cancelled = true; };
+  }, [date]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (heureDebut && heureFin && heureDebut >= heureFin) {
+      setError("L'heure de fin doit être après l'heure de début.");
+      return;
+    }
+
     setSending(true);
     try {
       const res = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nom, prenom, email, telephone, date, heure, website }),
+        body: JSON.stringify({ nom, prenom, email, telephone, date, heureDebut, heureFin, website }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -79,7 +110,7 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({ onClose }) =
             </div>
             <p className="text-[14.5px] font-semibold text-gray-900 mb-1.5">Merci, votre demande est bien reçue !</p>
             <p className="text-[13.5px] text-gray-600 leading-relaxed">
-              Nous vous recontactons pour confirmer votre créneau du {date} à {heure}.
+              Nous vous recontactons pour confirmer votre créneau du {date} de {heureDebut} à {heureFin}.
             </p>
             <p className="mt-3 text-[12px] text-gray-400">
               Référence : <span className="font-mono font-semibold text-gray-600">{reference}</span>
@@ -99,32 +130,64 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({ onClose }) =
               </div>
             )}
 
+            <div>
+              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Date</label>
+              <input
+                required
+                type="date"
+                min={todayIso}
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Date</label>
+                <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Heure de début</label>
                 <input
                   required
-                  type="date"
-                  min={todayIso}
-                  value={date}
-                  onChange={e => setDate(e.target.value)}
+                  type="time"
+                  min={OPEN}
+                  max={CLOSE}
+                  value={heureDebut}
+                  onChange={e => setHeureDebut(e.target.value)}
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                 />
               </div>
               <div>
-                <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Heure</label>
+                <label className="block text-[12.5px] font-semibold text-gray-700 mb-1">Heure de fin</label>
                 <input
                   required
                   type="time"
-                  step={1800}
-                  min="08:00"
-                  max="18:00"
-                  value={heure}
-                  onChange={e => setHeure(e.target.value)}
+                  min={OPEN}
+                  max={CLOSE}
+                  value={heureFin}
+                  onChange={e => setHeureFin(e.target.value)}
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13.5px] focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                 />
               </div>
             </div>
+            <p className="text-[11.5px] text-gray-500 -mt-2">Rendez-vous possibles entre {OPEN} et {CLOSE}, à l'horaire de votre choix.</p>
+
+            {date && (
+              <div className="text-[11.5px] text-gray-500 bg-canvas rounded-lg px-3 py-2.5">
+                {slotsLoading ? (
+                  'Vérification des créneaux disponibles…'
+                ) : bookedSlots.length === 0 ? (
+                  "Aucun créneau n'est encore réservé ce jour-là."
+                ) : (
+                  <>
+                    <span className="font-semibold text-gray-700">Déjà réservé ce jour-là : </span>
+                    {bookedSlots
+                      .slice()
+                      .sort((a, b) => a.heureDebut.localeCompare(b.heureDebut))
+                      .map(s => `${s.heureDebut}–${s.heureFin}`)
+                      .join(', ')}
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>

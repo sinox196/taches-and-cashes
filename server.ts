@@ -9805,11 +9805,48 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     }
   });
 
+  /** Business hours the public booking widget opens — a fixed window, not per-day configurable (not asked for). */
+  const APPOINTMENT_OPEN = '08:00';
+  const APPOINTMENT_CLOSE = '19:00';
+
+  /** Only a row with both ends set counts as a real slot — a legacy row from before heureDebut/heureFin existed is skipped rather than crashing the overlap check. */
+  const appointmentSlot = (a: any): { heureDebut: string; heureFin: string } | null =>
+    (a && typeof a.heureDebut === 'string' && typeof a.heureFin === 'string') ? { heureDebut: a.heureDebut, heureFin: a.heureFin } : null;
+
+  /** Two [start, end) ranges overlap iff each starts before the other ends. */
+  const rangesOverlap = (aStart: string, aEnd: string, bStart: string, bEnd: string) => aStart < bEnd && bStart < aEnd;
+
   /**
-   * "Prendre rendez-vous" — a visitor picks a date and a time and leaves their
-   * contact details; same shape as /api/orders just above (public, no auth,
-   * honeypot, persist-then-email so a dropped SMTP send never loses the
-   * request), with its own fields and its own reference prefix.
+   * Which ranges are already taken on a given date — public, no auth, no
+   * personal data (just the time ranges), so the booking widget can grey out
+   * or warn about a slot before the visitor fills the whole form and hits
+   * the 409 below.
+   */
+  app.get('/api/appointments/slots', async (req: any, res: any) => {
+    try {
+      const date = String(req.query?.date ?? '').trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Date invalide' });
+      const all = await db.getAllAppointments();
+      const slots = all
+        .filter((a: any) => a.date === date)
+        .map(appointmentSlot)
+        .filter((s: any): s is { heureDebut: string; heureFin: string } => !!s);
+      res.json({ slots });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * "Prendre rendez-vous" — a visitor picks a date and a time range and
+   * leaves their contact details; same shape as /api/orders just above
+   * (public, no auth, honeypot, persist-then-email so a dropped SMTP send
+   * never loses the request), with its own fields and its own reference
+   * prefix. The slot must fall inside APPOINTMENT_OPEN–APPOINTMENT_CLOSE and
+   * must not overlap a slot someone else already booked for the same date —
+   * checked here, server-side, since the public /slots lookup above is only
+   * a courtesy and a second visitor can always race past it.
    */
   app.post('/api/appointments', async (req: any, res: any) => {
     try {
@@ -9821,10 +9858,11 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       const email = text(req.body?.email, 160);
       const telephone = text(req.body?.telephone, 40);
       const date = text(req.body?.date, 10);
-      const heure = text(req.body?.heure, 5);
+      const heureDebut = text(req.body?.heureDebut, 5);
+      const heureFin = text(req.body?.heureFin, 5);
 
-      if (!nom || !prenom || !email || !telephone || !date || !heure) {
-        return res.status(400).json({ error: 'Nom, prénom, email, téléphone, date et heure sont requis' });
+      if (!nom || !prenom || !email || !telephone || !date || !heureDebut || !heureFin) {
+        return res.status(400).json({ error: 'Nom, prénom, email, téléphone, date et horaire sont requis' });
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         return res.status(400).json({ error: 'Adresse email invalide' });
@@ -9832,29 +9870,44 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({ error: 'Date invalide' });
       }
-      if (!/^\d{2}:\d{2}$/.test(heure)) {
-        return res.status(400).json({ error: 'Heure invalide' });
+      if (!/^\d{2}:\d{2}$/.test(heureDebut) || !/^\d{2}:\d{2}$/.test(heureFin)) {
+        return res.status(400).json({ error: 'Horaire invalide' });
       }
       if (date < formatDateISO(new Date())) {
         return res.status(400).json({ error: 'La date choisie est déjà passée' });
       }
+      if (heureDebut >= heureFin) {
+        return res.status(400).json({ error: "L'heure de fin doit être après l'heure de début" });
+      }
+      if (heureDebut < APPOINTMENT_OPEN || heureFin > APPOINTMENT_CLOSE) {
+        return res.status(400).json({ error: `Les rendez-vous se prennent entre ${APPOINTMENT_OPEN} et ${APPOINTMENT_CLOSE}` });
+      }
 
       const existing = await db.getAllAppointments();
+      const conflict = existing.some((a: any) => {
+        if (a.date !== date) return false;
+        const slot = appointmentSlot(a);
+        return !!slot && rangesOverlap(heureDebut, heureFin, slot.heureDebut, slot.heureFin);
+      });
+      if (conflict) {
+        return res.status(409).json({ error: 'Ce créneau est déjà réservé. Merci de choisir un autre horaire.' });
+      }
+
       const reference = `RDV-${civilParts(new Date()).year}-${String(existing.length + 1).padStart(4, '0')}`;
 
       await db.createAppointment({
         id: genId('appointment'),
-        nom, prenom, email, telephone, date, heure,
+        nom, prenom, email, telephone, date, heureDebut, heureFin,
         reference, status: 'PENDING', createdAt: new Date().toISOString(),
       });
 
       const { sent } = await sendMail({
         to: 'contact@taches-and-cash.com',
-        subject: `Nouvelle demande de rendez-vous — ${date} ${heure} (${reference})`,
+        subject: `Nouvelle demande de rendez-vous — ${date} ${heureDebut}-${heureFin} (${reference})`,
         html: `
           <p><strong>Référence :</strong> ${escapeHtml(reference)}</p>
           <p><strong>Date :</strong> ${escapeHtml(date)}</p>
-          <p><strong>Heure :</strong> ${escapeHtml(heure)}</p>
+          <p><strong>Horaire :</strong> ${escapeHtml(heureDebut)} – ${escapeHtml(heureFin)}</p>
           <p><strong>Nom :</strong> ${escapeHtml(nom)}</p>
           <p><strong>Prénom :</strong> ${escapeHtml(prenom)}</p>
           <p><strong>Email :</strong> ${escapeHtml(email)}</p>
