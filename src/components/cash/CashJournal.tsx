@@ -235,7 +235,13 @@ export const CashJournal: React.FC<{ variant?: 'caisse' | 'banque' }> = (props) 
       return [r.label, r.clientName, r.category]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
-  }, [rows, search, month, year]);
+    // `variant` has to be a dependency here: CashManagement renders this same
+    // <CashJournal> element for both tabs, just with a different `variant`
+    // prop — React keeps the one component instance alive across that
+    // switch rather than remounting it, so without `variant` in this array
+    // the memo never recomputes on a tab change alone, and the screen keeps
+    // showing whichever variant's rows were filtered last.
+  }, [rows, search, month, year, variant]);
 
   // Balance over the whole filtered set, then paged — so page 2 continues
   // from page 1 instead of restarting. `filtered` arrives oldest-first
