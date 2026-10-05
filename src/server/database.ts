@@ -103,6 +103,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.publicHolidays) db.publicHolidays = [];
     if (!db.payslips) db.payslips = [];
     if (!db.orders) db.orders = [];
+    if (!db.appointments) db.appointments = [];
     if (!db.messageGroups) db.messageGroups = [];
     if (!db.platformSettings) db.platformSettings = defaultPlatformSettings();
     if (typeof db.landingVisitCount !== 'number') db.landingVisitCount = 0;
@@ -977,6 +978,13 @@ async function initJsonDb(): Promise<Database> {
       db.orders.push(order);
       await saveDb();
       return order;
+    },
+
+    getAllAppointments: async () => db.appointments,
+    createAppointment: async (appointment: any) => {
+      db.appointments.push(appointment);
+      await saveDb();
+      return appointment;
     },
 
     getSettings: async (companyId: string) => ensureCompanySettings(companyId),

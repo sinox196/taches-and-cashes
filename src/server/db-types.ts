@@ -285,6 +285,10 @@ export interface Database {
   getAllOrders(): Promise<any[]>;
   createOrder(order: any): Promise<any>;
 
+  /** A "Prendre rendez-vous" booking from the public landing page — global, pre-account, same shape as orders. */
+  getAllAppointments(): Promise<any[]>;
+  createAppointment(appointment: any): Promise<any>;
+
   /**
    * A bare visit counter for the public landing page — global, one number,
    * no per-visitor detail. Not analytics: no session/cookie dedup, no source
@@ -398,6 +402,7 @@ export const emptyDb = () => ({
   // Calendrier des jours fériés — référence seule, n'affecte pas le pointage.
   publicHolidays: [],
   orders: [],
+  appointments: [],
   settingsByCompany: [],
   platformSettings: defaultPlatformSettings(),
   // Page publique — un simple compteur de visites, pas d'analytics.

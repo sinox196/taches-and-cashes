@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { ArrowRight, Mail, Phone, MessageCircle, LifeBuoy, Check } from 'lucide-react';
+import { ArrowRight, Mail, Phone, MessageCircle, LifeBuoy, Check, CalendarCheck } from 'lucide-react';
 
-export function ContactView({ email, phone, whatsappUrl, onSupport }: {
-  email: string; phone: string; whatsappUrl: string; onSupport: () => void;
+export function ContactView({ email, phone, whatsappUrl, onSupport, onBookAppointment }: {
+  email: string; phone: string; whatsappUrl: string; onSupport: () => void; onBookAppointment: () => void;
 }) {
   const [intent, setIntent] = useState('Découvrir la plateforme');
   const [prepared, setPrepared] = useState(false);
@@ -33,6 +33,9 @@ export function ContactView({ email, phone, whatsappUrl, onSupport }: {
           ].map(({ icon: Icon, title, value, href }) => <a key={title} href={href} className="contact-channel" {...(href.startsWith('https:') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
             <span className="contact-channel-icon"><Icon size={21} /></span><span><small>{title}</small><strong>{value}</strong></span><ArrowRight size={18} />
           </a>)}
+          <button onClick={onBookAppointment} className="contact-channel w-full text-left">
+            <span className="contact-channel-icon"><CalendarCheck size={21} /></span><span><small>Prendre rendez-vous</small><strong>Choisir une date et un créneau</strong></span><ArrowRight size={18} />
+          </button>
           <button onClick={onSupport} className="contact-help"><LifeBuoy size={21} /><span>Déjà utilisateur ?<strong>Consulter le centre d’assistance</strong></span><ArrowRight size={17} /></button>
         </div>
         <form onSubmit={prepare} className="contact-form" onChange={() => setPrepared(false)}>

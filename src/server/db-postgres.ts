@@ -44,9 +44,9 @@ import {
  * Every per-tenant table carries `companyId` inside its own `data` JSONB
  * blob — no schema change beyond an expression index — and every read/write
  * goes through `tenantCollection()`, which filters/stamps it the same way
- * `database.ts`'s JSON backend's `scoped()`/`findScoped()` do. `companies`
- * and `orders` are the only genuinely cross-tenant tables, using the plain
- * `collection()` helper with no companyId at all.
+ * `database.ts`'s JSON backend's `scoped()`/`findScoped()` do. `companies`,
+ * `orders` and `appointments` are the only genuinely cross-tenant tables,
+ * using the plain `collection()` helper with no companyId at all.
  */
 
 const { Pool } = pg;
@@ -86,10 +86,11 @@ const COLLECTIONS: Record<string, { desc: boolean }> = {
   public_holidays: { desc: false },
   payslips: { desc: true },
   orders: { desc: true },
+  appointments: { desc: true },
 };
 
-/** Tables scoped by companyId (everything except `companies` and `orders`). */
-const TENANT_TABLES = new Set(Object.keys(COLLECTIONS).filter(t => t !== 'companies' && t !== 'orders'));
+/** Tables scoped by companyId (everything except `companies`, `orders` and `appointments`). */
+const TENANT_TABLES = new Set(Object.keys(COLLECTIONS).filter(t => t !== 'companies' && t !== 'orders' && t !== 'appointments'));
 
 /** Snapshot key -> table name. The snapshot is the old `local.db.json` shape. */
 const TABLE_FOR: Record<string, string> = {
@@ -126,6 +127,7 @@ const TABLE_FOR: Record<string, string> = {
   publicHolidays: 'public_holidays',
   payslips: 'payslips',
   orders: 'orders',
+  appointments: 'appointments',
 };
 
 function makePool(connectionString: string) {
@@ -362,6 +364,7 @@ export async function initPostgres(connectionString: string): Promise<Database> 
 
   const companies = collection('companies');
   const orders = collection('orders');
+  const appointments = collection('appointments');
 
   const users = tenantCollection('users');
   const clients = tenantCollection('clients');
@@ -821,6 +824,9 @@ export async function initPostgres(connectionString: string): Promise<Database> 
 
     getAllOrders: orders.all,
     createOrder: orders.create,
+
+    getAllAppointments: appointments.all,
+    createAppointment: appointments.create,
 
     getSettings: async (companyId: string) => {
       const rows = await q(

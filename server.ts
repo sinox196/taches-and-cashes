@@ -9806,6 +9806,70 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   });
 
   /**
+   * "Prendre rendez-vous" — a visitor picks a date and a time and leaves their
+   * contact details; same shape as /api/orders just above (public, no auth,
+   * honeypot, persist-then-email so a dropped SMTP send never loses the
+   * request), with its own fields and its own reference prefix.
+   */
+  app.post('/api/appointments', async (req: any, res: any) => {
+    try {
+      const text = (v: any, max: number) => String(v ?? '').trim().slice(0, max);
+      if (text(req.body?.website, 200)) return res.status(201).json({ reference: null, emailSent: false });
+
+      const nom = text(req.body?.nom, 80);
+      const prenom = text(req.body?.prenom, 80);
+      const email = text(req.body?.email, 160);
+      const telephone = text(req.body?.telephone, 40);
+      const date = text(req.body?.date, 10);
+      const heure = text(req.body?.heure, 5);
+
+      if (!nom || !prenom || !email || !telephone || !date || !heure) {
+        return res.status(400).json({ error: 'Nom, prénom, email, téléphone, date et heure sont requis' });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: 'Adresse email invalide' });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'Date invalide' });
+      }
+      if (!/^\d{2}:\d{2}$/.test(heure)) {
+        return res.status(400).json({ error: 'Heure invalide' });
+      }
+      if (date < formatDateISO(new Date())) {
+        return res.status(400).json({ error: 'La date choisie est déjà passée' });
+      }
+
+      const existing = await db.getAllAppointments();
+      const reference = `RDV-${civilParts(new Date()).year}-${String(existing.length + 1).padStart(4, '0')}`;
+
+      await db.createAppointment({
+        id: genId('appointment'),
+        nom, prenom, email, telephone, date, heure,
+        reference, status: 'PENDING', createdAt: new Date().toISOString(),
+      });
+
+      const { sent } = await sendMail({
+        to: 'contact@taches-and-cash.com',
+        subject: `Nouvelle demande de rendez-vous — ${date} ${heure} (${reference})`,
+        html: `
+          <p><strong>Référence :</strong> ${escapeHtml(reference)}</p>
+          <p><strong>Date :</strong> ${escapeHtml(date)}</p>
+          <p><strong>Heure :</strong> ${escapeHtml(heure)}</p>
+          <p><strong>Nom :</strong> ${escapeHtml(nom)}</p>
+          <p><strong>Prénom :</strong> ${escapeHtml(prenom)}</p>
+          <p><strong>Email :</strong> ${escapeHtml(email)}</p>
+          <p><strong>Téléphone :</strong> ${escapeHtml(telephone)}</p>
+        `,
+      });
+
+      res.status(201).json({ reference, emailSent: sent });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * A bare visit counter for the landing page — no auth, no session/cookie,
    * one atomic increment. Not analytics: it answers "how many times was the
    * page loaded", nothing about who, from where, or which page. Landing.tsx

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Mail, LayoutDashboard, ListChecks, FileText, MessageSquare, Globe, ArrowRight, Compass, Clock, AlertTriangle, ArrowDown } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { RequestAccessModal } from '../components/landing/RequestAccessModal';
+import { AppointmentModal } from '../components/landing/AppointmentModal';
 import { Reveal, CountUp } from '../components/landing/Reveal';
 import { HomeView } from '../components/landing/HomeView';
 import { AnimatedLogo } from '../components/landing/AnimatedLogo';
@@ -195,6 +196,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
 
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
   const [modalPlan, setModalPlan] = useState<string | null>(null);
+  const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   // Le nombre de sièges choisi sur la carte cliquée — porté jusqu'à la
   // modale pour qu'elle démarre sur le même chiffre plutôt que de repartir
   // de zéro.
@@ -287,7 +289,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       ) : view === 'fonctionnalites' ? (
         <FeaturesView onStart={goToTarifs} />
       ) : view === 'contact' ? (
-        <ContactView email={CONTACT_EMAIL} phone={CONTACT_PHONE} whatsappUrl={CONTACT_WHATSAPP_URL} onSupport={goToSupport} />
+        <ContactView email={CONTACT_EMAIL} phone={CONTACT_PHONE} whatsappUrl={CONTACT_WHATSAPP_URL} onSupport={goToSupport} onBookAppointment={() => setShowAppointmentModal(true)} />
       ) : view === 'apropos' ? (
         <>
           {/* ABOUT HERO */}
@@ -707,6 +709,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       </footer>
 
       {modalPlan && <RequestAccessModal plan={modalPlan} initialSeats={modalSeats} onClose={() => setModalPlan(null)} />}
+      {showAppointmentModal && <AppointmentModal onClose={() => setShowAppointmentModal(false)} />}
     </div>
   );
 };
