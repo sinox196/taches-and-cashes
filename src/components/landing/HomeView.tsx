@@ -51,7 +51,7 @@ function TimerDemo() {
   </div>;
 }
 
-export function HomeView({ onStart, onFeatures, onContact, onQuickStart }: { onStart: () => void; onFeatures: () => void; onContact: () => void; onQuickStart: () => void }) {
+export function HomeView({ onStart, onFeatures, onContact, onQuickStart, onBookAppointment }: { onStart: () => void; onFeatures: () => void; onContact: () => void; onQuickStart: () => void; onBookAppointment: () => void }) {
   const [active, setActive] = useState(0);
   const selected = previews[active];
   const hero = useRef<HTMLElement>(null);
@@ -76,6 +76,7 @@ export function HomeView({ onStart, onFeatures, onContact, onQuickStart }: { onS
       <button className="home-motion-toggle" onClick={() => setMotionPaused(v => !v)} disabled={reducedMotion} aria-pressed={motionPaused || reducedMotion} aria-label={reducedMotion ? 'Animations désactivées selon vos préférences' : motionPaused ? 'Reprendre les animations' : 'Mettre les animations en pause'}>{motionPaused || reducedMotion ? <Play size={13} /> : <Pause size={13} />}<span>{reducedMotion ? 'Mouvement réduit' : motionPaused ? 'Reprendre' : 'Pause animations'}</span></button>
       <div className="home-container home-hero-content">
         <div className="home-hero-copy">
+          <button className="home-appointment-btn" onClick={onBookAppointment}><CalendarCheck size={14} />Prendre rendez-vous</button>
           <div className="home-kicker"><span />LE LOGICIEL QUI RELIE TEMPS, ÉQUIPE & CASH</div>
           <h1 id="home-title"><span className="home-title-line"><span>Le <em>premier logiciel</em></span></span><span className="home-title-line"><span>tunisien conçu</span></span><span className="home-title-line"><span><em>exclusivement</em> pour les</span></span><span className="home-title-line"><span>professionnels des</span></span><span className="home-title-line"><em>services.</em></span></h1>
           <svg className="home-title-stroke" viewBox="0 0 220 12" fill="none" aria-hidden="true"><path d="M3 9C65 1 143 1 216 6" stroke="currentColor" strokeWidth="3" strokeLinecap="round" pathLength="1" /></svg>

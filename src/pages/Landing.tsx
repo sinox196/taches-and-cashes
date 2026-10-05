@@ -285,7 +285,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
       }} />
       <main id="public-content" tabIndex={-1}>
       {view === 'home' ? (
-        <HomeView onStart={goToTarifs} onFeatures={() => { setView('fonctionnalites'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onContact={() => { setView('contact'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onQuickStart={goToSupportQuickStart} />
+        <HomeView onStart={goToTarifs} onFeatures={() => { setView('fonctionnalites'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onContact={() => { setView('contact'); window.scrollTo({ top: 0, behavior: 'instant' }); }} onQuickStart={goToSupportQuickStart} onBookAppointment={() => setShowAppointmentModal(true)} />
       ) : view === 'fonctionnalites' ? (
         <FeaturesView onStart={goToTarifs} />
       ) : view === 'contact' ? (

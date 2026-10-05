@@ -11,6 +11,9 @@
 .home-hero-shade { position: absolute; z-index: -2; inset: 0; background: linear-gradient(90deg, #0d202b 0%, #0d202bf5 24%, #0d202be0 36%, #0d202b7a 53%, #0d202b05 76%), linear-gradient(0deg, #0d202bf5 0%, transparent 24%); }
 .home-hero-content { padding-top: 40px; position: relative; }
 .home-hero-copy { max-width: 590px; animation: home-enter 850ms ease-out both; }
+.home-appointment-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; margin-bottom: 16px; border-radius: 999px; border: 1px solid #ffffff38; background: #ffffff12; color: #eafaf5; font-size: 11.5px; font-weight: 650; letter-spacing: .1px; transition: background .2s, transform .2s, border-color .2s; }
+.home-appointment-btn:hover { background: #ffffff22; border-color: #96ead2; transform: translateY(-2px); }
+.home-appointment-btn > svg { color: #96ead2; flex-shrink: 0; }
 .home-kicker { display: flex; align-items: center; gap: 10px; color: #c4dedb; font-size: 9px; font-weight: 650; letter-spacing: 1.7px; }
 .home-kicker > span { width: 7px; height: 7px; background: #96ead2; border-radius: 50%; box-shadow: 0 0 0 5px #96ead215; flex-shrink: 0; }
 /* Réduit du clamp(58,5.8vw,82) d'origine : sur un écran de PC courant, ce
@@ -158,7 +161,7 @@
 .home-hero h1 .home-title-line > em { animation: home-title-rise 1.1s .32s cubic-bezier(.16,1,.3,1) both, home-text-light 7s 1.5s ease-in-out infinite; background: linear-gradient(100deg,#96ead2 12%,#96ead2 30%,#f4fff9 47%,#96ead2 64%,#69cbb8 90%); background-size: 260% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; }
 .home-title-stroke { display: block; width: 210px; height: 12px; margin: -16px 0 17px; color: #96ead2; overflow: visible; }
 .home-title-stroke path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: home-stroke-draw 5.5s 1s ease-in-out infinite; }
-.home-hero-copy > .home-kicker, .home-hero-copy > p, .home-hero-copy > .home-actions, .home-hero-copy > .home-trial-note { animation: home-enter .9s .35s ease-out both; }
+.home-hero-copy > .home-appointment-btn, .home-hero-copy > .home-kicker, .home-hero-copy > p, .home-hero-copy > .home-actions, .home-hero-copy > .home-trial-note { animation: home-enter .9s .35s ease-out both; }
 .home-hero-copy > .home-actions { animation-delay: .5s; }
 .home-hero-copy > .home-trial-note { animation-delay: .65s; }
 .home-hero-atmosphere { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
@@ -182,7 +185,7 @@
 .home-hero-bottom > button svg { animation: home-scroll-cue 2.8s ease-in-out infinite; }
 .home-redesign[data-motion='paused'] *, .home-redesign[data-motion='paused'] *::before, .home-redesign[data-motion='paused'] *::after,
 .home-hero[data-visible='false'] *, .home-hero[data-visible='false'] *::before, .home-hero[data-visible='false'] *::after { animation-play-state: paused !important; }
-.home-redesign[data-motion='paused'] .home-title-line > *, .home-redesign[data-motion='paused'] .home-hero-copy > .home-kicker, .home-redesign[data-motion='paused'] .home-hero-copy > p, .home-redesign[data-motion='paused'] .home-hero-copy > .home-actions, .home-redesign[data-motion='paused'] .home-hero-copy > .home-trial-note, .home-redesign[data-motion='paused'] .home-activity-photo { opacity: 1 !important; transform: none !important; }
+.home-redesign[data-motion='paused'] .home-title-line > *, .home-redesign[data-motion='paused'] .home-hero-copy > .home-appointment-btn, .home-redesign[data-motion='paused'] .home-hero-copy > .home-kicker, .home-redesign[data-motion='paused'] .home-hero-copy > p, .home-redesign[data-motion='paused'] .home-hero-copy > .home-actions, .home-redesign[data-motion='paused'] .home-hero-copy > .home-trial-note, .home-redesign[data-motion='paused'] .home-activity-photo { opacity: 1 !important; transform: none !important; }
 .home-redesign[data-motion='paused'] .home-title-stroke path { stroke-dashoffset: 0; animation: none; }
 @keyframes home-cover-breathe { from { transform: scale(1); } to { transform: scale(1.075) translate(-.7%, .5%); } }
 @keyframes home-title-rise { from { opacity: 0; transform: translateY(115%) rotate(2deg); } to { opacity: 1; transform: translateY(0) rotate(0); } }
