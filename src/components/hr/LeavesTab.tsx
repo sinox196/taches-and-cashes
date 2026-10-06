@@ -401,7 +401,6 @@ export const LeavesTab: React.FC = () => {
                   >
                     <option value="Congé annuel">Congé annuel</option>
                     <option value="Congé maladie">Congé maladie</option>
-                    <option value="Congé exceptionnel">Congé exceptionnel</option>
                     <option value="Autre">Autre</option>
                   </select>
                 </div>
