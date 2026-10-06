@@ -64,7 +64,13 @@ export const LoansTab: React.FC = () => {
   const fetchLoans = () => {
     fetch('/api/hr/loans', { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.json())
-      .then(data => setLoans(Array.isArray(data) ? data : []))
+      // The server appends (oldest-first, like every collection but time
+      // entries and invoices — see CLAUDE.md). The table reads best with the
+      // most recently *requested* loan on top; `id` is `Date.now()` at
+      // creation, so sorting on it descending is the same thing as sorting
+      // on `createdAt` without needing a fallback for a row that somehow
+      // lacks one.
+      .then(data => setLoans(Array.isArray(data) ? [...data].sort((a, b) => b.id - a.id) : []))
       .catch(() => {});
   };
 
