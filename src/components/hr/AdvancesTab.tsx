@@ -48,10 +48,17 @@ export const AdvancesTab: React.FC = () => {
   const [approvalComment, setApprovalComment] = useState('');
   const [rejectionModalId, setRejectionModalId] = useState<number | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  // Une avance n'a pas de remboursement partiel — elle est soldée en une
+  // fois pour son montant total — mais le choix caisse/bancaire précède
+  // quand même la confirmation, même raison que LoansTab : c'est de ce
+  // choix que dépend quelle ligne de caisse est créée automatiquement.
+  const [repayModalId, setRepayModalId] = useState<number | null>(null);
+  const [repayBrouillard, setRepayBrouillard] = useState<'caisse' | 'banque'>('caisse');
 
   useEscapeToClose(() => setIsCreating(false), isCreating);
   useEscapeToClose(() => { setApprovalModalId(null); setApprovalComment(''); }, !!approvalModalId);
   useEscapeToClose(() => { setRejectionModalId(null); setRejectionReason(''); }, !!rejectionModalId);
+  useEscapeToClose(() => { setRepayModalId(null); setRepayBrouillard('caisse'); }, !!repayModalId);
 
   const fetchAdvances = () => {
     fetch('/api/hr/advances', { headers: { Authorization: `Bearer ${token}` } })
@@ -133,12 +140,15 @@ export const AdvancesTab: React.FC = () => {
   };
 
   const markRepaid = async (id: number) => {
-    await fetch(`/api/hr/advances/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({}),
-    });
-    fetchAdvances();
+    try {
+      const res = await fetch(`/api/hr/advances/${id}/repay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ brouillard: repayBrouillard }),
+      });
+      if (res.ok) { setRepayModalId(null); setRepayBrouillard('caisse'); fetchAdvances(); }
+      else { const err = await res.json(); alert(err.error || "Échec de l'enregistrement du remboursement"); }
+    } catch { /* ignore */ }
   };
 
   const badge = (status: Advance['status']) => {
@@ -229,7 +239,7 @@ export const AdvancesTab: React.FC = () => {
                       )}
                       {canManage && adv.status === 'ACTIVE' && (
                         <button
-                          onClick={() => markRepaid(adv.id)}
+                          onClick={() => setRepayModalId(adv.id)}
                           className="text-emerald-600 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-md transition-colors text-xs font-medium"
                         >
                           Marquer remboursée
@@ -315,6 +325,50 @@ export const AdvancesTab: React.FC = () => {
                   className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
                 >
                   Confirmer le refus
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Repayment modal */}
+      {repayModalId && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden">
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Marquer l'avance remboursée</h3>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Encaissé dans</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRepayBrouillard('caisse')}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    repayBrouillard === 'caisse' ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Brouillard de caisse
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepayBrouillard('banque')}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    repayBrouillard === 'banque' ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Bancaire
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Une ligne « Remboursement d'avance » sera ajoutée automatiquement au brouillard choisi, avec le nom du collaborateur et le montant encaissé.
+              </p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button onClick={() => { setRepayModalId(null); setRepayBrouillard('caisse'); }} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Annuler</button>
+                <button
+                  onClick={() => markRepaid(repayModalId)}
+                  className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
+                >
+                  Confirmer
                 </button>
               </div>
             </div>

@@ -44,6 +44,10 @@ export const LoansTab: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [repayModalId, setRepayModalId] = useState<number | null>(null);
   const [repayAmount, setRepayAmount] = useState<number | ''>('');
+  // Où va l'argent encaissé — chaque choix alimente automatiquement le
+  // brouillard correspondant (voir handleRepay) avec une ligne « Remboursement
+  // de prêt » portant le nom du collaborateur et le montant versé.
+  const [repayBrouillard, setRepayBrouillard] = useState<'caisse' | 'banque'>('caisse');
 
   const [amount, setAmount] = useState<number | ''>('');
   const [monthlyDeduction, setMonthlyDeduction] = useState<number | ''>('');
@@ -57,7 +61,7 @@ export const LoansTab: React.FC = () => {
   const [rejectionReason, setRejectionReason] = useState('');
 
   useEscapeToClose(() => setIsCreating(false), isCreating);
-  useEscapeToClose(() => { setRepayModalId(null); setRepayAmount(''); }, !!repayModalId);
+  useEscapeToClose(() => { setRepayModalId(null); setRepayAmount(''); setRepayBrouillard('caisse'); }, !!repayModalId);
   useEscapeToClose(() => { setApprovalModalId(null); setApprovalComment(''); }, !!approvalModalId);
   useEscapeToClose(() => { setRejectionModalId(null); setRejectionReason(''); }, !!rejectionModalId);
 
@@ -106,15 +110,18 @@ export const LoansTab: React.FC = () => {
   };
 
   const handleRepay = async (id: number) => {
-    const loan = loans.find(l => l.id === id);
-    if (!loan || !repayAmount || Number(repayAmount) <= 0) return;
+    if (!repayAmount || Number(repayAmount) <= 0) return;
     try {
-      const res = await fetch(`/api/hr/loans/${id}`, {
-        method: 'PUT',
+      // Le serveur additionne lui-même le versement à amountRepaid et crée la
+      // ligne de caisse correspondante — le client n'envoie que le montant du
+      // versement et le choix du brouillard, jamais un total déjà calculé.
+      const res = await fetch(`/api/hr/loans/${id}/repay`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amountRepaid: loan.amountRepaid + Number(repayAmount) }),
+        body: JSON.stringify({ amount: Number(repayAmount), brouillard: repayBrouillard }),
       });
-      if (res.ok) { setRepayModalId(null); setRepayAmount(''); fetchLoans(); }
+      if (res.ok) { setRepayModalId(null); setRepayAmount(''); setRepayBrouillard('caisse'); fetchLoans(); }
+      else { const err = await res.json(); alert(err.error || "Échec de l'enregistrement du remboursement"); }
     } catch { /* ignore */ }
   };
 
@@ -353,8 +360,32 @@ export const LoansTab: React.FC = () => {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                 autoFocus
               />
+              <label className="block text-sm font-medium text-gray-700 mb-1 mt-4">Encaissé dans</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRepayBrouillard('caisse')}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    repayBrouillard === 'caisse' ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Brouillard de caisse
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepayBrouillard('banque')}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    repayBrouillard === 'banque' ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Bancaire
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Une ligne « Remboursement de prêt » sera ajoutée automatiquement au brouillard choisi, avec le nom du collaborateur et le montant encaissé.
+              </p>
               <div className="mt-6 flex justify-end gap-3">
-                <button onClick={() => { setRepayModalId(null); setRepayAmount(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Annuler</button>
+                <button onClick={() => { setRepayModalId(null); setRepayAmount(''); setRepayBrouillard('caisse'); }} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Annuler</button>
                 <button
                   onClick={() => handleRepay(repayModalId)}
                   disabled={!repayAmount || Number(repayAmount) <= 0}

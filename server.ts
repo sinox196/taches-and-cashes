@@ -5410,6 +5410,36 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   };
 
   /**
+   * Un remboursement de prêt/avance alimente le brouillard de caisse (ou
+   * bancaire) comme un mouvement interne, jamais comme un règlement client —
+   * aucun clientId/clientName n'est posé, donc `isReglementRow` ne le compte
+   * jamais parmi les encaissements d'un client. Partagée par les deux routes
+   * /repay (prêts et avances) plutôt que dupliquée, même raison que
+   * normalizeJournalEntry/validateJournalEntry sont uniques pour toute la
+   * caisse : deux copies finiraient par ne plus construire la même ligne.
+   */
+  const createRepaymentJournalEntry = async (
+    companyId: string,
+    opts: { collaborateur: string; amount: number; brouillard: 'caisse' | 'banque'; category: string; createdBy: number },
+  ) => {
+    const row = normalizeJournalEntry({
+      date: formatDateISO(new Date()),
+      label: opts.collaborateur,
+      category: opts.category,
+      entree: opts.amount,
+      sortie: 0,
+      paymentMethod: opts.brouillard === 'banque' ? 'VIREMENT' : '',
+    });
+    if (validateJournalEntry(row)) return null;
+    return db.createCashJournalEntry(companyId, {
+      id: genId('caisse'),
+      ...row,
+      createdBy: opts.createdBy,
+      createdAt: new Date().toISOString(),
+    });
+  };
+
+  /**
    * The objets a journal row can carry. Seeded on first read with the
    * cabinet's own list and extended by them from the picker — held as rows,
    * not a constant, precisely so adding one never needs a code change.
@@ -7066,6 +7096,47 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     }
   });
 
+  // Dédiée, à côté du PUT générique ci-dessus — même idiome que
+  // /approve, /reject, /cancel : un remboursement n'est pas une simple
+  // modification de champ, c'est une action qui a un effet de bord (une
+  // ligne de caisse). Le client envoie le montant du versement, jamais le
+  // total cumulé — c'est le serveur qui l'additionne à l'existant, pour
+  // qu'un calcul client ne puisse jamais diverger du total réellement
+  // stocké.
+  app.post('/api/hr/loans/:id/repay', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = await db.getLoanById(req.user.companyId, id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+      if (existing.status !== 'ACTIVE' && existing.status !== 'REPAID') {
+        return res.status(400).json({ error: 'Loan is not active' });
+      }
+      const amount = round3(Number(req.body.amount));
+      if (!(amount > 0)) return res.status(400).json({ error: 'Montant invalide' });
+      const brouillard: 'caisse' | 'banque' = req.body.brouillard === 'banque' ? 'banque' : 'caisse';
+
+      const nextRepaid = round3((existing.amountRepaid || 0) + amount);
+      const updates: any = { amountRepaid: nextRepaid, updatedAt: new Date().toISOString() };
+      if (existing.amount > 0 && nextRepaid >= existing.amount) {
+        updates.status = 'REPAID';
+      }
+      const updated = await db.updateLoan(req.user.companyId, id, updates);
+
+      const employee = await db.getUserById(req.user.companyId, existing.userId);
+      await createRepaymentJournalEntry(req.user.companyId, {
+        collaborateur: employee?.fullName || employee?.username || 'Collaborateur',
+        amount,
+        brouillard,
+        category: 'Remboursement de prêt',
+        createdBy: req.user.id,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.get('/api/hr/advances', authenticate, requirePermission('VIEW_HR'), async (req: any, res: any) => {
     try {
       const perms = JSON.parse(req.user.permissions || '[]');
@@ -7208,6 +7279,40 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       if (notes !== undefined) updates.notes = String(notes);
 
       const updated = await db.updateAdvance(req.user.companyId, id, updates);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Dédiée, comme /api/hr/loans/:id/repay juste au-dessus — une avance n'a
+  // pas de remboursement partiel (`amountRepaid`), elle est soldée en une
+  // fois pour son montant total, mais le choix caisse/bancaire et la ligne
+  // de caisse qui en découle suivent exactement le même mécanisme.
+  app.post('/api/hr/advances/:id/repay', authenticate, requirePermission('MANAGE_LOANS_ADVANCES'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = await db.getAdvanceById(req.user.companyId, id);
+      if (!existing) return res.status(404).json({ error: 'Not found' });
+      if (existing.status !== 'ACTIVE') {
+        return res.status(400).json({ error: 'Advance is not active' });
+      }
+      const brouillard: 'caisse' | 'banque' = req.body.brouillard === 'banque' ? 'banque' : 'caisse';
+
+      const updated = await db.updateAdvance(req.user.companyId, id, {
+        status: 'REPAID',
+        updatedAt: new Date().toISOString(),
+      });
+
+      const employee = await db.getUserById(req.user.companyId, existing.userId);
+      await createRepaymentJournalEntry(req.user.companyId, {
+        collaborateur: employee?.fullName || employee?.username || 'Collaborateur',
+        amount: round3(Number(existing.amount) || 0),
+        brouillard,
+        category: "Remboursement d'avance",
+        createdBy: req.user.id,
+      });
+
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

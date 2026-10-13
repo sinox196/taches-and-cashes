@@ -59,7 +59,11 @@ export const LeavesTab: React.FC = () => {
   const fetchLeaves = () => {
     fetch('/api/hr/leaves', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.json())
-      .then(data => setLeaves(data))
+      // The server appends (oldest-first, like every collection but time
+      // entries and invoices — see CLAUDE.md). The table reads best with the
+      // most recently *requested* leave on top; `id` is `Date.now()` at
+      // creation, same fix already applied to Prêts/Avances.
+      .then(data => setLeaves(Array.isArray(data) ? [...data].sort((a: any, b: any) => b.id - a.id) : []))
       .catch(console.error);
   };
 
