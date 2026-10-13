@@ -25,7 +25,7 @@ export interface BankAccount {
 }
 
 export interface CompanyBlock {
-  company: { name: string; address: string; taxId: string; email: string; phone: string };
+  company: { name: string; address: string; taxId: string; email: string; phone: string; numeroEmployeur: string };
   banks: BankAccount[];
   defaultBankId: string;
   logo: string;

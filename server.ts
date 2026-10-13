@@ -825,6 +825,7 @@ const PLAN_MODULE_ROUTES: [string, PlanModule][] = [
 
   ['/api/payslips', 'Payroll'],
   ['/api/payroll', 'Payroll'],
+  ['/api/cnss-declarations', 'Payroll'],
 
   ['/api/users', 'Users'],
   ['/api/settings', 'Users'],
@@ -1499,6 +1500,11 @@ async function startServer() {
         taxId: String(settings?.company?.taxId || ''),
         email: String(settings?.company?.email || ''),
         phone: String(settings?.company?.phone || ''),
+        // Numéro employeur CNSS — identité de l'entreprise, pas une donnée de
+        // facturation, mais rangée ici plutôt que dans une deuxième copie :
+        // c'est ce même bloc que la Déclaration CNSS relit via
+        // /api/payroll/company (voir plus bas).
+        numeroEmployeur: String(settings?.company?.numeroEmployeur || ''),
       },
       banks,
       defaultBankId,
@@ -1582,6 +1588,7 @@ async function startServer() {
           taxId: text(body.company?.taxId, 60),
           email: text(body.company?.email, 120),
           phone: text(body.company?.phone, 40),
+          numeroEmployeur: text(body.company?.numeroEmployeur, 40),
         },
         banks: resolvedBanks,
         defaultBankId,
@@ -1857,6 +1864,236 @@ async function startServer() {
     try {
       const ok = await db.deletePayslip(req.user.companyId, parseInt(req.params.id, 10));
       if (!ok) return res.status(404).json({ error: 'Bulletin introuvable' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------
+  // Déclaration CNSS — déclaration trimestrielle des salaires et des
+  // salariés, reproduisant le classeur Excel que le cabinet dépose déjà :
+  // deux feuilles, « DEC PAPIER » (un ordre, un matricule CNSS, une identité,
+  // un numéro interne, un numéro CIN et les trois montants mensuels par
+  // salarié) puis « DEC RECAP » (le total des salaires déclarés, les taux de
+  // cotisation et le montant à payer). Mêmes idiomes que la Gestion des
+  // paies juste au-dessus : une seule fonction de calcul, un brouillon
+  // (preview) qui n'écrit rien, et une « copie figée » à la génération —
+  // ici l'identité de l'entreprise, pas celle d'un collaborateur.
+  // ---------------------------------------------------------
+
+  /** Quarter 1 -> [1,2,3], quarter 2 -> [4,5,6], etc. */
+  const quarterMonths = (quarter: number): [number, number, number] => {
+    const start = (quarter - 1) * 3 + 1;
+    return [start, start + 1, start + 2];
+  };
+
+  /**
+   * Les trois taux n'ont pas de valeur "correcte" universelle — le taux
+   * accident du travail en particulier varie par catégorie de risque
+   * assignée à l'entreprise par la CNSS — d'où leur statut pleinement
+   * paramétrable, par déclaration, plutôt qu'une constante en dur comme
+   * `CNSS_TAUX_DEFAUT`. Ces valeurs ne servent qu'à préremplir une toute
+   * première déclaration ; charge salariale/patronale reprennent le nom et
+   * le sens du classeur source (feuille ENTETE).
+   */
+  const CNSS_DECLARATION_TAUX_DEFAUT = { tauxChargeSalariale: 9.68, tauxChargePatronale: 17.07, tauxAccidentTravail: 2.4 };
+
+  /**
+   * Seule implémentation du calcul — l'aperçu et l'enregistrement l'appellent
+   * tous deux, pour qu'une déclaration enregistrée ne puisse jamais afficher
+   * un total que l'aperçu n'avait pas déjà annoncé (même règle que
+   * `computeInvoiceTotals()`/`computePayslip()`).
+   */
+  function computeCnssDeclaration(input: {
+    lignes: Array<{
+      userId: number | null; matriculeCnss: any; identite: any; numInterne: any; numCin: any;
+      mois1: any; mois2: any; mois3: any;
+    }>;
+    tauxChargeSalariale: number; tauxChargePatronale: number; tauxAccidentTravail: number;
+    penalites: number;
+  }) {
+    const lignes = (input.lignes || []).map((l, i) => {
+      const mois1 = round3(num(l.mois1, 0));
+      const mois2 = round3(num(l.mois2, 0));
+      const mois3 = round3(num(l.mois3, 0));
+      return {
+        ordre: i + 1,
+        userId: l.userId ?? null,
+        matriculeCnss: String(l.matriculeCnss ?? ''),
+        identite: String(l.identite ?? ''),
+        numInterne: String(l.numInterne ?? ''),
+        numCin: String(l.numCin ?? ''),
+        mois1, mois2, mois3,
+        total: round3(mois1 + mois2 + mois3),
+      };
+    });
+
+    const totalMois1 = round3(lignes.reduce((s, l) => s + l.mois1, 0));
+    const totalMois2 = round3(lignes.reduce((s, l) => s + l.mois2, 0));
+    const totalMois3 = round3(lignes.reduce((s, l) => s + l.mois3, 0));
+    const salairesDeclares = round3(lignes.reduce((s, l) => s + l.total, 0));
+
+    const tauxChargeSalariale = num(input.tauxChargeSalariale, 0);
+    const tauxChargePatronale = num(input.tauxChargePatronale, 0);
+    const tauxAccidentTravail = num(input.tauxAccidentTravail, 0);
+    // "Sécurité sociale" (feuille DEC RECAP) est la somme des deux charges —
+    // dérivé, jamais saisi séparément, pour qu'il ne puisse pas diverger de
+    // ce que les deux taux d'entrée justifient.
+    const tauxSecuriteSociale = round3(tauxChargeSalariale + tauxChargePatronale);
+
+    const montantSecuriteSociale = round3(salairesDeclares * (tauxSecuriteSociale / 100));
+    const montantAccidentTravail = round3(salairesDeclares * (tauxAccidentTravail / 100));
+    const cotisations = round3(montantSecuriteSociale + montantAccidentTravail);
+    const penalites = round3(num(input.penalites, 0));
+    const totalAPayer = round3(cotisations + penalites);
+
+    return {
+      lignes, totalMois1, totalMois2, totalMois3, salairesDeclares,
+      tauxChargeSalariale, tauxChargePatronale, tauxSecuriteSociale, tauxAccidentTravail,
+      montantSecuriteSociale, montantAccidentTravail, cotisations, penalites, totalAPayer,
+    };
+  }
+
+  /**
+   * Construit le brouillon commun à l'aperçu et à l'enregistrement. Sans
+   * `lignes` dans le corps (premier aperçu d'un trimestre), préremplit une
+   * ligne par collaborateur non-CLIENT à partir de la fiche Équipe
+   * (matricule CNSS = `numCnss`, N° interne = `matricule`, N° CIN =
+   * `numCin`) et des trois mois du trimestre à partir des bulletins de paie
+   * déjà générés pour ce collaborateur (`salaireBrut`, le montant soumis à
+   * cotisation CNSS avant toute retenue — voir `computePayslip()`) ; sans
+   * bulletin pour un mois donné, la case reste à 0, à saisir à la main —
+   * comme le classeur Excel d'origine, où ces montants sont toujours tapés,
+   * jamais calculés depuis une autre feuille. Avec `lignes` fourni (édition,
+   * ou aperçu après une première saisie), les valeurs du corps priment —
+   * aucune ligne n'est jamais ré-écrasée par un prérempli une fois saisie.
+   */
+  const buildCnssDeclarationDraft = async (body: any, companyId: string) => {
+    const year = parseInt(body.year, 10);
+    const quarter = parseInt(body.quarter, 10);
+
+    let lignes: any[] | null = Array.isArray(body.lignes) ? body.lignes : null;
+    if (!lignes && Number.isFinite(year) && Number.isFinite(quarter) && quarter >= 1 && quarter <= 4) {
+      const [m1, m2, m3] = quarterMonths(quarter);
+      const employees = (await db.getAllUsers(companyId)).filter((u: any) => u.role !== CLIENT_ROLE);
+      const payslips = (await db.getAllPayslips(companyId)).filter((p: any) => p.year === year);
+      const salaireBrutFor = (userId: number, month: number) =>
+        payslips.find((p: any) => p.userId === userId && p.month === month)?.salaireBrut ?? 0;
+      lignes = employees.map((e: any) => ({
+        userId: e.id,
+        matriculeCnss: e.numCnss || '',
+        identite: e.fullName || e.username,
+        numInterne: e.matricule || '',
+        numCin: e.numCin || '',
+        mois1: salaireBrutFor(e.id, m1),
+        mois2: salaireBrutFor(e.id, m2),
+        mois3: salaireBrutFor(e.id, m3),
+      }));
+    }
+
+    const block = companyBlock(await db.getSettings(companyId));
+
+    const computed = computeCnssDeclaration({
+      lignes: lignes || [],
+      tauxChargeSalariale: typeof body.tauxChargeSalariale === 'number' ? body.tauxChargeSalariale : CNSS_DECLARATION_TAUX_DEFAUT.tauxChargeSalariale,
+      tauxChargePatronale: typeof body.tauxChargePatronale === 'number' ? body.tauxChargePatronale : CNSS_DECLARATION_TAUX_DEFAUT.tauxChargePatronale,
+      tauxAccidentTravail: typeof body.tauxAccidentTravail === 'number' ? body.tauxAccidentTravail : CNSS_DECLARATION_TAUX_DEFAUT.tauxAccidentTravail,
+      penalites: num(body.penalites, 0),
+    });
+
+    return {
+      year, quarter,
+      // Copie figée de l'identité de l'entreprise — corriger le numéro
+      // employeur plus tard ne doit pas réécrire une déclaration déjà
+      // déposée, même règle que l'identité de paie sur un bulletin.
+      companyName: block.company.name, companyAddress: block.company.address,
+      numeroEmployeur: block.company.numeroEmployeur,
+      modeReglement: String(body.modeReglement || ''),
+      modeReglementRef: String(body.modeReglementRef || '').slice(0, 120),
+      datePaiement: String(body.datePaiement || ''),
+      lieuSignature: String(body.lieuSignature || '').slice(0, 80),
+      dateSignature: String(body.dateSignature || formatDateISO(new Date())),
+      ...computed,
+    };
+  };
+
+  /** Aperçu à la volée — aucune écriture. */
+  app.post('/api/cnss-declarations/preview', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const year = parseInt(req.body.year, 10);
+      const quarter = parseInt(req.body.quarter, 10);
+      if (!Number.isFinite(year) || !Number.isFinite(quarter) || quarter < 1 || quarter > 4) {
+        return res.status(400).json({ error: 'Année et trimestre requis' });
+      }
+      res.json(await buildCnssDeclarationDraft(req.body || {}, req.user.companyId));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Année optionnelle en filtre (`?year=2026`), comme les bulletins de paie. */
+  app.get('/api/cnss-declarations', authenticate, requirePermission('VIEW_PAYROLL'), async (req: any, res: any) => {
+    try {
+      let rows = await db.getAllCnssDeclarations(req.user.companyId);
+      if (req.query.year) rows = rows.filter((d: any) => String(d.year) === String(req.query.year));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/cnss-declarations', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const year = parseInt(req.body.year, 10);
+      const quarter = parseInt(req.body.quarter, 10);
+      if (!Number.isFinite(year) || !Number.isFinite(quarter) || quarter < 1 || quarter > 4) {
+        return res.status(400).json({ error: 'Trimestre invalide' });
+      }
+      const existing = (await db.getAllCnssDeclarations(req.user.companyId))
+        .find((d: any) => d.year === year && d.quarter === quarter);
+      if (existing) {
+        return res.status(400).json({ error: 'Une déclaration existe déjà pour ce trimestre.' });
+      }
+
+      const draft = await buildCnssDeclarationDraft(req.body || {}, req.user.companyId);
+      const row = await db.createCnssDeclaration(req.user.companyId, {
+        id: Date.now(),
+        ...draft,
+        createdAt: new Date().toISOString(),
+        createdBy: req.user.id,
+      });
+      res.json(row);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /** Le trimestre et l'année ne se corrigent pas depuis cette route — supprimer et régénérer, comme un bulletin de paie. */
+  app.put('/api/cnss-declarations/:id', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = await db.getCnssDeclarationById(req.user.companyId, id);
+      if (!existing) return res.status(404).json({ error: 'Déclaration introuvable' });
+
+      const draft = await buildCnssDeclarationDraft(
+        { ...req.body, year: existing.year, quarter: existing.quarter },
+        req.user.companyId,
+      );
+      const updated = await db.updateCnssDeclaration(req.user.companyId, id, draft);
+      res.json(updated);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/cnss-declarations/:id', authenticate, requirePermission('MANAGE_PAYROLL'), async (req: any, res: any) => {
+    try {
+      const ok = await db.deleteCnssDeclaration(req.user.companyId, parseInt(req.params.id, 10));
+      if (!ok) return res.status(404).json({ error: 'Déclaration introuvable' });
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

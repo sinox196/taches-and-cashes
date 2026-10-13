@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import { CalendarRange, Clock, AlertCircle, CheckCircle2, User, Wallet, DollarSign, Flag } from 'lucide-react';
+import { CalendarRange, Clock, AlertCircle, CheckCircle2, User, Wallet, DollarSign, Flag, Landmark } from 'lucide-react';
 import { LeavesTab } from './LeavesTab';
 import { AbsencesTab } from './AbsencesTab';
 import { LoansTab } from './LoansTab';
@@ -9,12 +9,13 @@ import { AdvancesTab } from './AdvancesTab';
 import { AttendanceTab } from './AttendanceTab';
 import { HolidaysTab } from './HolidaysTab';
 import { PayrollManagement } from '../payroll/PayrollManagement';
+import { CnssDeclarationManagement } from '../payroll/CnssDeclarationManagement';
 import { LeaveBalance } from '../../types';
 
 export const HRManagement: React.FC = () => {
   const { hasPermission, token } = useAuth();
   const { t } = useLanguage();
-  type HrTab = 'leaves' | 'absences' | 'loans' | 'advances' | 'attendance' | 'holidays' | 'paie';
+  type HrTab = 'leaves' | 'absences' | 'loans' | 'advances' | 'attendance' | 'holidays' | 'paie' | 'cnss';
   const canViewHr = hasPermission('VIEW_HR');
   const canViewPayroll = hasPermission('VIEW_PAYROLL');
   // A notification (congé, autorisation d'absence, prêt, avance) stashes the
@@ -30,7 +31,7 @@ export const HRManagement: React.FC = () => {
     const pending = sessionStorage.getItem('open_hr_subview');
     if (pending) sessionStorage.removeItem('open_hr_subview');
     return pending === 'absences' || pending === 'loans' || pending === 'advances'
-      || pending === 'attendance' || pending === 'holidays' || pending === 'paie' ? pending : 'leaves';
+      || pending === 'attendance' || pending === 'holidays' || pending === 'paie' || pending === 'cnss' ? pending : 'leaves';
   });
 
   // The pending-tab restore above runs once, before `canViewHr` is known to
@@ -51,7 +52,7 @@ export const HRManagement: React.FC = () => {
     const onOpenTab = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail === 'leaves' || detail === 'absences' || detail === 'loans'
-        || detail === 'advances' || detail === 'attendance' || detail === 'holidays' || detail === 'paie') {
+        || detail === 'advances' || detail === 'attendance' || detail === 'holidays' || detail === 'paie' || detail === 'cnss') {
         setActiveTab(detail);
       }
     };
@@ -170,6 +171,7 @@ export const HRManagement: React.FC = () => {
             ] : []),
             ...(canViewPayroll ? [
               { id: 'paie' as const, label: 'Paie', icon: Wallet, border: 'border-blue-600', text: 'text-blue-700' },
+              { id: 'cnss' as const, label: 'Déclaration CNSS', icon: Landmark, border: 'border-emerald-600', text: 'text-emerald-700' },
             ] : []),
           ]).map(tabDef => (
             <button
@@ -199,7 +201,8 @@ export const HRManagement: React.FC = () => {
             : activeTab === 'loans' ? <LoansTab />
             : activeTab === 'advances' ? <AdvancesTab />
             : activeTab === 'holidays' ? <HolidaysTab />
-            : <PayrollManagement embedded />}
+            : activeTab === 'paie' ? <PayrollManagement embedded />
+            : <CnssDeclarationManagement embedded />}
         </div>
       </div>
     </main>

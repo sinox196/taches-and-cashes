@@ -49,7 +49,7 @@ const prepareImage = (file: File, maxW: number, maxH: number, tooLargeMessage: s
   });
 
 const EMPTY: CompanyBlock = {
-  company: { name: '', address: '', taxId: '', email: '', phone: '' },
+  company: { name: '', address: '', taxId: '', email: '', phone: '', numeroEmployeur: '' },
   banks: [],
   defaultBankId: '',
   logo: '',
@@ -194,6 +194,12 @@ export const CompanySettings: React.FC<{ onClose: () => void }> = ({ onClose }) 
                 {field('E-mail', form.company.email, v => setCompany('email', v), 'exemple@exemple.tn')}
                 {field('Téléphone', form.company.phone, v => setCompany('phone', v), '+216 26 999 999')}
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {field('N° Employeur CNSS', form.company.numeroEmployeur, v => setCompany('numeroEmployeur', v), '218106-50', true)}
+              </div>
+              <p className="text-[11px] text-gray-500 -mt-1">
+                Imprimé sur la déclaration trimestrielle CNSS (GRH &amp; Paie → Déclaration CNSS).
+              </p>
             </section>
 
             <section className="space-y-3">

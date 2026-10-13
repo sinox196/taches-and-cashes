@@ -64,7 +64,7 @@ const TENANT_COLLECTIONS = [
   'resourceTemplates', 'resourceTemplateItems',
   'clientResourceInstances', 'clientResourceItemStatuses', 'usefulLinks',
   'echeanceColumns', 'echeanceStatuses', 'echeanceStatusOptions',
-  'publicHolidays', 'payslips',
+  'publicHolidays', 'payslips', 'cnssDeclarations',
 ];
 
 async function initJsonDb(): Promise<Database> {
@@ -102,6 +102,7 @@ async function initJsonDb(): Promise<Database> {
     if (!db.echeanceStatusOptions) db.echeanceStatusOptions = [];
     if (!db.publicHolidays) db.publicHolidays = [];
     if (!db.payslips) db.payslips = [];
+    if (!db.cnssDeclarations) db.cnssDeclarations = [];
     if (!db.orders) db.orders = [];
     if (!db.appointments) db.appointments = [];
     if (!db.messageGroups) db.messageGroups = [];
@@ -576,6 +577,29 @@ async function initJsonDb(): Promise<Database> {
       const index = indexScoped(db.payslips, companyId, id);
       if (index === -1) return false;
       db.payslips.splice(index, 1);
+      await saveDb();
+      return true;
+    },
+
+    getAllCnssDeclarations: async (companyId: string) => scoped(db.cnssDeclarations, companyId),
+    getCnssDeclarationById: async (companyId: string, id: number) => findScoped(db.cnssDeclarations, companyId, id),
+    createCnssDeclaration: async (companyId: string, declaration: any) => {
+      const row = { ...declaration, companyId };
+      db.cnssDeclarations.unshift(row); // newest first, like payslips/invoices
+      await saveDb();
+      return row;
+    },
+    updateCnssDeclaration: async (companyId: string, id: number, updates: any) => {
+      const index = indexScoped(db.cnssDeclarations, companyId, id);
+      if (index === -1) return null;
+      db.cnssDeclarations[index] = { ...db.cnssDeclarations[index], ...updates };
+      await saveDb();
+      return db.cnssDeclarations[index];
+    },
+    deleteCnssDeclaration: async (companyId: string, id: number) => {
+      const index = indexScoped(db.cnssDeclarations, companyId, id);
+      if (index === -1) return false;
+      db.cnssDeclarations.splice(index, 1);
       await saveDb();
       return true;
     },

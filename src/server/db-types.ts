@@ -145,6 +145,13 @@ export interface Database {
   updatePayslip(companyId: string, id: number, updates: any): Promise<any | null>;
   deletePayslip(companyId: string, id: number): Promise<boolean>;
 
+  /** Déclaration trimestrielle CNSS des salaires et des salariés — une par (companyId, year, quarter). */
+  getAllCnssDeclarations(companyId: string): Promise<any[]>;
+  getCnssDeclarationById(companyId: string, id: number): Promise<any | undefined>;
+  createCnssDeclaration(companyId: string, declaration: any): Promise<any>;
+  updateCnssDeclaration(companyId: string, id: number, updates: any): Promise<any | null>;
+  deleteCnssDeclaration(companyId: string, id: number): Promise<boolean>;
+
   getAllMessages(companyId: string): Promise<any[]>;
   createMessage(companyId: string, message: any): Promise<any>;
   markMessagesRead(companyId: string, readerId: number, fromUserId: number): Promise<number>;
@@ -373,6 +380,7 @@ export const emptyDb = () => ({
   timeEntries: [],
   // Gestion des paies — un bulletin par (utilisateur, année, mois).
   payslips: [],
+  cnssDeclarations: [],
   // Direct messages between two users (chat).
   messages: [],
   // Mission + type de tâche handed by an admin to a collaborator.
