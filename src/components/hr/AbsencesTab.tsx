@@ -65,7 +65,11 @@ export const AbsencesTab: React.FC = () => {
   const fetchAuths = () => {
     fetch('/api/hr/authorizations', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.json())
-      .then(data => setAuths(data))
+      // The server appends (oldest-first, like every collection but time
+      // entries and invoices — see CLAUDE.md). The table reads best with the
+      // most recently *requested* authorization on top; `id` is `Date.now()`
+      // at creation, same fix already applied to Congés/Prêts/Avances.
+      .then(data => setAuths(Array.isArray(data) ? [...data].sort((a: any, b: any) => b.id - a.id) : []))
       .catch(console.error);
   };
 
