@@ -1,7 +1,19 @@
 import React from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
-import { X, User, CheckCircle2, Clock, Pause, Briefcase, Calendar, Clock4, AlertCircle } from 'lucide-react';
+import { X, User, CheckCircle2, Clock, Pause, Briefcase, Calendar, Clock4, AlertCircle, Check } from 'lucide-react';
 import { roleMeta, roleLabel } from '../../constants/roles';
+
+/** Mêmes libellés/couleurs que LeavesTab.tsx/AbsencesTab.tsx (GRH & Paie) —
+ *  une demande affichée ici ne doit pas se lire différemment selon l'écran. */
+const statusBadge = (status: string) => {
+  switch (status) {
+    case 'PENDING': return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700"><Clock className="w-3 h-3" /> En attente</span>;
+    case 'APPROVED': return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700"><Check className="w-3 h-3" /> Approuvé</span>;
+    case 'REJECTED': return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-700"><X className="w-3 h-3" /> Refusé</span>;
+    case 'CANCELLED': return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600"><AlertCircle className="w-3 h-3" /> Annulé</span>;
+    default: return null;
+  }
+};
 
 interface EmployeeDetailsModalProps {
   employee: any;
@@ -178,6 +190,27 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({ empl
                     <div className="text-[14px] font-bold text-red-600">{employee.leaves.rejected}</div>
                   </div>
                 </div>
+
+                {/* Détail des demandes — mêmes colonnes que l'onglet Congés de
+                    GRH & Paie (LeavesTab.tsx) : dates, statut, responsable. */}
+                {employee.leaves.list?.length > 0 && (
+                  <div className="pt-2 border-t border-gray-100 max-h-64 overflow-y-auto divide-y divide-gray-50">
+                    {employee.leaves.list.map((l: any) => (
+                      <div key={l.id} className="py-2 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-medium text-gray-900 truncate">{l.type}</div>
+                          <div className="text-[11px] text-gray-500">
+                            {l.startDate} au {l.endDate} · {l.duration} j
+                          </div>
+                          {l.approverName && (
+                            <div className="text-[10px] text-gray-400">Responsable : {l.approverName}</div>
+                          )}
+                        </div>
+                        <div className="shrink-0">{statusBadge(l.status)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -211,6 +244,27 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({ empl
                   <div className="text-[10px] text-gray-500">Refusées</div>
                 </div>
               </div>
+
+              {/* Détail des demandes — mêmes colonnes que l'onglet
+                  Autorisations d'absence de GRH & Paie (AbsencesTab.tsx). */}
+              {employee.authorizations.list?.length > 0 && (
+                <div className="mt-3 pt-2 border-t border-gray-100 max-h-64 overflow-y-auto divide-y divide-gray-50">
+                  {employee.authorizations.list.map((a: any) => (
+                    <div key={a.id} className="py-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-medium text-gray-900 truncate">{a.reason}</div>
+                        <div className="text-[11px] text-gray-500">
+                          {a.date} · {a.startTime}-{a.endTime} ({a.duration}h)
+                        </div>
+                        {a.approverName && (
+                          <div className="text-[10px] text-gray-400">Responsable : {a.approverName}</div>
+                        )}
+                      </div>
+                      <div className="shrink-0">{statusBadge(a.status)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         </div>

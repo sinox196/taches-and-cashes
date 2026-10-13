@@ -3399,14 +3399,47 @@ app.post('/api/kpi/dashboard', authenticate, async (req: any, res: any) => {
           pending: empLeaves.filter((l: any) => l.status === 'PENDING').length,
           rejected: empLeaves.filter((l: any) => l.status === 'REJECTED').length,
           daysTaken: empLeaves.filter((l: any) => l.status === 'APPROVED').reduce((sum: number, l: any) => sum + (l.duration || 0), 0),
-          balance: balance
+          balance: balance,
+          // Inlined like clients.list just below — a count of requests per
+          // employee per period, not a count of time entries, so it stays
+          // small enough to send directly rather than needing a lazy
+          // drill-down route like /api/kpi/employee-tasks. Same columns the
+          // GRH & Paie "Congés" tab shows (LeavesTab.tsx), so the dashboard's
+          // drill-down modal can't disagree with it.
+          list: empLeaves
+            .map((l: any) => ({
+              id: l.id,
+              type: l.type,
+              startDate: l.startDate,
+              endDate: l.endDate,
+              duration: l.duration,
+              status: l.status,
+              approverName: l.approverId != null ? userLabel(l.approverId) : null,
+              approverComment: l.approverComment || null,
+            }))
+            .sort((a: any, b: any) => (b.startDate || '').localeCompare(a.startDate || '')),
         },
         authorizations: {
           total: empAuths.length,
           approved: empAuths.filter((a: any) => a.status === 'APPROVED').length,
           pending: empAuths.filter((a: any) => a.status === 'PENDING').length,
           rejected: empAuths.filter((a: any) => a.status === 'REJECTED').length,
-          totalDuration: totalAuthDuration // in hours
+          totalDuration: totalAuthDuration, // in hours
+          // Même raisonnement que leaves.list ci-dessus — mêmes colonnes que
+          // AbsencesTab.tsx.
+          list: empAuths
+            .map((a: any) => ({
+              id: a.id,
+              date: a.date,
+              startTime: a.startTime,
+              endTime: a.endTime,
+              duration: a.duration,
+              reason: a.reason,
+              status: a.status,
+              approverName: a.approverId != null ? userLabel(a.approverId) : null,
+              approverComment: a.approverComment || null,
+            }))
+            .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || '')),
         },
         attendance: {
           checkins: checkins.length,
