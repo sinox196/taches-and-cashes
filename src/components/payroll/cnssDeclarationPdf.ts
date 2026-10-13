@@ -43,7 +43,36 @@ export const cnssDeclarationDocumentName = (d: any) =>
     .replace(/[^A-Za-z0-9-_ ]+/g, '')
     .trim().replace(/\s+/g, '-') || 'declaration-cnss';
 
-export function buildCnssDeclarationPdf(d: any, block?: CompanyBlock | null): jsPDF {
+/**
+ * The CNSS's own official letterhead (bilingual "Caisse Nationale de
+ * Sécurité Sociale" banner), printed at the top of the récapitulatif page —
+ * a fixed institutional asset, never user-configurable, so it lives as a
+ * plain file in `public/logos/` rather than a per-company settings field
+ * (same reasoning as the seeded CNSS/ANETI/TEJ portal logos). `jsPDF.addImage`
+ * needs the bytes already in hand (a data URL, not a path it fetches
+ * itself), so this loads and caches it once per page load rather than once
+ * per generated PDF.
+ */
+let cnssHeaderLogoCache: string | null | undefined;
+async function loadCnssHeaderLogo(): Promise<string | null> {
+  if (cnssHeaderLogoCache !== undefined) return cnssHeaderLogoCache;
+  try {
+    const res = await fetch('/logos/cnss-header.png');
+    if (!res.ok) { cnssHeaderLogoCache = null; return null; }
+    const blob = await res.blob();
+    cnssHeaderLogoCache = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Logo illisible.'));
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    cnssHeaderLogoCache = null; // un logo manquant ne doit jamais bloquer la génération du document
+  }
+  return cnssHeaderLogoCache;
+}
+
+export async function buildCnssDeclarationPdf(d: any, block?: CompanyBlock | null): Promise<jsPDF> {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
 
   const text = (v: any, x: number, yy: number, opts?: any) => doc.text(String(v ?? ''), x, yy, opts);
@@ -175,6 +204,15 @@ export function buildCnssDeclarationPdf(d: any, block?: CompanyBlock | null): js
   // ======================== PAGE 2 — DEC RECAP ============================
   doc.addPage();
   y = 16;
+  const headerLogo = await loadCnssHeaderLogo();
+  if (headerLogo) {
+    const logoW = CONTENT_W;
+    const logoH = logoW * (116 / 878); // source banner's own aspect ratio
+    try {
+      doc.addImage(headerLogo, 'PNG', M, y, logoW, logoH);
+      y += logoH + 6;
+    } catch { /* a corrupt data URL must not take the whole document down */ }
+  }
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13); setInk(NAVY);
   text('ETAT RECAPITULATIF DES SALAIRES DECLARES', W / 2, y, { align: 'center' });
   y += 10;
@@ -292,13 +330,14 @@ function frDate(iso: string | undefined | null): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '—');
 }
 
-export function downloadCnssDeclarationPdf(d: any, block?: CompanyBlock | null): void {
-  buildCnssDeclarationPdf(d, block).save(`${cnssDeclarationDocumentName(d)}.pdf`);
+export async function downloadCnssDeclarationPdf(d: any, block?: CompanyBlock | null): Promise<void> {
+  const doc = await buildCnssDeclarationPdf(d, block);
+  doc.save(`${cnssDeclarationDocumentName(d)}.pdf`);
 }
 
 /** Same iframe-print pattern as `printInvoicePdf()`/`printPayslipPdf()`. */
-export function printCnssDeclarationPdf(d: any, block?: CompanyBlock | null): void {
-  const doc = buildCnssDeclarationPdf(d, block);
+export async function printCnssDeclarationPdf(d: any, block?: CompanyBlock | null): Promise<void> {
+  const doc = await buildCnssDeclarationPdf(d, block);
   const url = URL.createObjectURL(doc.output('blob'));
 
   const frame = document.createElement('iframe');
