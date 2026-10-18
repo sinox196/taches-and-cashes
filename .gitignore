@@ -15,3 +15,10 @@ backups/
 local.db.json.bak
 local.db.json.tmp
 local.db.json.*
+
+# Agent skills installed with `npx skills add` — vendored copies (~80 MB of
+# demos/audio). skills-lock.json is the manifest; re-run the install to restore.
+.agents/
+.claude/skills/appshot-*
+.claude/skills/remotion-*
+.claude/skills/video-shotcraft
