@@ -32,10 +32,11 @@ const displayNumber = (inv: any) =>
     : inv.number;
 
 /** Module scope: see the note in InvoiceEditor about remounting. */
-const Row: React.FC<{ label: string; value: string; strong?: boolean; muted?: boolean }> = ({ label, value, strong, muted }) => (
-  <div className={`flex justify-between px-4 py-2 ${strong ? 'bg-gray-50' : ''}`}>
-    <span className={strong ? 'font-semibold text-gray-800' : 'text-gray-600'}>{label}</span>
-    <span className={`font-mono ${strong ? 'font-bold text-gray-900' : muted ? 'text-gray-500' : 'text-gray-900'}`}>{value}</span>
+const Row: React.FC<{ label: string; value: string; strong?: boolean; muted?: boolean; indent?: boolean }> = ({ label, value, strong, muted, indent }) => (
+  <div className={`flex justify-between items-start gap-3 px-4 py-2 ${strong ? 'bg-gray-50' : ''}`}>
+    {/* min-w-0 + break-words: a long label wraps in its own column instead of pushing the amount out */}
+    <span className={`min-w-0 break-words ${indent ? 'pl-4' : ''} ${strong ? 'font-semibold text-gray-800' : 'text-gray-600'}`}>{label}</span>
+    <span className={`shrink-0 whitespace-nowrap font-mono ${strong ? 'font-bold text-gray-900' : muted ? 'text-gray-500' : 'text-gray-900'}`}>{value}</span>
   </div>
 );
 
@@ -286,7 +287,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, onClose
                 <>
                   <Row label="Remboursement de débours" value={`+ ${money(invoice.disbursements)}`} />
                   {debLines.map((l, i) => (
-                    <Row key={i} label={`\u00a0\u00a0\u00a0\u00a0${l.label || 'Débours'}`} value={money(l.amount)} />
+                    <Row key={i} label={l.label || 'Débours'} value={money(l.amount)} indent />
                   ))}
                 </>
               )}

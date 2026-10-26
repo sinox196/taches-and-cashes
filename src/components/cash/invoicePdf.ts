@@ -298,11 +298,17 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
     breakdownBottom = by + 8;
   }
 
-  const row = (lbl: string, value: string, bold = false) => {
+  // A label wraps onto as many lines as it needs inside its own column, so a
+  // long one (a débours line typed as a full sentence) can never run into the
+  // amount or past the page edge; the amount stays on the first line.
+  const row = (lbl: string, value: string, bold = false, indent = 0) => {
     doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(9);
-    setInk(bold ? INK : MUTED); text(lbl, tx, y);
+    const maxW = RIGHT - (tx + indent) - doc.getTextWidth(value) - 4;
+    const lines: string[] = doc.splitTextToSize(lbl, maxW);
+    setInk(bold ? INK : MUTED);
+    lines.forEach((l, i) => text(l, tx + indent, y + i * 4));
     setInk(INK); text(value, RIGHT, y, { align: 'right' });
-    y += 5;
+    y += 5 + (lines.length - 1) * 4;
   };
   row('Total HT', money(invoice.totalHT));
   row('Total TVA', money(invoice.totalVAT));
@@ -327,7 +333,7 @@ export function buildInvoicePdf(invoice: any, block?: CompanyBlock | null): jsPD
   } else if (debLines.length > 1) {
     row('Remboursement de débours', `+ ${money(invoice.disbursements)}`);
     for (const l of debLines) {
-      row(l.label ? `    ${l.label}` : '    Débours', money(l.amount));
+      row(l.label || 'Débours', money(l.amount), false, 4);
     }
   }
   if (invoice.advances > 0) row('Moins avances perçues', `- ${money(invoice.advances)}`);
