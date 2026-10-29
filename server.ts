@@ -1080,6 +1080,30 @@ async function seedResourceLibrary(db: import('./src/server/db-types.js').Databa
     'link-seed-tej', 'Impôts', 'Plateforme TEJ de retenue à la source',
     'https://tej.finances.gov.tn/home', { icon: '/logos/tej.jpg' },
   );
+  await seedLink(
+    'link-seed-apii-declaration', 'APII', 'Déclaration d’investissement en ligne',
+    'https://www.tunisieindustrie.nat.tn/fr/declaration.asp', { icon: '/logos/apii.png' },
+  );
+  await seedLink(
+    'link-seed-bct-cours', 'BCT', 'Cours moyens des devises cotées en dinar tunisien sur le marché des changes interbancaire',
+    'https://www.bct.gov.tn/bct/siteprod/cours.jsp', { icon: '/logos/bct.png' },
+  );
+  await seedLink(
+    'link-seed-impots-teledeclaration', 'Impôts', 'Télé-déclaration Fiscale',
+    'https://jibaya.tn/blog/la-tele-declaration-fiscale/', { icon: '/logos/jibaya.png' },
+  );
+  await seedLink(
+    'link-seed-impots-immatriculation', 'Impôts', "Plateforme d'Immatriculation Fiscale en Ligne",
+    'https://jibaya.tn/blog/plateforme-dimmatriculation-fiscale-en-ligne/', { icon: '/logos/jibaya.png' },
+  );
+  await seedLink(
+    'link-seed-rne', 'RNE', 'RNE',
+    'https://www.registre-entreprises.tn/rne-public/#/', { icon: '/logos/rne.svg' },
+  );
+  await seedLink(
+    'link-seed-tia', 'TIA', "Plateforme nationale de déclaration et de suivi des projets d'investissement en Tunisie",
+    'https://tunisiainvestment.tn/', { icon: '/logos/tia.png' },
+  );
 
   // Les 28 colonnes du suivi mensuel du cabinet — de vrais en-têtes (mois +
   // libellé précis), pas du remplissage — déclinées sur chaque exercice livré.
@@ -4752,7 +4776,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
    * écran n'affiche serait du travail pour rien.
    */
   const resourceSeedInFlight = new Map<string, Promise<void>>();
-  const RESOURCE_LIBRARY_VERSION = '6t-3l-4y-prev';
+  const RESOURCE_LIBRARY_VERSION = '6t-9l-4y-prev';
 
   async function seedResourceLibraryFor(company: any): Promise<void> {
     if (!company?.id) return;
@@ -9783,6 +9807,24 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
 
   // --- Liens utiles ---
 
+  // Une icône est soit un chemin servi par l'app (`/logos/…`), soit une URL
+  // http(s), soit une image **matricielle** importée via « Parcourir » et
+  // envoyée en data URL. Le navigateur convertit déjà tout import en PNG ; le
+  // serveur refuse quand même le SVG en data URL (il peut porter du script,
+  // même raison que la signature de la fiche entreprise) et plafonne la taille.
+  const normalizeLinkIcon = (icon: any): { value: string | null; error?: string } => {
+    if (icon === undefined || icon === null || String(icon).trim() === '') return { value: null };
+    const v = String(icon).trim();
+    if (/^data:/i.test(v)) {
+      if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v)) return { value: null, error: 'Icône invalide : PNG, JPEG ou WEBP uniquement' };
+      if (v.length > 400_000) return { value: null, error: 'Icône trop lourde (300 ko maximum)' };
+      return { value: v };
+    }
+    if (v.length > 500) return { value: null, error: 'Adresse de l’icône trop longue' };
+    if (v.startsWith('/logos/') || /^https?:\/\//i.test(v)) return { value: v };
+    return { value: null, error: 'Icône invalide' };
+  };
+
   app.get('/api/useful-links', authenticate, requirePermission('VIEW_RESOURCES'), async (req: any, res: any) => {
     try {
       const links = await db.getAllUsefulLinks(req.user.companyId);
@@ -9801,6 +9843,8 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       if (!String(category || '').trim() || !String(label || '').trim() || !String(url || '').trim()) {
         return res.status(400).json({ error: 'Catégorie, libellé et URL sont requis' });
       }
+      const iconCheck = normalizeLinkIcon(icon);
+      if (iconCheck.error) return res.status(400).json({ error: iconCheck.error });
       const existing = await db.getAllUsefulLinks(req.user.companyId);
       const link = await db.createUsefulLink(req.user.companyId, {
         id: genId('link'),
@@ -9808,7 +9852,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         label: String(label).trim(),
         url: String(url).trim(),
         description: description ? String(description).trim() : null,
-        icon: icon || null,
+        icon: iconCheck.value,
         sector: sector || null,
         sortOrder: existing.length,
         isActive: true,
@@ -9822,8 +9866,13 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
 
   app.put('/api/useful-links/:id', authenticate, requirePermission('MANAGE_RESOURCES'), async (req: any, res: any) => {
     try {
-      const { category, label, url, description, isActive, sortOrder } = req.body;
+      const { category, label, url, description, icon, isActive, sortOrder } = req.body;
       const updates: any = {};
+      if (icon !== undefined) {
+        const iconCheck = normalizeLinkIcon(icon);
+        if (iconCheck.error) return res.status(400).json({ error: iconCheck.error });
+        updates.icon = iconCheck.value;
+      }
       if (category !== undefined) updates.category = String(category).trim();
       if (label !== undefined) updates.label = String(label).trim();
       if (url !== undefined) updates.url = String(url).trim();

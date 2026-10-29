@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useEscapeToClose } from '../../hooks/useEscapeToClose';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Pencil, Trash2, Loader2, FileCheck2, Link2, CalendarClock, ExternalLink, Briefcase } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, FileCheck2, Link2, CalendarClock, ExternalLink, Briefcase, Upload } from 'lucide-react';
 import { DocumentTemplatesManager, type ResourceTemplate, type ResourceTemplateItem } from './DocumentTemplatesManager';
 import { ImportDocumentTemplateModal } from './ImportDocumentTemplateModal';
 import { EcheancesGrid } from './EcheancesGrid';
@@ -33,13 +33,19 @@ export const ResourcesManagement: React.FC = () => {
 
   const [importingTemplate, setImportingTemplate] = useState(false);
   const [linkForm, setLinkForm] = useState<null | { id?: string; category: string; label: string; url: string; description: string; icon: string }>(null);
+  const [iconError, setIconError] = useState('');
+  // Ids of links whose logo failed to load — they fall back to the plain link icon.
+  const [brokenIcons, setBrokenIcons] = useState<Set<string>>(new Set());
+  const iconInputRef = useRef<HTMLInputElement>(null);
   useEscapeToClose(() => setLinkForm(null), !!linkForm);
 
   const load = async () => {
     try {
+      // Les liens utiles se lisent avec VIEW_RESOURCES : tout le monde les
+      // charge. Les modèles des procédures restent au référentiel (admin).
       const [t, i, l] = await Promise.all([
-        fetch('/api/resource-templates', { headers: authHeaders }).then(r => r.json()),
-        fetch('/api/resource-template-items', { headers: authHeaders }).then(r => r.json()),
+        canManage ? fetch('/api/resource-templates', { headers: authHeaders }).then(r => r.json()) : Promise.resolve([]),
+        canManage ? fetch('/api/resource-template-items', { headers: authHeaders }).then(r => r.json()) : Promise.resolve([]),
         fetch('/api/useful-links', { headers: authHeaders }).then(r => r.json()),
       ]);
       if (Array.isArray(t)) setTemplates(t);
@@ -52,10 +58,33 @@ export const ResourcesManagement: React.FC = () => {
     }
   };
 
-  // The référentiel tabs (and their data) are admin-only — a plain
-  // VIEW_RESOURCES user only ever sees "Mes procédures en cours", which fetches its own
-  // data directly, so there is nothing to load here for them.
-  useEffect(() => { if (canManage) load(); else setIsLoading(false); }, []);
+  // Modèles des procédures stay admin-only; useful links are read by everyone
+  // with VIEW_RESOURCES (only creating, editing and deleting them is gated).
+  useEffect(() => { load(); }, []);
+
+  // « Parcourir » : the picked file is redrawn on a canvas and kept as a small
+  // PNG data URL — whatever was picked (SVG included) is stored as a plain
+  // raster image, never as markup, and stays light enough for the link row.
+  const pickIcon = (file: File | undefined) => {
+    setIconError('');
+    if (!file || !linkForm) return;
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) { setIconError('Choisissez une image PNG, JPEG, WEBP ou SVG.'); return; }
+    if (file.size > 2 * 1024 * 1024) { setIconError('Image trop lourde (2 Mo maximum).'); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 320 / (img.naturalWidth || 320), 128 / (img.naturalHeight || 128));
+      const w = Math.max(1, Math.round((img.naturalWidth || 320) * scale));
+      const h = Math.max(1, Math.round((img.naturalHeight || 128) * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      setLinkForm(f => (f ? { ...f, icon: canvas.toDataURL('image/png') } : f));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); setIconError("Impossible de lire cette image."); };
+    img.src = url;
+  };
 
   const saveLink = async () => {
     if (!linkForm) return;
@@ -91,9 +120,8 @@ export const ResourcesManagement: React.FC = () => {
   const TABS: { id: Tab; label: string; icon: any }[] = [
     ...(canManage ? [{ id: 'documents' as Tab, label: 'Modèles des procédures', icon: FileCheck2 }] : []),
     { id: 'work', label: 'Mes procédures en cours', icon: Briefcase },
-    ...(canManage ? [
-      { id: 'links' as Tab, label: 'Liens utiles', icon: Link2 },
-    ] : []),
+    // Liens utiles : lisibles par tous, gérés avec MANAGE_RESOURCES.
+    { id: 'links' as Tab, label: 'Liens utiles', icon: Link2 },
     // Les échéances se **consultent** avec VIEW_RESOURCES : le suivi mensuel
     // dit qui doit quoi et quand, c'est ce qu'un collaborateur a besoin de
     // voir pour savoir où il en est. Les modifier reste réservé — la grille
@@ -156,7 +184,7 @@ export const ResourcesManagement: React.FC = () => {
         <div className="space-y-5">
           {canManage && (
             <button
-              onClick={() => setLinkForm({ category: '', label: '', url: '', description: '', icon: '' })}
+              onClick={() => { setIconError(''); setLinkForm({ category: '', label: '', url: '', description: '', icon: '' }); }}
               className="self-start bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -180,10 +208,14 @@ export const ResourcesManagement: React.FC = () => {
                         title={`Ouvrir ${l.url}`}
                         className="flex items-center gap-2.5 text-[13px] font-medium text-gray-800 hover:text-navy min-w-0"
                       >
-                        {l.icon ? (
-                          <img src={l.icon} alt="" className="w-6 h-6 rounded object-contain border border-gray-100 shrink-0 bg-white" />
+                        {l.icon && !brokenIcons.has(l.id) ? (
+                          <img
+                            src={l.icon} alt=""
+                            onError={() => setBrokenIcons(prev => new Set(prev).add(l.id))}
+                            className="w-20 h-9 rounded object-contain shrink-0 bg-white"
+                          />
                         ) : (
-                          <ExternalLink className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          <span className="w-20 h-9 flex items-center justify-center shrink-0"><ExternalLink className="w-3.5 h-3.5 text-gray-400" /></span>
                         )}
                         <span className="min-w-0">
                           <span className="block truncate">{l.label}</span>
@@ -193,7 +225,7 @@ export const ResourcesManagement: React.FC = () => {
                       {canManage && (
                         <div className="flex items-center gap-1 shrink-0">
                           <button
-                            onClick={() => setLinkForm({ id: l.id, category: l.category, label: l.label, url: l.url, description: l.description || '', icon: l.icon || '' })}
+                            onClick={() => { setIconError(''); setLinkForm({ id: l.id, category: l.category, label: l.label, url: l.url, description: l.description || '', icon: l.icon || '' }); }}
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-lg"
                           >
                             <Pencil className="w-3.5 h-3.5" />
@@ -221,7 +253,7 @@ export const ResourcesManagement: React.FC = () => {
 
       {linkForm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5 space-y-3">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-3">
             <h2 className="text-[15px] font-bold text-gray-900">{linkForm.id ? 'Modifier le lien' : 'Nouveau lien'}</h2>
             <div>
               <label className="block text-[11px] font-semibold text-gray-500 mb-1">Catégorie</label>
@@ -263,17 +295,44 @@ export const ResourcesManagement: React.FC = () => {
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-gray-500 mb-1">
-                Icône <span className="font-normal text-gray-300">(URL, facultatif)</span>
+                Logo <span className="font-normal text-gray-300">(facultatif)</span>
               </label>
               <div className="flex items-center gap-2">
-                {linkForm.icon && <img src={linkForm.icon} alt="" className="w-8 h-8 rounded object-contain border border-gray-100 shrink-0" />}
+                {linkForm.icon && <img src={linkForm.icon} alt="" className="w-16 h-8 rounded object-contain border border-gray-100 shrink-0 bg-white" />}
                 <input
-                  value={linkForm.icon}
-                  onChange={e => setLinkForm({ ...linkForm, icon: e.target.value })}
-                  placeholder="/logos/exemple.png"
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent"
+                  value={linkForm.icon.startsWith('data:') ? 'Image importée' : linkForm.icon}
+                  readOnly={linkForm.icon.startsWith('data:')}
+                  onChange={e => { setIconError(''); setLinkForm({ ...linkForm, icon: e.target.value }); }}
+                  placeholder="URL ou /logos/exemple.png"
+                  className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:ring-2 focus:ring-navy focus:border-transparent read-only:bg-gray-50 read-only:text-gray-500"
                 />
+                <input
+                  ref={iconInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                  onChange={e => { pickIcon(e.target.files?.[0]); e.target.value = ''; }}
+                />
+                <button
+                  type="button"
+                  onClick={() => iconInputRef.current?.click()}
+                  className="shrink-0 px-3 py-2 border border-gray-300 rounded-lg text-[12px] font-medium text-gray-700 hover:bg-gray-100 bg-white flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Parcourir…
+                </button>
+                {linkForm.icon && (
+                  <button
+                    type="button"
+                    onClick={() => setLinkForm({ ...linkForm, icon: '' })}
+                    title="Retirer le logo"
+                    className="shrink-0 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
+              {iconError && <p className="mt-1 text-[11px] font-medium text-red-600">{iconError}</p>}
             </div>
             <div className="flex justify-end gap-3 pt-1">
               <button onClick={() => setLinkForm(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-100 bg-white">Annuler</button>
