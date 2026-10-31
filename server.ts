@@ -13,7 +13,7 @@ import {
   PLAN_SEAT_LIMITS, PLAN_PORTAL_SEAT_LIMITS, SELLABLE_PLANS, isSellablePlan, DEFAULT_PLAN_ID,
   planMeta, planLabel, formatDT, REFERRAL_DISCOUNT_PERCENT, discountedPriceDT,
   planAllowsPermission, documentQuotaFor, planAllowsModule, planModules, type PlanModule,
-  planPriceForSeats, clampSeatsForPlan, planAllowsSeatOverage, permanentDocumentQuotaFor,
+  planPriceForSeats, clampSeatsForPlan, planAllowsSeatOverage, clientLimitFor,
   FREELANCER_UPGRADE_PRICE_DT,
 } from './src/constants/plans.js';
 import { ROLES, STAFF_ROLES, DASHBOARD_ROLES, HR_APPROVER_ROLES, CLIENT_ROLE } from './src/constants/roles.js';
@@ -666,96 +666,42 @@ const QUOTA_REACHED_ERROR = (limit: number) =>
   + 'Les brouillons restent illimités ; passez à l\'abonnement pour émettre sans plafond.';
 
 /**
- * Le plafond mensuel **permanent** de Freelance (voir plans.ts —
- * `monthlyDocumentQuota`, distinct de `trialDocumentQuota` ci-dessus, qui ne
- * s'applique jamais à Freelance puisqu'elle est `ACTIVE` dès sa création).
- * `null` dès que la dérogation `documentQuotaOverride` est posée sur la
- * fiche entreprise, ou pour toute autre offre.
+ * Le plafond du fichier clients (Freelance : 10 fiches au total, pas par
+ * mois — voir `clientLimit` dans plans.ts). Rend le message de refus, ou
+ * `null` quand on peut encore créer `adding` clients. Une seule
+ * implémentation pour la création unitaire et l'import, sinon l'un
+ * accepterait ce que l'autre refuse.
  */
-const permanentDocumentQuotaOf = (company: any): number | null =>
-  permanentDocumentQuotaFor(company?.plan, company?.documentQuotaOverride);
-
-/**
- * Le rang (1-based) d'un document parmi ceux du même mois qui comptent dans
- * le quota, triés par création — c'est ce rang, pas un compteur global, qui
- * dit si *ce* document précis dépasse le quota. Un brouillon devenu document
- * à l'émission prend son rang à ce moment-là (`documentMonth` lit
- * `issuedAt || createdAt`), jamais à sa préparation.
- */
-const monthlyQuotaRank = (inv: any, allInvoicesSameCompany: any[]): number => {
-  const month = documentMonth(inv);
-  const sameMonth = allInvoicesSameCompany
-    .filter((i: any) => countsAgainstQuota(i) && documentMonth(i) === month)
-    .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  return sameMonth.findIndex((i: any) => i.id === inv.id) + 1;
+const clientLimitError = (company: any, used: number, adding = 1): string | null => {
+  const limit = clientLimitFor(company?.plan, company);
+  if (!limit) return null;
+  if (used + adding <= limit) return null;
+  const left = Math.max(0, limit - used);
+  return `L'offre Freelance est limitée à ${limit} clients`
+    + (left > 0 ? ` — il ne reste que ${left} place(s).` : ' — le plafond est atteint.')
+    + ` Passez à l'offre illimitée (${FREELANCER_UPGRADE_PRICE_DT} DT/mois — contactez-nous) pour en ajouter.`;
 };
 
 /**
- * Un document au-delà du quota permanent **se crée quand même** —
- * contrairement au plafond d'essai ci-dessus, qui refuse (402) à la
- * création. Ici, la création n'est jamais bloquée ; seule sa consultation
- * l'est (`maskLockedInvoice`) : c'est la différence explicitement demandée
- * entre un essai qui expire et une offre gratuite dont le quota est le
- * modèle économique.
+ * Le compte Freelance vient d'atteindre son 10ᵉ client — prévient le cabinet
+ * lui-même (contact@), pour qu'une demande d'upgrade se remarque même si le
+ * client n'écrit pas. Appelé seulement quand le total vaut exactement le
+ * plafond, donc une seule fois.
  */
-const isQuotaLocked = (company: any, inv: any, allInvoicesSameCompany: any[]): boolean => {
-  if (!countsAgainstQuota(inv)) return false;
-  const quota = permanentDocumentQuotaOf(company);
-  if (!quota) return false;
-  return monthlyQuotaRank(inv, allInvoicesSameCompany) > quota;
-};
-
-/**
- * Masque les montants d'un document verrouillé — la ligne (référence,
- * client, date) reste visible, seuls les chiffres disparaissent, pour que
- * l'écran dessine un flou + cadenas plutôt qu'un trou dans la liste ou dans
- * l'export. `quotaLocked` est le seul champ ajouté ; tout le reste du
- * document garde sa forme habituelle, juste avec des montants à `null`.
- */
-const maskLockedInvoice = (inv: any) => ({
-  ...inv,
-  quotaLocked: true,
-  lines: (inv.lines || []).map((l: any) => ({ ...l, quantity: null, unitPrice: null, montantHT: null })),
-  vatBreakdown: [],
-  indicativeVatBreakdown: [],
-  indicativeVatTotal: null,
-  totalHT: null,
-  totalVAT: null,
-  totalTTC: null,
-  withholdingAmount: null,
-  stampDuty: null,
-  netToPay: null,
-  disbursementsLines: [],
-  disbursements: null,
-  advances: null,
-  totalNetToPay: null,
-});
-
-/** Applique le verrouillage éventuel avant qu'un document ne parte vers le client. */
-const withQuotaLock = (company: any, inv: any, allInvoicesSameCompany: any[]) =>
-  isQuotaLocked(company, inv, allInvoicesSameCompany) ? maskLockedInvoice(inv) : { ...inv, quotaLocked: false };
-
-const FREELANCER_LOCK_ERROR =
-  `Ce document dépasse le quota Freelance de 10 documents par mois. `
-  + `Passez à l'offre illimitée (${FREELANCER_UPGRADE_PRICE_DT} DT/mois — contactez-nous) pour le modifier.`;
-
-/**
- * Le 10ᵉ document du mois d'un compte Freelance sans dérogation — envoyé une
- * seule fois par mois, puisque le rang ne vaut exactement le quota qu'une
- * fois (le document suivant a un rang de 11, pas de 10).
- */
-const notifyFreelancerQuotaReached = async (company: any) => {
+const notifyClientLimitReached = async (company: any, count: number) => {
+  const limit = clientLimitFor(company?.plan, company);
+  if (!limit || count !== limit) return;
   await sendMail({
     to: 'contact@taches-and-cash.com',
-    subject: `Freelance — quota mensuel atteint (${company.name})`,
+    subject: `Freelance — ${limit} clients atteints (${company.name})`,
     html: `
-      <p>Le compte Freelance <strong>${escapeHtml(company.name)}</strong> vient d'émettre son 10ᵉ document du mois.</p>
+      <p>Le compte Freelance <strong>${escapeHtml(company.name)}</strong> vient de créer son ${limit}ᵉ client, le maximum de son offre.</p>
       <p><strong>Contact :</strong> ${escapeHtml(company.contactName || '—')}</p>
       <p><strong>Email :</strong> ${escapeHtml(company.contactEmail || '—')}</p>
       <p><strong>Téléphone :</strong> ${escapeHtml(company.phone || '—')}</p>
       <p><strong>Date :</strong> ${formatDateFR(new Date())}</p>
     `,
-  });
+  }).catch(() => {});
 };
 
 /**
@@ -1372,7 +1318,7 @@ async function startServer() {
         // de repli du catalogue (`planMeta(plan).seatLimit`, toujours 1), et
         // le client en a besoin pour des décisions comme « Nouvel
         // utilisateur »/« Exporter » sur Équipe (voir UsersManagement.tsx).
-        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null, seatLimit: company.seatLimit ?? null } : null,
+        company: company ? { id: company.id, name: company.name, status: company.status, plan: company.plan, trialEndsAt: company.trialEndsAt, secteur: company.secteur ?? null, seatLimit: company.seatLimit ?? null, clientLimit: clientLimitFor(company.plan, company) } : null,
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -4259,6 +4205,11 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Client name is required' });
       }
+      // Freelance : 10 clients au total. Refusé côté serveur, pas seulement
+      // masqué à l'écran — un 402 comme le plafond de documents d'essai.
+      const company = await db.getCompanyById(req.user.companyId);
+      const limitError = clientLimitError(company, (await db.getAllClients(req.user.companyId)).length);
+      if (limitError) return res.status(402).json({ error: limitError });
 
       const newClient = await db.createClient(req.user.companyId, {
         id: Date.now(),
@@ -4284,6 +4235,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         createdBy: req.user.id
       });
 
+      await notifyClientLimitReached(company, (await db.getAllClients(req.user.companyId)).length);
       const created = await enrichClientLedger(req.user.companyId, newClient);
       res.status(201).json((await userCan(req, 'VIEW_CLIENT_FINANCIALS')) ? created : stripLedger(created));
     } catch (error) {
@@ -4437,6 +4389,16 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         });
       });
 
+      // Freelance : un import qui ferait dépasser le plafond de clients est
+      // refusé en entier plutôt que coupé au hasard à la 10ᵉ ligne — le
+      // message dit combien de places restent, à l'utilisateur de choisir
+      // lesquelles importer.
+      const company = await db.getCompanyById(req.user.companyId);
+      if (toCreate.length > 0) {
+        const limitError = clientLimitError(company, existing.length, toCreate.length);
+        if (limitError) return res.status(402).json({ error: limitError });
+      }
+
       // Fired together rather than awaited one at a time: saveDb() coalesces
       // concurrent writes into a single trailing flush, so hundreds of rows
       // still cost roughly one file write, not hundreds.
@@ -4446,6 +4408,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         if (r.status === 'fulfilled') created++;
         else invalid.push({ row: idx, reason: 'Échec d’enregistrement' });
       });
+      if (created > 0) await notifyClientLimitReached(company, (await db.getAllClients(req.user.companyId)).length);
 
       res.status(201).json({
         created,
@@ -5989,18 +5952,8 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     try {
       const company = await db.getCompanyById(req.user.companyId);
       const all = await db.getAllInvoices(req.user.companyId);
-      // Le plafond d'essai (bloquant, éventuel — voir documentQuotaState)
-      // d'abord ; à défaut, le plafond permanent de Freelance (jamais
-      // bloquant, juste affiché). Les deux ne coexistent jamais dans le
-      // catalogue actuel, mais l'ordre reste correct si un jour ils le font.
       const trial = documentQuotaState(company, all);
       if (trial.limit) return res.json({ ...trial, permanent: false });
-      const permLimit = permanentDocumentQuotaOf(company);
-      if (permLimit) {
-        const month = formatDateISO(new Date()).slice(0, 7);
-        const used = all.filter((i: any) => countsAgainstQuota(i) && documentMonth(i) === month).length;
-        return res.json({ limit: permLimit, used, remaining: Math.max(0, permLimit - used), permanent: true });
-      }
       res.json({ limit: null, used: 0, remaining: null, permanent: false });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
@@ -6009,7 +5962,6 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
 
   app.get('/api/invoices', authenticate, requirePermission('VIEW_CASH'), async (req: any, res: any) => {
     try {
-      const company = await db.getCompanyById(req.user.companyId);
       const all = await db.getAllInvoices(req.user.companyId);
       const q = String(req.query.q || '').toLowerCase();
       const kind = String(req.query.kind || '');
@@ -6033,10 +5985,6 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         // pas émis. Il est compté à part pour que le décompte de la ligne de
         // total ne semble pas se tromper.
         if (inv.status === 'DRAFT') { draftCount += 1; continue; }
-        // Un document verrouillé (Freelance, quota dépassé) n'entre pas non
-        // plus dans le total : ses montants ne sont pas montrés à l'écran, un
-        // total qui les compterait quand même les révélerait par soustraction.
-        if (isQuotaLocked(company, inv, all)) continue;
         const currency = String(inv.currency || 'TND');
         const acc = totalsByCurrency[currency] || { totalHT: 0, totalNetToPay: 0, count: 0 };
         acc.totalHT = round3(acc.totalHT + num(Number(inv.totalHT), 0));
@@ -6050,7 +5998,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       // dans UsersManagement.tsx. Les stripper ici, pas seulement les cacher
       // à l'écran, sinon les montants partiraient quand même dans le JSON.
       const showTotals = await userCan(req, 'VIEW_CASH_TOTALS');
-      const page = filtered.slice(offset, offset + limit).map((inv: any) => withQuotaLock(company, inv, all));
+      const page = filtered.slice(offset, offset + limit);
       res.json({
         data: page, total: filtered.length, limit, offset,
         totalsByCurrency: showTotals ? totalsByCurrency : {},
@@ -6066,9 +6014,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     try {
       const invoice = await db.getInvoiceById(req.user.companyId, req.params.id);
       if (!invoice) return res.status(404).json({ error: 'Document introuvable' });
-      const company = await db.getCompanyById(req.user.companyId);
-      const all = await db.getAllInvoices(req.user.companyId);
-      res.json(withQuotaLock(company, invoice, all));
+      res.json(invoice);
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -6127,9 +6073,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       const company = await db.getCompanyById(req.user.companyId);
 
       // Le plafond d'essai ne porte que sur les documents émis, et refuse
-      // toujours la création — un brouillon passe toujours. Le plafond
-      // permanent de Freelance, lui, ne refuse jamais rien ici : voir plus
-      // bas, une fois le document créé.
+      // toujours la création — un brouillon passe toujours.
       if (!isDraft) {
         const quota = documentQuotaState(company, all);
         if (quota.limit && quota.remaining === 0) {
@@ -6220,18 +6164,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
 
       await notifyPortalInvoice(req.user.companyId, invoice);
 
-      // Freelance : le 10ᵉ document émis du mois avertit le cabinet lui-même
-      // par e-mail (contact@), pas seulement l'écran — pour qu'un dépassement
-      // se remarque même si personne ne regarde le badge de quota ce jour-là.
-      // La création elle-même n'a jamais été refusée : seule sa consultation
-      // se verrouille désormais (withQuotaLock), donc le document part quand
-      // même vers le client, simplement masqué s'il dépasse le quota.
-      const allAfter = await db.getAllInvoices(req.user.companyId);
-      const permQuota = permanentDocumentQuotaOf(company);
-      if (permQuota && countsAgainstQuota(invoice) && monthlyQuotaRank(invoice, allAfter) === permQuota) {
-        await notifyFreelancerQuotaReached(company);
-      }
-      res.status(201).json(withQuotaLock(company, invoice, allAfter));
+      res.status(201).json(invoice);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
@@ -6242,15 +6175,6 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
     try {
       const existing = await db.getInvoiceById(req.user.companyId, req.params.id);
       if (!existing) return res.status(404).json({ error: 'Document introuvable' });
-
-      // Un document verrouillé (Freelance, quota mensuel dépassé) ne se
-      // modifie pas tant que le mois n'est pas repassé ou que la dérogation
-      // n'est pas posée — la création n'a jamais été refusée, mais l'usage
-      // du document, lui, est bien ce que l'upgrade paie.
-      const companyForLock = await db.getCompanyById(req.user.companyId);
-      if (isQuotaLocked(companyForLock, existing, await db.getAllInvoices(req.user.companyId))) {
-        return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
-      }
 
       const merged = { ...existing, ...req.body };
 
@@ -6391,15 +6315,7 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       });
       await notifyPortalInvoice(req.user.companyId, issued);
 
-      // Même règle qu'à la création directe : le 10ᵉ document du mois avertit
-      // le cabinet, et la réponse porte le verrouillage éventuel — un
-      // brouillon émis peut très bien naître déjà au-delà du quota permanent.
-      const allAfterIssue = await db.getAllInvoices(req.user.companyId);
-      const permQuota = permanentDocumentQuotaOf(company);
-      if (permQuota && monthlyQuotaRank(issued, allAfterIssue) === permQuota) {
-        await notifyFreelancerQuotaReached(company);
-      }
-      res.json(withQuotaLock(company, issued, allAfterIssue));
+      res.json(issued);
     } catch (error) {
       console.error('Issue invoice error:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -6444,10 +6360,6 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
       }
 
       const all = await db.getAllInvoices(req.user.companyId);
-      const companyForLock = await db.getCompanyById(req.user.companyId);
-      if (isQuotaLocked(companyForLock, existing, all)) {
-        return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
-      }
       const dateError = legalSequenceDateError(all, existing.id, Infinity, existing.issueDate);
       if (dateError) {
         return res.status(400).json({
@@ -6535,15 +6447,6 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         i.id !== existing.id && i.documentKind === 'FACTURE_LEGALE' && i.status !== 'DRAFT' &&
         String(i.issueDate || '').slice(0, 4) === String(year) && Number(i.number) >= 2,
       );
-
-      // Un document verrouillé (quota Freelance dépassé) ne se modifie plus
-      // du tout, même règle que PUT/convert-to-legal — y compris pour un
-      // décalage qui ne touche pourtant à aucun montant.
-      const companyForLock = await db.getCompanyById(req.user.companyId);
-      const toTouch = [existing, ...othersThisYear];
-      if (toTouch.some((i: any) => isQuotaLocked(companyForLock, i, all))) {
-        return res.status(402).json({ error: FREELANCER_LOCK_ERROR });
-      }
 
       const offset = n - 1;
       const formatted = String(n).padStart(4, '0');
@@ -10978,13 +10881,17 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
         const d = String(req.body.subscriptionEndsAt || '').slice(0, 10);
         updates.subscriptionEndsAt = d ? new Date(`${d}T23:59:59Z`).toISOString() : null;
       }
-      // La dérogation au quota mensuel de Freelance (voir plans.ts,
-      // `permanentDocumentQuotaFor`) — posée à la main une fois l'upgrade
-      // payé hors app, puisqu'aucun paiement en ligne n'existe ici. N'a
-      // d'effet que sur un compte Freelance ; sans risque à laisser posée sur
-      // une autre offre, elle n'y est simplement jamais lue.
-      if (req.body?.documentQuotaOverride !== undefined) {
-        updates.documentQuotaOverride = !!req.body.documentQuotaOverride;
+      // La dérogation au plafond de 10 clients de Freelance (voir plans.ts,
+      // `clientLimitFor`) — posée à la main une fois l'upgrade payé hors
+      // app, puisqu'aucun paiement en ligne n'existe ici. N'a d'effet que sur
+      // un compte Freelance ; sans risque à laisser posée sur une autre
+      // offre, elle n'y est simplement jamais lue. L'ancien drapeau
+      // `documentQuotaOverride` est remis à zéro à chaque écriture : il est
+      // lu comme une dérogation, donc le laisser en place empêcherait de la
+      // retirer depuis cette fiche.
+      if (req.body?.clientLimitOverride !== undefined) {
+        updates.clientLimitOverride = !!req.body.clientLimitOverride;
+        updates.documentQuotaOverride = false;
       }
 
       res.json(await db.updateCompany(id, updates));

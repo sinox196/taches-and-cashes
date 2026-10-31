@@ -10,7 +10,7 @@ import { LandingNav, type PublicView } from '../components/landing/LandingNav';
 import { ContactView } from '../components/landing/ContactView';
 import { FeaturesView } from '../components/landing/FeaturesView';
 import { SupportView } from '../components/landing/SupportView';
-import { SELLABLE_PLANS, planMeta, planPriceForSeats, planListPriceForSeats, formatDT, FREELANCER_UPGRADE_PRICE_DT } from '../constants/plans';
+import { SELLABLE_PLANS, planMeta, planPriceForSeats, planListPriceForSeats, formatDT, FREELANCER_UPGRADE_PRICE_DT, FREELANCER_CLIENT_LIMIT } from '../constants/plans';
 
 const CONTACT_EMAIL = 'contact@taches-and-cash.com';
 /** Same number the support brief gave for the page's phone card; also what
@@ -469,8 +469,8 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 Un prix simple, qui grandit avec votre équipe
               </h1>
               <p className="mt-[18px] text-[16.5px] text-[#5B6472] leading-[1.6]">
-                Freelancer est gratuit pour un indépendant seul, avec 10 documents de facturation inclus chaque
-                mois. Complet ouvre tout le cabinet, à plusieurs comptes, et son prix s'ajuste instantanément au
+                Freelancer est gratuit pour un indépendant seul, jusqu'à {FREELANCER_CLIENT_LIMIT} clients, factures
+                illimitées. Complet ouvre tout le cabinet, à plusieurs comptes, et son prix s'ajuste instantanément au
                 nombre d'utilisateurs.
               </p>
             </div>
@@ -534,13 +534,13 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                     <p className={`text-[13px] ${tone.portal}`}>+ {plan.portalSeats}</p>
                   )}
 
-                  {/* Freelance seule porte un quota de documents — le dire ici
-                      évite la surprise du message de verrouillage à la 11ᵉ
-                      facture, et le lien mailto reprend l'adresse déjà utilisée
-                      partout ailleurs sur cette page plutôt qu'en inventer une. */}
+                  {/* Freelance seule porte un plafond de clients — le dire ici
+                      évite la surprise du refus au 11ᵉ client, et le lien mailto
+                      reprend l'adresse déjà utilisée partout ailleurs sur cette
+                      page plutôt qu'en inventer une. */}
                   {plan.id === 'FREELANCER' && (
                     <p className={`text-[12.5px] mt-3 leading-snug ${tone.muted}`}>
-                      10 factures/mois incluses. Besoin de plus ?{' '}
+                      Jusqu'à {FREELANCER_CLIENT_LIMIT} clients. Besoin de plus ?{' '}
                       <a href={`mailto:${CONTACT_EMAIL}`} className="text-turquoise font-semibold hover:underline">
                         {FREELANCER_UPGRADE_PRICE_DT} DT/mois pour illimité
                       </a>

@@ -57,6 +57,8 @@ export interface User {
     id: string; name: string; status: string; plan: string; trialEndsAt: string | null; secteur?: string | null;
     /** Le nombre de sièges back-office réellement accordé — pas le repli du catalogue, voir plans.ts. */
     seatLimit?: number | null;
+    /** Plafond du fichier clients (Freelance), dérogation comprise — `null` pour illimité. Calculé par le serveur. */
+    clientLimit?: number | null;
   } | null;
 }
 

@@ -420,7 +420,7 @@ demande un autre.
 toutes les vues (`modules` absent) :
 
 - **Freelancer** — gratuit, un siège, ADMIN. Voir plus bas — et voir « Le
-  quota mensuel de Freelance » plus loin pour son plafond de 10 documents.
+  plafond de Freelance » plus loin pour sa limite de 10 clients.
 - **Complet** (`COMPLET`) — **15 DT/mois pour 1 utilisateur**, +15 DT par
   utilisateur supplémentaire (5 utilisateurs = `15 + 4×15 = 75` DT/mois).
   Offre par défaut d'une inscription qui ne précise rien (`DEFAULT_PLAN_ID`).
@@ -526,62 +526,61 @@ n'y entre jamais n'expire jamais. La page de tarifs affiche « Gratuit »
 plutôt que « 0 DT/mois » pour la même offre — un prix à zéro se lit comme un
 champ oublié, pas comme une promesse.
 
-**Le quota mensuel de Freelance — 10 documents, en permanence, pas seulement
-pendant un essai.** `PlanMeta.monthlyDocumentQuota: 10` sur `FREELANCER` est
-distinct de `trialDocumentQuota` (voir plus bas) : celui-ci s'éteint dès que
-l'entreprise passe `ACTIVE`, ce que Freelance est déjà dès sa création — un
-`trialDocumentQuota` n'y aurait donc jamais d'effet. `permanentDocumentQuotaFor(plan,
-documentQuotaOverride)` dans plans.ts le rend, sauf si `company.documentQuotaOverride`
-est posé (dérogation manuelle depuis la console plateforme, une fois l'upgrade
-payé hors app — aucun paiement en ligne n'existe dans cette application ;
-`FREELANCER_UPGRADE_PRICE_DT = 15` est purement informatif, affiché sur la
-page de tarifs et dans le message de verrouillage).
+**Le plafond de Freelance — 10 clients au total, pas par mois, et pas
+seulement pendant un essai.** À la demande explicite de l'utilisateur, il
+remplace l'ancien quota de 10 documents par mois : factures et documents sont
+désormais **illimités** sur Freelance, c'est le fichier clients qui est
+plafonné. `PlanMeta.clientLimit` (`FREELANCER_CLIENT_LIMIT = 10` dans
+plans.ts, lu par la fiche, la carte de tarifs et le serveur) ;
+`clientLimitFor(plan, company)` le rend, sauf si la fiche porte la dérogation
+`clientLimitOverride` (posée à la main depuis la console plateforme une fois
+l'upgrade payé hors app — aucun paiement en ligne n'existe dans cette
+application ; `FREELANCER_UPGRADE_PRICE_DT = 15` est purement informatif,
+affiché sur la page de tarifs et dans le message de refus).
+`documentQuotaOverride`, l'ancien nom de la dérogation du temps du quota de
+documents, est **encore lu comme une dérogation** : une entreprise qui avait
+payé pour lever l'ancien plafond ne doit pas se retrouver bloquée par le
+nouveau. La console l'efface à chaque enregistrement (et écrit
+`clientLimitOverride` à la place), sans quoi décocher la case ne lèverait
+rien.
 
-**La carte Freelancer de la page de tarifs annonçait « Nombre illimité de factures et de documents » — faux pour cette offre-là, exactement ce que le serveur verrouille dès le 11ᵉ document du mois.** `features` sur les deux fiches vendues (`FREELANCER`, `COMPLET`) pointait vers le même `CORE_FEATURES` : correct pour Complet, réellement illimité, mais un chiffre faux et crédible pour Freelancer. `FREELANCER_FEATURES` (plans.ts) est `CORE_FEATURES.map()` avec cette seule ligne remplacée par « 10 factures par mois » — un `.map()` plutôt qu'une liste recopiée à la main, pour que les dix autres lignes ne puissent pas diverger de `CORE_FEATURES` si celui-ci change. `COMPLET` garde `features: CORE_FEATURES` sans y toucher.
+**Atteint, le plafond refuse la création — contrairement à l'ancien quota de
+documents, qui laissait créer puis verrouillait la consultation.**
+`clientLimitError(company, used, adding)` dans server.ts est l'unique
+arbitre, appelé par `POST /api/clients` *et* `POST /api/clients/import` (402,
+message qui dit combien de places restent) — sinon l'un accepterait ce que
+l'autre refuse. **Un import qui ferait dépasser est refusé en entier**, pas
+coupé à la 10ᵉ ligne : couper au hasard choisirait à la place de
+l'utilisateur quels clients entrent. Les clients déjà en base ne sont jamais
+touchés — une entreprise déjà au-delà garde tout, elle ne peut simplement plus
+en ajouter. `GET /api/me` porte `company.clientLimit` (dérogation comprise,
+calculé par le serveur), et la page Clients affiche un compteur
+« Offre Freelance : N / 10 clients » — le total vient d'une requête sans
+filtre, puisque `data.total` ne compte que ce que la recherche retient — et
+désactive Importer / Nouveau client une fois le plafond atteint. Le serveur
+reste ce qui décide ; le compteur ne fait que le dire avant qu'on remplisse un
+formulaire pour rien.
 
-**Dépasser le quota ne bloque jamais la création — contrairement au plafond
-d'essai — seule la consultation d'un document au-delà se verrouille.**
-`isQuotaLocked(company, inv, allInvoicesSameCompany)` dans server.ts calcule
-le rang (1-based) du document parmi ceux du même mois qui comptent dans le
-quota (`countsAgainstQuota`, triés par création) : au-delà de 10, il est
-« verrouillé ». `maskLockedInvoice()` renvoie alors le document avec
-`quotaLocked: true` et tous ses champs de montant à `null` (`totalHT`,
-`totalTTC`, `totalNetToPay`, les lignes, les débours…) — la fiche existe
-toujours (numéro, client, date), mais aucun chiffre n'y figure, appliqué par
-`withQuotaLock()` dans `GET /api/invoices`, `GET /api/invoices/:id`,
-`POST /api/invoices` et `POST /api/invoices/:id/issue`. `PUT
-/api/invoices/:id` et `POST /api/invoices/:id/convert-to-legal` refusent
-purement et simplement (402, `FREELANCER_LOCK_ERROR`) de modifier ou de
-convertir un document verrouillé. Le Total Général de Cash (`GET
-/api/invoices`) exclut aussi ces documents de la somme — les compter aurait
-révélé leur montant par soustraction, exactement ce que le masquage cherche
-à éviter.
+**Le verrouillage des documents a été retiré, pas laissé en sommeil** :
+`isQuotaLocked`/`maskLockedInvoice`/`withQuotaLock`/`FREELANCER_LOCK_ERROR`,
+le champ `quotaLocked`, la carte floutée d'[InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)
+et le badge « Verrouillé » de Cash n'existent plus, et
+`GET /api/cash/document-quota` ne sert plus que le plafond d'essai. Un
+document de Freelance se consulte, se modifie et s'imprime comme n'importe
+quel autre.
 
-Côté écran, [InvoicePreview.tsx](src/components/cash/InvoicePreview.tsx)
-affiche le corps du document flouté (`blur-sm`) sous une carte de
-verrouillage (cadenas, message, lien `mailto:` vers contact@) dès
-l'ouverture — ouvrir l'aperçu *est* déjà la tentative de consultation, donc
-le message est visible sans clic de plus ; Télécharger/Imprimer sont
-désactivés et Modifier est carrément absent du bandeau (l'éditeur ouvrirait
-sur des montants déjà masqués par le serveur). [CashManagement.tsx](src/components/cash/CashManagement.tsx)
-badge chaque ligne verrouillée (« Verrouillé », les deux colonnes de montant
-en pointillés gris) et ne garde que Supprimer parmi les actions de ligne —
-Émettre/Convertir/Modifier disparaissent, la suppression ne demandant pas de
-consulter les montants.
+**La carte Freelancer de la page de tarifs dit le plafond tel qu'il est.**
+`FREELANCER_FEATURES` (plans.ts) est `CORE_FEATURES.map()` avec une seule
+ligne remplacée — « Clients et missions illimités » devient « 10 clients
+maximum, missions illimitées » ; « Nombre illimité de factures et de
+documents » reste, puisque c'est maintenant vrai. Un `.map()` plutôt qu'une
+liste recopiée à la main, pour que les autres lignes ne puissent pas diverger
+de `CORE_FEATURES`. `COMPLET` garde `features: CORE_FEATURES` sans y toucher.
 
-`GET /api/cash/document-quota` porte les deux mécanismes sous un seul champ
-`permanent` : `false` pour l'ancien plafond d'essai (bloquant), `true` pour
-le quota permanent de Freelance — la carte Cash choisit son libellé
-(« Essai gratuit » contre « Offre Freelance ») sur ce booléen plutôt que sur
-un second appel.
-
-**Le 10ᵉ document du mois avertit le cabinet par e-mail, pas seulement
-l'écran.** `notifyFreelancerQuotaReached(company)` envoie à contact@ (nom,
-e-mail, téléphone du contact de l'entreprise, date) exactement quand le rang
-du document créé vaut le quota — jamais au-delà, donc une seule fois par
-mois : le document suivant a un rang de 11, pas de 10. Appelée depuis
-`POST /api/invoices` et `POST /api/invoices/:id/issue`, les deux routes où un
-document peut naître.
+**Le 10ᵉ client avertit le cabinet par e-mail.** `notifyClientLimitReached()`
+envoie à contact@ (nom, e-mail, téléphone du contact, date) quand le total
+vaut exactement le plafond après une création ou un import — une seule fois,
+puisque le 11ᵉ est refusé.
 
 **Les offres retirées restent dans la liste** (`legacy: true`) — `FREELANCE`,
 `EQUIPE`, `CROISSANCE`, et désormais `RH_PAIE`/`FACTURATION`. Une entreprise
@@ -682,11 +681,10 @@ plafonne les documents **émis** par mois tant que l'entreprise n'est pas
 précisément ce qu'on vend. L'ancien pack Facturation à un siège en portait un
 (10/mois) ; ni Complet ni les deux offres `legacy` qu'il a remplacées n'en
 ont — rien dans la demande n'en redemandait un, et le champ reste disponible
-pour la prochaine offre qui en aura besoin. **Ne pas confondre avec le quota
-permanent de Freelance** (`monthlyDocumentQuota`, « Le quota mensuel de
-Freelance » ci-dessus) : celui-là ne dépend pas de `status`, ne bloque jamais
-la création, et vit dans `permanentDocumentQuotaFor()`, une fonction
-distincte. Trois précisions qui décident du comportement du plafond
+pour la prochaine offre qui en aura besoin. **Ne pas confondre avec le plafond
+de Freelance** (`clientLimit`, « Le plafond de Freelance » ci-dessus) :
+celui-là porte sur les clients, pas sur les documents, et ne dépend pas de
+`status`. Trois précisions qui décident du comportement du plafond
 *d'essai*, pour l'offre qui viendrait un jour en poser un :
 
 - **Un brouillon ne compte pas** (`countsAgainstQuota` : tout sauf `DRAFT`).
@@ -1323,7 +1321,7 @@ plus désigner la même date. Un compte en essai ou actif sans échéance affich
 qu'on cherche pour relancer, et un tiret la laissait passer inaperçue. Un compte
 expiré ou suspendu garde le tiret — il n'y a rien à y échoir.
 
-`PUT /api/platform/companies/:id` travaille sur une **liste blanche** : nom, contact, email, téléphone, secteur, sièges, fin d'essai, et `documentQuotaOverride` (la dérogation au quota mensuel de Freelance — voir « Le quota mensuel de Freelance » dans « Offres et sièges » ; sans effet sur une autre offre, donc sans risque à laisser posée si l'entreprise change de plan). `status` et `plan` en sont volontairement absents — ils se changent par la confirmation de paiement, qui porte ses propres effets de bord ; les accepter ici ouvrirait un second chemin capable d'activer un compte sans paiement.
+`PUT /api/platform/companies/:id` travaille sur une **liste blanche** : nom, contact, email, téléphone, secteur, sièges, fin d'essai, et `clientLimitOverride` (la dérogation au plafond de 10 clients de Freelance — voir « Le plafond de Freelance » dans « Offres et sièges » ; sans effet sur une autre offre, donc sans risque à laisser posée si l'entreprise change de plan). `status` et `plan` en sont volontairement absents — ils se changent par la confirmation de paiement, qui porte ses propres effets de bord ; les accepter ici ouvrirait un second chemin capable d'activer un compte sans paiement.
 
 `DELETE /api/platform/companies/:id` supprime **le tenant entier** : `deleteCompany()` purge chaque collection portant un `companyId`, plus `settingsByCompany` (indexé par `id`, que le filtre générique n'attrape pas) et, sous Postgres, `leave_balances` et `settings` qui ont leur propre colonne `company_id` — le tout dans une transaction, une purge à moitié faite laisserait des utilisateurs sans entreprise. `orders` n'est jamais touché : une demande d'accès précède l'entreprise et ne porte pas de `companyId`.
 
@@ -1652,7 +1650,7 @@ Time entries store French `DD/MM/YYYY` display strings in `date`; HR records use
 
 [Landing.tsx](src/pages/Landing.tsx) porte trois vues (`home` / `tarifs` / `apropos`) sans routeur, comme le reste de l'application. La page valorise les **douze modules** — pas une sélection : une page qui ne montre que le pointage laisse croire que le reste n'existe pas. Six d'entre eux ont leur section en grand (pointage, facturation) ou leur bandeau (parrainage) ; les six autres passent par [ModuleExplorer.tsx](src/components/landing/ModuleExplorer.tsx), un panneau à onglets — six sections de plus en pleine largeur feraient une page qu'on ne finit pas, et ces écrans se comparent. Ses maquettes sont **dessinées en HTML**, pas exportées en images : elles suivent les tokens de la charte, restent nettes à tout zoom, et un libellé qui change dans l'application se corrige sans repasser par un export.
 
-**La grille de tarifs ne montre plus que deux cartes, Freelancer et Complet** — RH & Paie et Facturation, retirées de la vente (voir « Offres et sièges »), disparaissent automatiquement puisque les cartes sont dérivées de `SELLABLE_PLANS`. Le conteneur est passé de `xl:grid-cols-4` (`max-w-[1240px]`) à `sm:grid-cols-2` (`max-w-[820px]`) — deux cartes perdues dans une rangée pensée pour quatre lisaient comme un catalogue à moitié vide plutôt que comme un choix simple. La carte Freelancer porte une ligne « 10 factures/mois incluses. Besoin de plus ? 15 DT/mois pour illimité » (le lien pointe vers `mailto:${CONTACT_EMAIL}`, la même adresse que le reste de la page) — voir « Le quota mensuel de Freelance » côté serveur pour le mécanisme qu'elle annonce. Les deux cartes portent aussi une note verte « 2 mois offerts en paiement annuel », à la demande explicite de l'utilisateur — une note, pas un calculateur ou un bouton mensuel/annuel : aucun paiement en ligne n'existe dans cette application, le tarif annuel se négocie hors app comme le reste de la facturation.
+**La grille de tarifs ne montre plus que deux cartes, Freelancer et Complet** — RH & Paie et Facturation, retirées de la vente (voir « Offres et sièges »), disparaissent automatiquement puisque les cartes sont dérivées de `SELLABLE_PLANS`. Le conteneur est passé de `xl:grid-cols-4` (`max-w-[1240px]`) à `sm:grid-cols-2` (`max-w-[820px]`) — deux cartes perdues dans une rangée pensée pour quatre lisaient comme un catalogue à moitié vide plutôt que comme un choix simple. La carte Freelancer porte une ligne « Jusqu'à 10 clients. Besoin de plus ? 15 DT/mois pour illimité » (le lien pointe vers `mailto:${CONTACT_EMAIL}`, la même adresse que le reste de la page) — voir « Le plafond de Freelance » côté serveur pour le mécanisme qu'elle annonce. Les deux cartes portent aussi une note verte « 2 mois offerts en paiement annuel », à la demande explicite de l'utilisateur — une note, pas un calculateur ou un bouton mensuel/annuel : aucun paiement en ligne n'existe dans cette application, le tarif annuel se négocie hors app comme le reste de la facturation.
 
 **Le titre et le sous-titre du hero ont été réécrits à la demande explicite de l'utilisateur.** Le `<h1>` était scindé en deux morceaux (« Logiciel de gestion — » en texte plein, puis « pour tous les professionnels des services. » dans un double `<span className="relative">…<span className="relative z-10">` vestige d'une décoration de soulignement déjà retirée — voir plus haut, « The decorative underline bar… ») ; c'est maintenant une phrase unique, sans tiret ni span imbriqué, ces derniers ne servant plus à rien depuis que la décoration qu'ils portaient est partie. Le sous-titre (un seul `<p>`, « Suivi du temps, missions, échéances fiscales… ») est devenu trois lignes dans un seul bloc `Reveal` (une seule animation d'entrée pour les trois, puisqu'elles forment un seul message) : une accroche en gras navy (« Gérez mieux, facturez plus, gagnez en rentabilité »), une ligne d'audience plus petite mais toujours en semi-gras (« Pour les comptables, auditeurs, fiscalistes… »), puis le corps du sous-titre d'origine reformulé (« Centralisez vos missions, pilotez vos équipes… »).
 

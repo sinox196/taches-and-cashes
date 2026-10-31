@@ -77,17 +77,13 @@ export interface PlanMeta {
    */
   trialDocumentQuota?: number;
   /**
-   * Documents **émis** par mois, en permanence — pas seulement pendant un
-   * essai. Distinct de `trialDocumentQuota` : celui-ci disparaît dès que
-   * l'entreprise passe `ACTIVE`, alors que Freelance est `ACTIVE` dès sa
-   * création (voir plus bas) et garderait donc un `trialDocumentQuota` sans
-   * jamais l'appliquer. Voir `permanentDocumentQuotaFor()`. Et contrairement
-   * au plafond d'essai, dépasser celui-ci **ne bloque pas la création** — le
-   * document se crée quand même, seule sa consultation (voir/modifier/
-   * télécharger/imprimer) se verrouille tant que le mois n'est pas repassé ou
-   * que la dérogation n'est pas posée (server.ts, `isQuotaLocked`).
+   * Nombre **total** de fiches clients, en permanence — pas par mois, et pas
+   * seulement pendant un essai. Atteint, la création d'un client (ou un
+   * import qui dépasserait) est refusée côté serveur ; les clients déjà en
+   * base ne sont jamais touchés. Absent = illimité. Levé par la dérogation
+   * de la console plateforme, voir `clientLimitFor()`.
    */
-  monthlyDocumentQuota?: number;
+  clientLimit?: number;
   /** Mise en avant sur la page de tarifs. */
   highlighted?: boolean;
   /**
@@ -124,6 +120,9 @@ export type PlanModule =
   | 'Dashboard' | 'Users' | 'Missions' | 'Clients' | 'Time Tracking'
   | 'Ressources' | 'Messages' | 'Cash' | 'HR' | 'Parrainage' | 'Payroll' | 'Support';
 
+/** Le plafond du fichier clients de Freelancer — lu par la fiche, la carte de tarifs et le serveur. */
+export const FREELANCER_CLIENT_LIMIT = 10;
+
 /**
  * Le socle du pack Complet, qui ouvre toutes les vues : écrit une fois, pas
  * copié dans chaque offre généraliste — une carte de tarifs qui promet moins
@@ -145,17 +144,15 @@ export const CORE_FEATURES: string[] = [
 
 /**
  * Freelancer partage `CORE_FEATURES` avec Complet sauf sur un point : son
- * quota de documents n'est pas illimité (`monthlyDocumentQuota: 10` sur la
- * fiche FREELANCER ci-dessous — voir « Le quota mensuel de Freelance » dans
- * CLAUDE.md). Annoncer « Nombre illimité de factures et de documents » sur
- * cette carte aurait promis ce que le serveur verrouille dès le 11ᵉ document
- * du mois — un chiffre faux et crédible, exactement ce que cette app évite
- * ailleurs. Une seule ligne diffère, donc un `.map()` sur `CORE_FEATURES`
- * plutôt qu'une liste recopiée à la main qui pourrait diverger des dix
- * autres lignes.
+ * fichier clients est plafonné (`clientLimit: 10` sur la fiche FREELANCER
+ * ci-dessous). Annoncer « Clients et missions illimités » sur cette carte
+ * aurait promis ce que le serveur refuse dès le 11ᵉ client — un chiffre faux
+ * et crédible, exactement ce que cette app évite ailleurs. Une seule ligne
+ * diffère, donc un `.map()` sur `CORE_FEATURES` plutôt qu'une liste recopiée
+ * à la main qui pourrait diverger des autres lignes.
  */
 export const FREELANCER_FEATURES: string[] = CORE_FEATURES.map(f =>
-  f === 'Nombre illimité de factures et de documents' ? '10 factures par mois' : f
+  f === 'Clients et missions illimités' ? `${FREELANCER_CLIENT_LIMIT} clients maximum, missions illimitées` : f
 );
 
 /**
@@ -198,17 +195,14 @@ export const PLANS: PlanMeta[] = [
    * main). **En tête du catalogue** : c'est la première carte de la page de
    * tarifs.
    *
-   * **`monthlyDocumentQuota: 10`** — contrairement à `documentQuotaFor()`
-   * (essai uniquement, jamais pertinent ici puisque Freelance est `ACTIVE`
-   * dès sa création), ce plafond-ci ne s'éteint jamais tout seul : c'est le
-   * modèle économique de l'offre, pas une période d'essai. Dépasser 10
-   * documents dans le mois **ne bloque pas la création** — server.ts continue
-   * de les créer, seule leur consultation se verrouille (montants masqués,
-   * voir `isQuotaLocked`/`maskLockedInvoice`) tant que le mois n'est pas
-   * repassé ou que l'entreprise n'a pas la dérogation `documentQuotaOverride`
-   * (un drapeau sur sa fiche, posé à la main depuis la console plateforme une
-   * fois l'upgrade payé hors app — voir `FREELANCER_UPGRADE_PRICE_DT`, aucun
-   * paiement en ligne n'existe dans cette application).
+   * **`clientLimit: 10`** — dix fiches clients au total, pas par mois : ce
+   * plafond ne s'éteint jamais tout seul, c'est le modèle économique de
+   * l'offre. Factures et documents, eux, sont illimités. Le 11ᵉ client est
+   * refusé à la création (server.ts, `clientLimitError`) tant que
+   * l'entreprise n'a pas la dérogation `clientLimitOverride` (un drapeau sur
+   * sa fiche, posé à la main depuis la console plateforme une fois l'upgrade
+   * payé hors app — voir `FREELANCER_UPGRADE_PRICE_DT`, aucun paiement en
+   * ligne n'existe dans cette application).
    */
   {
     id: 'FREELANCER',
@@ -217,7 +211,7 @@ export const PLANS: PlanMeta[] = [
     priceDT: 0,
     seatLimit: 1,
     portalSeatLimit: 0,
-    monthlyDocumentQuota: 10,
+    clientLimit: FREELANCER_CLIENT_LIMIT,
     features: FREELANCER_FEATURES,
   },
   /**
@@ -495,29 +489,30 @@ export const documentQuotaFor = (
 };
 
 /**
- * Le prix de l'upgrade « documents illimités » de Freelance — informatif
- * seulement (affiché sur la page de tarifs et dans le message de
- * verrouillage), puisque la levée du plafond se fait à la main depuis la
- * console plateforme (`company.documentQuotaOverride`), pas par un second
- * palier du catalogue : aucun paiement en ligne n'existe dans cette
- * application, l'upgrade se traite comme le reste de la facturation, hors
- * app, après un contact.
+ * Le prix de l'upgrade « clients illimités » de Freelance — informatif
+ * seulement (affiché sur la page de tarifs et dans le message de refus),
+ * puisque la levée du plafond se fait à la main depuis la console plateforme
+ * (`company.clientLimitOverride`), pas par un second palier du catalogue :
+ * aucun paiement en ligne n'existe dans cette application, l'upgrade se
+ * traite comme le reste de la facturation, hors app, après un contact.
  */
 export const FREELANCER_UPGRADE_PRICE_DT = 15;
 
 /**
- * Le plafond mensuel **permanent** d'une entreprise — celui de
- * `monthlyDocumentQuota`, jamais affecté par `status`, contrairement à
- * `documentQuotaFor()` ci-dessus. `documentQuotaOverride` posé sur la fiche
- * (console plateforme) le lève sans changer d'offre : Freelance reste
- * Freelance, seul le plafond disparaît.
+ * Le plafond du fichier clients d'une entreprise, ou `null` pour illimité.
+ * La dérogation posée sur la fiche (console plateforme) le lève sans changer
+ * d'offre : Freelance reste Freelance, seul le plafond disparaît.
+ * `documentQuotaOverride` est l'ancien nom de cette dérogation, du temps où
+ * Freelance était plafonné en documents par mois : une entreprise qui avait
+ * payé pour lever ce plafond-là ne doit pas se retrouver bloquée par le
+ * nouveau — on lit la forme ancienne, on ne la réécrit pas.
  */
-export const permanentDocumentQuotaFor = (
+export const clientLimitFor = (
   plan: string | null | undefined,
-  documentQuotaOverride: boolean | null | undefined,
+  company?: { clientLimitOverride?: boolean | null; documentQuotaOverride?: boolean | null } | null,
 ): number | null => {
-  if (documentQuotaOverride) return null;
-  return planMeta(plan)?.monthlyDocumentQuota ?? null;
+  if (company?.clientLimitOverride || company?.documentQuotaOverride) return null;
+  return planMeta(plan)?.clientLimit ?? null;
 };
 
 /**

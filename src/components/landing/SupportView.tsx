@@ -217,7 +217,7 @@ const FAQ_ITEMS: { id: string; q: string; a: string }[] = [
   {
     id: 'faq-prix',
     q: 'Combien coûte Tâches & Cash ?',
-    a: "Freelancer est gratuite pour un utilisateur seul, avec 10 documents de facturation inclus chaque mois. Complet ouvre tout le cabinet à plusieurs comptes, à partir de 15 DT/mois par utilisateur avec l'offre de lancement. Le détail est sur la page Tarifs.",
+    a: "Freelancer est gratuite pour un utilisateur seul, jusqu'à 10 clients, avec des factures illimitées. Complet ouvre tout le cabinet à plusieurs comptes, à partir de 15 DT/mois par utilisateur avec l'offre de lancement. Le détail est sur la page Tarifs.",
   },
   {
     id: 'faq-parrainage',

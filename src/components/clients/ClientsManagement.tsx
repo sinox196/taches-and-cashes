@@ -134,7 +134,12 @@ const encaissementsForEditing = (client: Pick<Client, 'encaissements' | 'updated
 };
 
 export const ClientsManagement: React.FC = () => {
-  const { token, hasPermission, impersonateClient } = useAuth();
+  const { token, user, hasPermission, impersonateClient } = useAuth();
+  // Freelance : 10 clients au total. Le serveur refuse le 11ᵉ (402) ; ce
+  // compteur ne fait que le dire avant qu'on remplisse un formulaire pour rien.
+  const clientLimit = user?.company?.clientLimit ?? null;
+  const [clientCount, setClientCount] = useState<number | null>(null);
+  const limitReached = clientLimit != null && clientCount != null && clientCount >= clientLimit;
   const [impersonateError, setImpersonateError] = useState('');
   const [impersonateLoadingId, setImpersonateLoadingId] = useState<number | null>(null);
 
@@ -437,6 +442,14 @@ export const ClientsManagement: React.FC = () => {
           setTotalCount(data.length);
         }
       }
+      // Le total du compteur ignore les filtres : `data.total` ne compte que
+      // ce que la recherche retient, le plafond porte sur tout le fichier.
+      if (clientLimit != null) {
+        const countRes = await fetch('/api/clients?page=1&limit=1', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (countRes.ok) setClientCount((await countRes.json()).total ?? null);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -667,20 +680,32 @@ export const ClientsManagement: React.FC = () => {
         <div>
           <h1 className="text-[20px] font-bold text-gray-800 tracking-tight">Clients</h1>
           <p className="text-[12px] text-gray-500 mt-1">Gérez votre base de clients, entreprises et particuliers.</p>
+          {clientLimit != null && clientCount != null && (
+            <p className={`inline-flex items-center mt-2 px-2 py-0.5 rounded-full text-[11.5px] font-semibold ${
+              limitReached ? 'bg-late-bg text-late-fg' : 'bg-[#FFFAEB] text-[#B54708]'
+            }`}>
+              {limitReached
+                ? `Offre Freelance : ${clientLimit} clients maximum atteints — passez à l'offre illimitée pour en ajouter`
+                : `Offre Freelance : ${clientCount} / ${clientLimit} clients`}
+            </p>
+          )}
         </div>
         {hasPermission('CREATE_CLIENTS') && (
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setIsImportOpen(true)}
-              title="Importer une liste de clients depuis un fichier Excel"
-              className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+              disabled={limitReached}
+              title={limitReached ? `Plafond de ${clientLimit} clients atteint` : 'Importer une liste de clients depuis un fichier Excel'}
+              className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>Importer</span>
             </button>
             <button
               onClick={handleOpenCreate}
-              className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors"
+              disabled={limitReached}
+              title={limitReached ? `Plafond de ${clientLimit} clients atteint` : undefined}
+              className="bg-navy hover:bg-navy-hover text-white px-4 py-2.5 rounded-lg text-[13px] font-medium flex items-center gap-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-navy"
             >
               <Plus className="w-4 h-4" />
               <span>Nouveau client</span>

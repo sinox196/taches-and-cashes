@@ -40,7 +40,8 @@ interface Company {
   phone?: string;
   ribSentAt?: string;
   pendingPlan?: string;
-  /** Dérogation au quota mensuel de 10 documents de Freelance — voir plans.ts. */
+  /** Dérogation au plafond de 10 clients de Freelance — voir `clientLimitFor` dans plans.ts. */
+  clientLimitOverride?: boolean;
   documentQuotaOverride?: boolean;
 }
 
