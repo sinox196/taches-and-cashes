@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Pencil, Trash2, Search, Eye } from 'lucide-react';
+import { Loader2, Phone, Mail, Send, CheckCircle2, Landmark, Pencil, Trash2, Search, Eye, MonitorPlay } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { friendlyError } from '../utils/errors';
 import { PlatformUsersModal } from '../components/platform/PlatformUsersModal';
@@ -123,6 +123,38 @@ export const PlatformAdmin: React.FC = () => {
 
   /** Compteur brut de visites de la page publique — pas de détail par visiteur, voir CLAUDE.md « Console plateforme ». */
   const [landingVisits, setLandingVisits] = useState<number | null>(null);
+
+  /**
+   * Le compte démo (demo / demo) — créé par le serveur lui-même en une à deux
+   * minutes, voir src/server/demoAccount.ts. Sondé tant qu'il tourne.
+   */
+  const [demo, setDemo] = useState<{ state: string; exists?: boolean; log: string[]; error?: string } | null>(null);
+  const [demoStarting, setDemoStarting] = useState(false);
+  const loadDemo = async () => {
+    try {
+      const r = await fetch('/api/platform/demo-account', { headers: authHeaders });
+      if (r.ok) setDemo(await r.json());
+    } catch { /* l'encart reste simplement sur son dernier état */ }
+  };
+  useEffect(() => { loadDemo(); }, []);
+  useEffect(() => {
+    if (demo?.state !== 'running') return;
+    const t = setInterval(loadDemo, 3000);
+    return () => clearInterval(t);
+  }, [demo?.state]);
+  // La nouvelle entreprise « Démo » apparaît dans la liste dès qu'elle est prête.
+  useEffect(() => { if (demo?.state === 'done') load(); }, [demo?.state]);
+  const startDemo = async () => {
+    setDemoStarting(true);
+    try {
+      const r = await fetch('/api/platform/demo-account', { method: 'POST', headers: authHeaders });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) setDemo(d => ({ ...(d || { log: [] }), state: 'error', error: body.error || 'Création impossible.' }));
+      else setDemo(body);
+    } finally {
+      setDemoStarting(false);
+    }
+  };
 
   const load = async () => {
     try {
@@ -263,6 +295,37 @@ export const PlatformAdmin: React.FC = () => {
 
       {error && (
         <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-[12px] font-medium rounded-r-md">{error}</div>
+      )}
+
+      {demo && (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <MonitorPlay className="w-4 h-4 text-navy mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[13px] font-bold text-navy">Compte de démonstration</div>
+              <div className="text-[11.5px] text-gray-500 mt-0.5">
+                {demo.state === 'running'
+                  ? `Création en cours… ${demo.log[demo.log.length - 1] ?? ''}`
+                  : demo.state === 'error'
+                    ? <span className="text-red-600">{demo.error}</span>
+                    : demo.exists
+                      ? <>Prêt — connexion <strong className="text-gray-700">demo</strong> / <strong className="text-gray-700">demo</strong>. Équipe et portail client : mot de passe <strong className="text-gray-700">demo1234</strong>.</>
+                      : 'Une entreprise « Démo » complète : équipe, 10 clients, un mois de tâches, pointage, paie, factures, échéances et portail client.'}
+              </div>
+            </div>
+          </div>
+          {!demo.exists && demo.state !== 'running' && (
+            <button
+              onClick={startDemo}
+              disabled={demoStarting}
+              className="px-3.5 py-2 bg-navy hover:bg-navy-hover text-white rounded-lg text-[12px] font-semibold flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {demoStarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MonitorPlay className="w-3.5 h-3.5" />}
+              Créer le compte démo
+            </button>
+          )}
+          {demo.state === 'running' && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
+        </div>
       )}
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm">

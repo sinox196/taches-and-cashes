@@ -27,6 +27,7 @@ import {
   DEFAULT_AWAY_AFTER_MINUTES, OFFLINE_AFTER_MS, clampAwayMinutes, type PresenceState,
 } from './src/constants/presence.js';
 import bcrypt from 'bcryptjs';
+import { runDemoApiPhase, runDemoDirectPhase, DEMO_USERNAME } from './src/server/demoAccount.js';
 import jwt from 'jsonwebtoken';
 import { sendMail } from './src/server/email.js';
 import { aiEnabled, summarizeDashboard } from './src/server/ai.js';
@@ -11003,6 +11004,57 @@ app.post('/api/dashboard/ai-summary', authenticate, async (req: any, res: any) =
   app.get('/api/platform/landing-visits', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
     try {
       res.json({ visits: await db.getLandingVisitCount() });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * « Créer le compte démo » — builds the « Démo » company (login demo/demo)
+   * from inside the server, so a platform admin never has to run a command or
+   * hand out database access. The work is src/server/demoAccount.ts, the same
+   * module `npm run db:seed-demo-account` uses: phase 1 drives this very
+   * server's API over loopback with the caller's own token, so every figure
+   * comes from the real routes; phase 2 writes through this process's own
+   * `db`, which is what makes it safe on the JSON engine too.
+   *
+   * It takes a minute or two (several hundred requests), so the POST answers
+   * 202 at once and the console polls the GET. One run at a time, and none
+   * at all while a `demo` user exists — delete the « Démo » company to redo it.
+   */
+  let demoAccountJob: { state: 'idle' | 'running' | 'done' | 'error'; log: string[]; error?: string; startedAt?: string; finishedAt?: string } =
+    { state: 'idle', log: [] };
+
+  app.get('/api/platform/demo-account', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    const exists = !!(await db.getUserByUsername(DEMO_USERNAME));
+    res.json({ ...demoAccountJob, exists });
+  });
+
+  app.post('/api/platform/demo-account', authenticate, requirePlatformAdmin, async (req: any, res: any) => {
+    try {
+      if (demoAccountJob.state === 'running') return res.status(409).json({ error: 'La création du compte démo est déjà en cours.' });
+      if (await db.getUserByUsername(DEMO_USERNAME)) {
+        return res.status(409).json({ error: "Un compte « demo » existe déjà. Supprimez l'entreprise « Démo » pour le recréer." });
+      }
+      const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '') || String(req.query.token || '');
+      demoAccountJob = { state: 'running', log: [], startedAt: new Date().toISOString() };
+      const job = demoAccountJob;
+      const log = (line: string) => { job.log.push(line); console.log(`[demo] ${line}`); };
+      res.status(202).json(job);
+      (async () => {
+        try {
+          await runDemoApiPhase(`http://127.0.0.1:${PORT}`, token, log);
+          await runDemoDirectPhase(db, log);
+          job.state = 'done';
+          console.log(`[demo] Compte démo créé par ${req.user.id}.`);
+        } catch (e: any) {
+          job.state = 'error';
+          job.error = String(e?.message || e);
+          console.error('[demo] Échec :', job.error);
+        } finally {
+          job.finishedAt = new Date().toISOString();
+        }
+      })();
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
