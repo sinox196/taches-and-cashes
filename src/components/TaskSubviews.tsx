@@ -621,6 +621,24 @@ const NotesList: React.FC<{
 
   const taskTypesFor = (svcId: string) => (svcId ? taskTypes.filter(t => String(t.serviceId) === svcId) : []);
 
+  // Recherche par client — un `SearchableSelect` comme les filtres de
+  // « Déléguées par moi » : taper suggère (accents repliés, n'importe quel
+  // morceau du nom), cliquer sélectionne, « Tous les clients » remet à zéro.
+  // Options dérivées des notes déjà chargées, jamais un second appel réseau.
+  const [clientFilter, setClientFilter] = useState('');
+  const clientFilterOptions = useMemo<SearchableOption[]>(() => [
+    { id: '', label: 'Tous les clients' },
+    ...Array.from(new Set<string>(notes.map(n => n.client).filter((c: any): c is string => !!c)))
+      .sort((a, b) => a.localeCompare(b, 'fr'))
+      .map(c => ({ id: c, label: c })),
+  ], [notes]);
+  // Un filtre qui pointe un client dont la dernière note vient de partir
+  // (démarrée, planifiée, supprimée) laisserait une liste vide sans raison.
+  useEffect(() => {
+    if (clientFilter && !notes.some(n => n.client === clientFilter)) setClientFilter('');
+  }, [notes, clientFilter]);
+  const visibleNotes = clientFilter ? notes.filter(n => n.client === clientFilter) : notes;
+
   const canAdd = !!description.trim() && !!client.trim();
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -763,6 +781,25 @@ const NotesList: React.FC<{
           </p>
         </div>
       ) : (
+        <>
+        {notes.length > 1 && (
+          <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2 shrink-0">
+            <div className="w-full sm:w-64">
+              <SearchableSelect
+                value={clientFilter}
+                onChange={setClientFilter}
+                options={clientFilterOptions}
+                placeholder="Rechercher par client"
+                size="sm"
+              />
+            </div>
+            {clientFilter && (
+              <span className="text-[11.5px] text-gray-400">
+                {visibleNotes.length} note{visibleNotes.length > 1 ? 's' : ''} sur {notes.length}
+              </span>
+            )}
+          </div>
+        )}
         <div className="overflow-auto flex-1 min-h-0 sm:min-h-[200px]">
           <table className="w-full text-[12.5px] border-collapse">
             <thead className="sticky top-0 bg-gray-50 text-[10.5px] font-bold text-gray-500 uppercase tracking-wide">
@@ -776,7 +813,7 @@ const NotesList: React.FC<{
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {notes.map(note => (
+              {visibleNotes.map(note => (
                 <React.Fragment key={note.id}>
                   <tr className="hover:bg-gray-50/60">
                     <td className="px-3 py-2 whitespace-nowrap text-gray-500">{noteDate(note.createdAt)}</td>
@@ -881,6 +918,7 @@ const NotesList: React.FC<{
             </tbody>
           </table>
         </div>
+        </>
       )}
     </div>
   );

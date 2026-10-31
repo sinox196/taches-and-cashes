@@ -39,7 +39,16 @@ export interface DashboardPdfInput {
    * appels réseau.
    */
   clientTasksByKey?: Record<string, { tasks: any[]; truncated: number }>;
+  /**
+   * Les tâches de chaque collaborateur, par `id` (celui de
+   * `stats.employeeStats[]`) — même raisonnement que `clientTasksByKey` :
+   * `/api/kpi/employee-tasks` n'est appelé qu'au clic à l'écran, l'appelant
+   * le récupère pour chaque collaborateur avant de construire le rapport.
+   */
+  employeeTasksById?: Record<string, { tasks: any[]; truncated: number }>;
 }
+
+interface TocEntry { title: string; page: number; level: 0 | 1 }
 
 const INK: [number, number, number] = [13, 27, 42]; // #0D1B2A
 const MUTED: [number, number, number] = [102, 112, 133];
@@ -91,7 +100,7 @@ export function dashboardPdfName(periodLabel: string): string {
 }
 
 export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
-  const { exec, stats, periodLabel, generatedAt, filterLabel, clientTasksByKey } = input;
+  const { exec, stats, periodLabel, generatedAt, filterLabel, clientTasksByKey, employeeTasksById } = input;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let y = M;
   // Géométrie de la page courante — mutable, parce que la table Performance
@@ -120,13 +129,42 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
     bottom = LANDSCAPE_BOTTOM;
     newPage();
   };
+  // Sommaire : chaque titre de section s'inscrit ici avec la page où il
+  // atterrit réellement (après un éventuel saut de page), pour que le
+  // sommaire de la première page et les signets du PDF pointent juste.
+  const toc: TocEntry[] = [];
+  const currentPage = () => doc.getCurrentPageInfo().pageNumber;
   const sectionTitle = (label: string) => {
     ensureSpace(16);
+    toc.push({ title: label, page: currentPage(), level: 0 });
     doc.setFillColor(ACCENT[0], ACCENT[1], ACCENT[2]);
     doc.rect(M, y, 2.2, 6, 'F');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(12); setInk(INK);
     text(label, M + 5, y + 4.8);
     y += 11;
+  };
+  const subSectionTitle = (label: string, meta?: string) => {
+    ensureSpace(14);
+    toc.push({ title: label, page: currentPage(), level: 1 });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); setInk(INK);
+    text(label, M, y + 4);
+    if (meta) {
+      const w = doc.getTextWidth(label);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(MUTED);
+      text(meta, M + w + 3, y + 4);
+    }
+    y += 7;
+    doc.setDrawColor(ACCENT[0], ACCENT[1], ACCENT[2]);
+    doc.setLineWidth(0.5);
+    doc.line(M, y, M + 30, y);
+    y += 5;
+  };
+  /** Petit intitulé au-dessus d'un tableau à l'intérieur d'une sous-section. */
+  const caption = (label: string) => {
+    ensureSpace(14);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setInk(MUTED);
+    text(label.toUpperCase(), M, y + 3);
+    y += 5.5;
   };
   const wrap = (v: string, width: number) => doc.splitTextToSize(String(v ?? ''), width) as string[];
 
@@ -276,6 +314,11 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
   y += 6;
   rule(y);
   y += 10;
+  // La première page porte le sommaire, dessiné une fois tout le reste en
+  // place (les numéros de page ne sont connus qu'à la fin) ; le contenu
+  // commence page 2.
+  const tocStartY = y;
+  newPage();
 
   const e = exec?.executive || {};
   const financialsFiltered = !!exec?.financialsFiltered;
@@ -625,6 +668,214 @@ export function buildDashboardPdf(input: DashboardPdfInput): jsPDF {
     );
     drawTable(employeeCols, rows, 'Aucun collaborateur sur cette période.', 7);
   }
+
+  // ---- Détail par collaborateur ---------------------------------------------
+  // Une fiche par collaborateur, chacune sur sa propre page et chacune au
+  // sommaire : synthèse chiffrée (les mêmes mesures que sa ligne du tableau
+  // de performance), clients traités, tâches de la période
+  // (`employeeTasksById`, fourni par l'appelant), puis ses congés et
+  // autorisations — ce que la modale « Clients traités »/le détail
+  // collaborateur montrent à l'écran, un clic à la fois.
+  if (employees.length > 0) {
+    const sorted = [...employees].sort((a, b) => (b.totalDurationSeconds || 0) - (a.totalDurationSeconds || 0));
+    newPage();
+    sectionTitle('Détail par collaborateur');
+    const isoKey = (d: string) => {
+      const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || '');
+      return m ? `${m[3]}-${m[2]}-${m[1]}` : (d || '');
+    };
+    const frDate = (iso: string) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+      return m ? `${m[3]}/${m[2]}/${m[1]}` : (iso || '—');
+    };
+    const hrStatus = (st: string) => (st === 'APPROVED' ? 'Approuvé' : st === 'REJECTED' ? 'Refusé' : st === 'PENDING' ? 'En attente' : st || '—');
+    const taskStatus = (st: string) => (st === 'COMPLETED' ? 'Terminée' : st === 'RUNNING' ? 'En cours' : st === 'PAUSED' ? 'En pause' : st || '—');
+    const clip = (v: string, n: number) => (v && v.length > n ? `${v.slice(0, n - 1)}…` : v || '');
+
+    sorted.forEach((emp: any, idx: number) => {
+      if (idx > 0) newPage();
+      subSectionTitle(emp.name, roleLabel(emp.role));
+
+      const t = emp.tasks || {};
+      const daysTaken = emp.leaves?.daysTaken || 0;
+      const remaining = emp.leaves?.balance?.available ?? 0;
+      const checkins = emp.attendance?.checkins || 0;
+      statRow([
+        { label: 'Temps passé', value: emp.totalDurationFormatted || '—' },
+        { label: 'Tâches', value: String(t.total ?? 0), foot: `${t.completed ?? 0} terminées · ${t.inProgress ?? 0} en cours · ${t.paused ?? 0} en pause` },
+        { label: 'Taux de réalisation', value: t.total ? `${Math.round(t.completionRate || 0)} %` : '—' },
+        { label: 'Clients traités', value: String(emp.clients?.totalHandled ?? 0) },
+      ]);
+      statRow([
+        { label: 'Occupation', value: emp.occupation != null ? pct(emp.occupation) : '—', foot: emp.capacite != null ? `capacité ${hours(emp.capacite)}` : undefined },
+        ...(emp.totalCostFormatted !== undefined ? [{
+          label: 'Coût employeur',
+          value: emp.pricedTasks === 0 && emp.unpricedTasks > 0 ? 'Non configuré' : (emp.totalCostFormatted || '—'),
+          foot: emp.unpricedTasks > 0 ? `${emp.unpricedTasks} tâche(s) sans taux` : undefined,
+        }] : []),
+        { label: 'Congés pris', value: `${daysTaken} j`, foot: `solde ${remaining} j` },
+        { label: 'Autorisations', value: String(emp.authorizations?.total ?? 0), foot: emp.authorizations?.totalDuration ? `${nf(emp.authorizations.totalDuration, 1)} h approuvées` : undefined },
+        { label: 'Ponctualité', value: checkins ? `${emp.attendance.onTimeCheckins}/${checkins}` : '—', foot: checkins ? `${emp.attendance.lateCheckins} retard(s)` : undefined },
+      ]);
+      y += 2;
+
+      const clientList: any[] = [...(emp.clients?.list || [])].sort((a, b) => (b.durationSeconds || 0) - (a.durationSeconds || 0));
+      if (clientList.length > 0) {
+        caption('Clients traités');
+        const rows = clientList.map(c => ({ name: c.name, taches: String(c.taskCount ?? 0), duree: c.durationFormatted || '—' }));
+        const cols = fitColumns([
+          { k: 'name', label: 'CLIENT', minW: 60 },
+          { k: 'taches', label: 'TÂCHES', a: 'right', minW: 20 },
+          { k: 'duree', label: 'DURÉE', a: 'right', minW: 22 },
+        ], rows, 6.5, 7);
+        drawTable(cols, rows, '', 7);
+        y += 3;
+      }
+
+      const detail = employeeTasksById?.[String(emp.id)];
+      caption('Tâches de la période');
+      if (!detail || detail.tasks.length === 0) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setInk(MUTED);
+        text(detail ? 'Aucune tâche sur cette période.' : 'Détail des tâches indisponible.', M, y + 2);
+        y += 8;
+      } else {
+        const tasks = [...detail.tasks].sort((a, b) =>
+          isoKey(a.date).localeCompare(isoKey(b.date)) || String(a.heureDebut || '').localeCompare(String(b.heureDebut || '')));
+        const showCost = tasks.some(tk => tk.cost !== undefined);
+        const rows = tasks.map(tk => ({
+          date: tk.date || '—',
+          client: clip(tk.client, 34),
+          pole: clip(tk.pole, 30) || '—',
+          taskType: clip(tk.taskType, 34) || '—',
+          description: clip(tk.description, 40) || '—',
+          horaire: tk.heureDebut ? `${tk.heureDebut}–${tk.heureFin || '…'}` : '—',
+          duree: tk.dureeFormatted || '—',
+          cost: money(tk.cost),
+          statut: taskStatus(tk.statut),
+        }));
+        const cols = fitColumns([
+          { k: 'date', label: 'DATE' },
+          { k: 'client', label: 'CLIENT', minW: 26 },
+          { k: 'pole', label: 'MISSION' },
+          { k: 'taskType', label: 'TYPE DE TÂCHE' },
+          { k: 'description', label: 'DESCRIPTION' },
+          { k: 'horaire', label: 'HORAIRE' },
+          { k: 'duree', label: 'DURÉE', a: 'right' },
+          ...(showCost ? [{ k: 'cost', label: 'COÛT', a: 'right' as const }] : []),
+          { k: 'statut', label: 'STATUT', a: 'right' },
+        ], rows, 6.5, 6.8);
+        drawTable(cols, rows, '', 6.8);
+        if (detail.truncated > 0) {
+          ensureSpace(6);
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(7); setInk(MUTED);
+          text(`… et ${detail.truncated} tâche(s) supplémentaire(s) non affichée(s).`, M, y + 3.5);
+          y += 6;
+        }
+        y += 3;
+      }
+
+      const leaves: any[] = emp.leaves?.list || [];
+      if (leaves.length > 0) {
+        caption('Congés');
+        const rows = leaves.map(l => ({
+          type: l.type || '—', du: frDate(l.startDate), au: frDate(l.endDate),
+          jours: `${l.duration ?? 0} j`, statut: hrStatus(l.status), approver: l.approverName || '—',
+        }));
+        const cols = fitColumns([
+          { k: 'type', label: 'TYPE', minW: 30 },
+          { k: 'du', label: 'DU' }, { k: 'au', label: 'AU' },
+          { k: 'jours', label: 'JOURS', a: 'right' },
+          { k: 'statut', label: 'STATUT' }, { k: 'approver', label: 'VALIDEUR' },
+        ], rows, 6.5, 7);
+        drawTable(cols, rows, '', 7);
+        y += 3;
+      }
+
+      const auths: any[] = emp.authorizations?.list || [];
+      if (auths.length > 0) {
+        caption("Autorisations d'absence");
+        const rows = auths.map(a => ({
+          date: frDate(a.date), horaire: a.startTime ? `${a.startTime}–${a.endTime || ''}` : '—',
+          duree: a.duration != null ? `${nf(a.duration, 1)} h` : '—', motif: clip(a.reason, 50) || '—',
+          statut: hrStatus(a.status),
+        }));
+        const cols = fitColumns([
+          { k: 'date', label: 'DATE' }, { k: 'horaire', label: 'HORAIRE' },
+          { k: 'duree', label: 'DURÉE', a: 'right' },
+          { k: 'motif', label: 'MOTIF', minW: 40 }, { k: 'statut', label: 'STATUT' },
+        ], rows, 6.5, 7);
+        drawTable(cols, rows, '', 7);
+        y += 3;
+      }
+    });
+  }
+
+  // ---- Sommaire (page 1) ------------------------------------------------------
+  // Dessiné en dernier, quand chaque section connaît sa page. S'il déborde de
+  // la première page (beaucoup de collaborateurs), des pages de sommaire
+  // sont insérées juste après elle et toutes les références décalées
+  // d'autant — les liens et signets sont créés *après* l'insertion, donc
+  // ils pointent toujours la bonne page physique.
+  const TOC_LINE = 6.2;
+  const firstCapacity = Math.max(1, Math.floor((PORTRAIT_BOTTOM - tocStartY - 12) / TOC_LINE));
+  const extraCapacity = Math.floor((PORTRAIT_BOTTOM - M - 4) / TOC_LINE);
+  const extraTocPages = toc.length > firstCapacity ? Math.ceil((toc.length - firstCapacity) / extraCapacity) : 0;
+  for (let i = 0; i < extraTocPages; i++) {
+    doc.addPage('a4', 'portrait');
+    doc.movePage(doc.getNumberOfPages(), 2 + i);
+  }
+  if (extraTocPages) for (const t of toc) t.page += extraTocPages;
+
+  let n0 = 0; let n1 = 0;
+  const numbered = toc.map(t => {
+    if (t.level === 0) { n0 += 1; n1 = 0; return { ...t, num: `${n0}.` }; }
+    n1 += 1; return { ...t, num: `${n0}.${n1}` };
+  });
+
+  doc.setPage(1);
+  let ty = tocStartY;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(14); setInk(INK);
+  doc.text('Sommaire', M, ty + 4);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); setInk(MUTED);
+  doc.text('Cliquez sur une ligne pour aller à la section.', PORTRAIT_W - M, ty + 4, { align: 'right' });
+  ty += 12;
+  let tocPage = 1;
+  const tocRight = PORTRAIT_W - M;
+  for (const t of numbered) {
+    if (ty + TOC_LINE > PORTRAIT_BOTTOM) {
+      tocPage += 1;
+      doc.setPage(tocPage);
+      ty = M + 4;
+    }
+    const indent = t.level === 0 ? 0 : 8;
+    doc.setFont('helvetica', t.level === 0 ? 'bold' : 'normal');
+    doc.setFontSize(t.level === 0 ? 10 : 9);
+    setInk(t.level === 0 ? INK : [61, 70, 85]);
+    const label = `${t.num}  ${t.title}`;
+    doc.text(label, M + indent, ty + 4);
+    const pageStr = String(t.page);
+    doc.text(pageStr, tocRight, ty + 4, { align: 'right' });
+    // Points de conduite entre le titre et le numéro de page.
+    const startX = M + indent + doc.getTextWidth(label) + 2;
+    const endX = tocRight - doc.getTextWidth(pageStr) - 2;
+    if (endX > startX) {
+      doc.setDrawColor(LINE[0] - 40, LINE[1] - 40, LINE[2] - 40);
+      doc.setLineDashPattern([0.4, 1.2], 0);
+      doc.setLineWidth(0.25);
+      doc.line(startX, ty + 3.6, endX, ty + 3.6);
+      doc.setLineDashPattern([], 0);
+    }
+    doc.link(M, ty, tocRight - M, TOC_LINE, { pageNumber: t.page, top: 0 });
+    ty += TOC_LINE;
+  }
+
+  // Signets du lecteur PDF — la même arborescence que le sommaire.
+  let parent: any = null;
+  for (const t of numbered) {
+    if (t.level === 0) parent = doc.outline.add(null, `${t.num} ${t.title}`, { pageNumber: t.page });
+    else doc.outline.add(parent, t.title, { pageNumber: t.page });
+  }
+  doc.setDisplayMode('fullwidth', 'continuous', 'UseOutlines');
 
   // ---- Pied de page : pagination -------------------------------------------
   const pages = doc.getNumberOfPages();

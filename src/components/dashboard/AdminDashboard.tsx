@@ -196,7 +196,37 @@ export const AdminDashboard: React.FC = () => {
       }));
       const clientTasksByKey = Object.fromEntries(results);
 
-      downloadDashboardPdf({ periodLabel, generatedAt: new Date(), exec, stats, filterLabel, clientTasksByKey });
+      // Même salve pour la fiche de chaque collaborateur (« Détail par
+      // collaborateur ») : la liste de ses tâches que la modale « Clients
+      // traités » ne charge qu'au clic (`/api/kpi/employee-tasks`).
+      const employeesWithTasks = (stats?.employeeStats || []).filter((e: any) => (e.tasks?.total ?? 0) > 0);
+      const empResults = await Promise.all(employeesWithTasks.map(async (emp: any) => {
+        const id = String(emp.id);
+        try {
+          const res = await fetch('/api/kpi/employee-tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ ...filtersBody, userId: emp.id }),
+          });
+          const body = await res.json();
+          return [id, { tasks: body.tasks ?? [], truncated: body.truncated ?? 0 }] as const;
+        } catch {
+          return [id, { tasks: [], truncated: 0 }] as const;
+        }
+      }));
+      const employeeTasksById = Object.fromEntries(empResults);
+      // Collaborateurs sans tâche : une entrée vide plutôt qu'absente, pour
+      // que le rapport dise « aucune tâche » et non « détail indisponible ».
+      for (const emp of stats?.employeeStats || []) {
+        if (!(String(emp.id) in employeeTasksById)) employeeTasksById[String(emp.id)] = { tasks: [], truncated: 0 };
+      }
+
+      downloadDashboardPdf({
+        periodLabel, generatedAt: new Date(), exec,
+        // Avec capacité/occupation fusionnées, comme le tableau à l'écran.
+        stats: stats ? { ...stats, employeeStats: employeesWithCapacity } : stats,
+        filterLabel, clientTasksByKey, employeeTasksById,
+      });
     } finally {
       setExportingPdf(false);
     }
