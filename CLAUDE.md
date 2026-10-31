@@ -16,6 +16,8 @@ DATABASE_URL="postgresql://..." npm run db:import -- local.db.json   # JSON snap
 DATABASE_URL="postgresql://..." npm run db:backup                     # Postgres -> backups/backup-<ts>.json
 ```
 
+**`npm run db:seed-demo-account`** ([scripts/seed-demo-account.ts](scripts/seed-demo-account.ts)) builds a separate « Démo » company, login **`demo` / `demo`**: 4 team members with every payroll field, 10 fictitious clients carrying the platform admin's own custom client columns (values invented by column name, **never copied** — the demo's four-letter password makes it readable by anyone), 50 completed tasks, a month of attendance and one payslip each, invoices/règlements/caisse, échéances, procédures and 10 portal accounts — all for the current month, the one the dashboard opens on. Everything that carries a business rule goes through the running app's API (like `db:seed-demo`); only attendance for past days and the `demo` password go straight to the database, since no route can produce them (check-in/out stamp "now", passwords need six characters). On Postgres one run does both; on the JSON file, phase 2 (`-- --finish`) must run with the server stopped, or its next save overwrites it. It refuses to run if a `demo` user already exists — delete the company from the platform console to start over.
+
 There is **no test runner and no test suite** — don't invent test commands. `npm run lint` is the verification step.
 
 `npm run dev` starts *one* process: Vite runs in middleware mode inside Express. Never start a separate `vite dev` — the API and the SPA must share port 3000, since the frontend calls `/api/*` on same-origin relative URLs.

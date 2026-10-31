@@ -13,7 +13,8 @@
     "db:import": "tsx scripts/db-import.ts",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:fix-timezone": "tsx scripts/fix-timezone-history.ts",
-    "db:seed-demo": "tsx scripts/seed-demo-data.ts"
+    "db:seed-demo": "tsx scripts/seed-demo-data.ts",
+    "db:seed-demo-account": "tsx scripts/seed-demo-account.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
